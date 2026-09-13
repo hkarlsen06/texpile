@@ -168,6 +168,9 @@ math-field {
 :root .cm-completionMatchedText {
 	color: var(--primary-ink);
 }
+:root .cm-tooltip-autocomplete > ul > li[aria-selected] .cm-completionMatchedText {
+	color: inherit;
+}
 
 /* mathlive's \command suggestion popover (light DOM in <body>) ships one hardcoded gray look
    with no color variables or layout hooks; restyled to a compact themed list (command left,
