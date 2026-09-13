@@ -189,9 +189,17 @@ function buildIncludegraphics(node: Node): string {
 	return `\\includegraphics[width=${DEFAULT_FIGURE_FRACTION}\\textwidth]{${src}}`;
 }
 
+export function dropParagraphEnd(text: string, last: Node | null): string {
+	return last?.type.name === 'paragraph' ? text.replace(/[ \t]*\\par$/, '') : text;
+}
+
+function envBody(node: Node): string {
+	return dropParagraphEnd(renderChildren(node, false).replace(/^\n+|\n+$/g, ''), node.lastChild) + '\n';
+}
+
 // doc assembly (verbatim `orig` substitution + per-block memo) is format-neutral and shared
 // with the markdown serializer; serializeNode hoists, so binding it here is safe.
-const assembly = createBlockAssembly((node, ctx) => serializeNode(node, ctx));
+const assembly = createBlockAssembly((node, ctx) => serializeNode(node, ctx), { beforeBreak: dropParagraphEnd });
 
 function serializeDocChildrenDetailed(doc: Node): DocSerializeResult {
 	return assembly.serializeDocChildrenDetailed(doc);
@@ -315,7 +323,7 @@ const NODES: Record<string, NodeHandler> = {
 
 	blockquote: (node) => {
 		const env = node.attrs.env === 'quotation' ? 'quotation' : 'quote';
-		return `\\begin{${env}}\n${renderChildren(node, false)}\n\\end{${env}}\n`;
+		return `\\begin{${env}}\n${envBody(node)}\\end{${env}}\n`;
 	},
 
 	raw_latex: (node) => node.textContent + '\n',
@@ -336,7 +344,7 @@ const NODES: Record<string, NodeHandler> = {
 		if (sourceForm === 'macro' && node.childCount === 1 && node.firstChild?.type.name === 'paragraph') {
 			return `\\abstract{${renderChildren(node.firstChild, false).trimEnd()}}\n`;
 		}
-		return `\\begin{abstract}\n${renderChildren(node, false)}\\end{abstract}\n`;
+		return `\\begin{abstract}\n${envBody(node)}\\end{abstract}\n`;
 	},
 
 	horizontal_rule: () => '\\par\\noindent\\rule{\\linewidth}{0.4pt}\n',

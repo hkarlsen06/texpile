@@ -1,7 +1,7 @@
 // the .tex file IS the document: opening splits preamble/body and parses only the body;
 // saving regenerates only the body and splices it back under the untouched preamble
 import * as LatexParser from '$lib/languages/latex/parser/latexParser';
-import { serializeToLatexDetailed, serializeNode } from '$lib/languages/latex/serializer/latexSerializer';
+import { dropParagraphEnd, serializeToLatexDetailed, serializeNode } from '$lib/languages/latex/serializer/latexSerializer';
 import { fillOrigNorms } from '$lib/serializer/blockAssembly';
 import type { Node } from 'prosemirror-model';
 
@@ -150,10 +150,11 @@ export function bodyOffsetOf(p: Pick<ParsedLatexFile, 'preamble' | 'hadDocumentE
  * padding is added; an unprotected edge gets the conventional single \n.
  */
 export function serializeLatexFile(parsed: Pick<ParsedLatexFile, 'preamble' | 'postamble' | 'hadDocumentEnv'>, doc: Node): string {
-	const { text: body, leadProtected, tailProtected } = serializeToLatexDetailed(doc);
+	const { text, leadProtected, tailProtected, trailingRegenerated } = serializeToLatexDetailed(doc);
 	// fragment file: body IS the entire file, no synthesized wrapper written back. a protected
 	// tail reproduces the original bytes through EOF, including a missing trailing newline.
-	if (parsed.hadDocumentEnv === false) return tailProtected ? body : body + '\n';
+	if (parsed.hadDocumentEnv === false) return tailProtected ? text : text + '\n';
+	const body = dropParagraphEnd(text, trailingRegenerated);
 	// postamble runs to EOF and usually ends with \n; normalize its trailing newlines
 	// to exactly one or the file grows a blank line per save
 	const tail = parsed.postamble.replace(/\n+$/, '') + '\n';

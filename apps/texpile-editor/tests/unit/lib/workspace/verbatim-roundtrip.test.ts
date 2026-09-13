@@ -153,6 +153,30 @@ describe('edit blast radius is one block', () => {
 		expect(twice).toBe(once);
 	});
 
+	it('adds no \\par where a blank line or an \\end already ends the edited paragraph', () => {
+		const file = `${PREAMBLE}\n\\begin{abstract}\nWe prove it works.\n\\end{abstract}\n\nMiddle paragraph.\n\n\\section{Two}\nLast paragraph.\n\\end{document}\n`;
+		const parsed = parseLatexFile(file);
+		const retext = (doc: Node, from: string, to: string): Node => {
+			const kids: Node[] = [];
+			doc.forEach((c) => kids.push(c.isText ? schema.text(c.text!.replace(from, to), c.marks) : retext(c, from, to)));
+			return doc.copy(Fragment.fromArray(kids));
+		};
+		for (const [from, to] of [
+			['We prove', 'We show'],
+			['Middle', 'Centre'],
+			['Last', 'Final']
+		]) {
+			const out = serializeLatexFile(parsed, retext(parsed.doc, from, to));
+			expect(out).toContain(to);
+			expect(out).not.toContain('\\par');
+		}
+		const fresh = schema.nodes.doc.create(null, [
+			schema.nodes.paragraph.create(null, schema.text('One.')),
+			schema.nodes.paragraph.create(null, schema.text('Two.'))
+		]);
+		expect(serializeLatexFile(parsed, fresh)).toContain('One. \\par');
+	});
+
 	it('an inserted-then-empty paragraph is a no-op (pristine neighbours re-join)', () => {
 		const parsed = parseLatexFile(FILE);
 		const idx = childIndexWithText(parsed.doc, 'Double blank line');

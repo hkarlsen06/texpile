@@ -93,6 +93,7 @@ export type DocSerializeResult = {
 	leadProtected: boolean;
 	/** Same, for the trailing edge. */
 	tailProtected: boolean;
+	trailingRegenerated: Node | null;
 };
 
 function neighborKey(sib: Node | null): string {
@@ -111,6 +112,7 @@ export type BlockAssemblyOptions = {
 	 * blank line.
 	 */
 	boundary?: (prev: Node, next: Node, contiguous: boolean) => string | null;
+	beforeBreak?: (text: string, last: Node) => string;
 };
 
 /**
@@ -157,6 +159,7 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 		let prevSeq: number | null = null;
 		// the last child that emitted anything, verbatim or not; what the boundary hook sees
 		let lastNode: Node | null = null;
+		let lastRegenerated: Node | null = null;
 		let leadProtected = false;
 		let i = 0;
 		function dialectBoundary(next: Node): string | null {
@@ -169,6 +172,10 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 			let end = out.length;
 			while (end > 0 && out[end - 1] === '\n') end--;
 			return out.slice(0, end);
+		}
+		function beforeSeparator(sep: string): string {
+			const text = trimmedEnd();
+			return lastRegenerated && options.beforeBreak && /\n[ \t]*\n/.test(sep) ? options.beforeBreak(text, lastRegenerated) : text;
 		}
 		while (i < n) {
 			const run = verbatimRun(doc, parts, i);
@@ -190,20 +197,23 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 				} else {
 					// hard boundary after regenerated output: exactly one blank line (a guaranteed
 					// parbreak; without it a verbatim paragraph could merge into its neighbour).
-					out = trimmedEnd() + (dialectBoundary(node) ?? '\n\n') + orig.latex;
+					const sep = dialectBoundary(node) ?? '\n\n';
+					out = beforeSeparator(sep) + sep + orig.latex;
 				}
 				const lastSeq = origOf(doc.child(i + run - 1))?.seq;
 				prevSeq = typeof lastSeq === 'number' ? lastSeq : null;
 				lastNode = doc.child(i + run - 1);
+				lastRegenerated = null;
 				i += run;
 			} else {
 				if (parts[i] !== '') {
 					const node = doc.child(i);
 					const sep = out === '' ? null : dialectBoundary(node);
-					if (sep != null) out = trimmedEnd() + sep + parts[i].replace(/^\n+/, '');
+					if (sep != null) out = beforeSeparator(sep) + sep + parts[i].replace(/^\n+/, '');
 					else out += prevSeq != null ? '\n\n' + parts[i].replace(/^\n+/, '') : parts[i];
 					prevSeq = null;
 					lastNode = node;
+					lastRegenerated = node;
 				}
 				i++;
 			}
@@ -223,7 +233,7 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 		// leading BOM or a no-break space is content, not a gap
 		if (!leadProtected) out = out.replace(/^[ \t\r\n]+/, '');
 		if (!tailProtected) out = out.replace(/[ \t\r\n]+$/, '');
-		return { text: out, leadProtected, tailProtected };
+		return { text: out, leadProtected, tailProtected, trailingRegenerated: tailProtected ? null : lastRegenerated };
 	}
 
 	return { serializeDocChildrenDetailed };
