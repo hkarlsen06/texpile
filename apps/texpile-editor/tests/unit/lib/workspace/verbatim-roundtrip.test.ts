@@ -172,9 +172,34 @@ describe('edit blast radius is one block', () => {
 		}
 		const fresh = schema.nodes.doc.create(null, [
 			schema.nodes.paragraph.create(null, schema.text('One.')),
-			schema.nodes.paragraph.create(null, schema.text('Two.'))
+			schema.nodes.raw_latex.create(null, schema.text('\\vspace{1em}')),
+			schema.nodes.paragraph.create(null, schema.text('Two.')),
+			schema.nodes.paragraph.create(null, schema.text('Three.'))
 		]);
-		expect(serializeLatexFile(parsed, fresh)).toContain('One. \\par');
+		expect(serializeLatexFile(parsed, fresh)).toContain('One. \\par\n\\vspace{1em}\n\nTwo.\n\nThree.\n\\end{document}');
+	});
+
+	it('keeps the \\par a paragraph had while it still ends before the same block', () => {
+		const file = `${PREAMBLE}\nFirst ends here. \\par\nSecond follows.\n\nLast one. \\par\n\\end{document}\n`;
+		const parsed = parseLatexFile(file);
+		const typed = (i: number, words: string) =>
+			replaceChild(parsed.doc, i, parsed.doc.child(i).type.create(parsed.doc.child(i).attrs, schema.text(words)));
+		expect(serializeLatexFile(parsed, typed(0, 'First ends here, typed.'))).toContain(
+			'First ends here, typed. \\par\nSecond follows.\n\nLast one. \\par\n'
+		);
+		expect(serializeLatexFile(parsed, typed(1, 'Second follows, typed.'))).toContain(
+			'First ends here. \\par\nSecond follows, typed.\n\nLast one. \\par\n'
+		);
+		expect(serializeLatexFile(parsed, typed(2, 'Last one, typed.'))).toContain(
+			'Second follows.\n\nLast one, typed. \\par\n\\end{document}'
+		);
+		const joined = parsed.doc.copy(
+			Fragment.fromArray([
+				parsed.doc.child(0).type.create(parsed.doc.child(0).attrs, schema.text('First ends Second follows.')),
+				parsed.doc.child(2)
+			])
+		);
+		expect(serializeLatexFile(parsed, joined)).toContain('First ends Second follows.\n\nLast one. \\par');
 	});
 
 	it('an inserted-then-empty paragraph is a no-op (pristine neighbours re-join)', () => {

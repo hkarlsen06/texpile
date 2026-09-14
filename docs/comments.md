@@ -24,7 +24,7 @@ Your name on a comment is the display name from [Preferences](preferences.md), a
 
 ## Suggest changes
 
-The button left of the comment count picks how edits apply. Editing, the default, changes the document directly. In Suggesting, edits go into the file as suggestions: the new words are tinted, the old words are struck through just before them, and a card beside them offers Accept and Reject. Accept keeps the new words. Reject puts the old words back.
+The button left of the comment count picks how edits apply, and the choice is remembered per project. Editing, the default, changes the document directly. In Suggesting, edits go into the file as suggestions: the new words are tinted, the old words are struck through just before them, and a card beside them offers Accept and Reject. Accept keeps the new words. Reject puts the old words back. Formatting put on words that stay the same, bold for instance, shows only the tinted words, and the card says Format and names the formatting.
 
 The file on disk holds the suggested text, so a compile shows the paper as it reads with every suggestion taken. The old words are kept with the comments in the project folder, and nowhere else, so commit that folder along with the files.
 
@@ -32,7 +32,7 @@ In the source editor, spaces and line breaks are suggested like any other text, 
 
 Suggestions stay in step with later edits. Typing inside a suggestion in Editing splits it around the new words, deleting some of its words shrinks it, and replacing the whole passage closes it. Typing inside someone else's suggestion while Suggesting makes a suggestion of your own there. Undoing a suggestion, or typing the old words back, removes it. The arrow keys and a click can put the cursor on either side of struck-through words, and typing goes in on that side.
 
-The visual editor cannot draw every change as words. A change inside a formula, a table, a citation, or LaTeX commands shows its paragraph in yellow, with the text as it is on disk, and the card says that some changes cannot be shown there. A change in the preamble or a `%` comment is not drawn at all. Its thread is listed in the Comments panel with a note to switch to source mode, which shows every suggestion in place.
+The visual editor cannot draw every change as words. A change inside a formula, a table, or LaTeX commands shows its paragraph in yellow, with the text as it is on disk, and the card says that some changes cannot be shown there. A change in the preamble or a `%` comment is not drawn at all. Its thread is listed in the Comments panel with a note to switch to source mode, which shows every suggestion in place.
 
 When the words a suggestion changed are edited in another program while Texpile is not watching the file, the suggestion is marked lost. It stays in the Comments panel with its old and new words, and can be dismissed. Suggesting is not available in a shared session.
 

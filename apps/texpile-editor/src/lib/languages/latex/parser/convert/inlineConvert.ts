@@ -2,7 +2,7 @@
 // mutually recursive with the walkers in converter.ts; ESM live bindings make the circular import safe
 import type { Node, Macro } from '@unified-latex/unified-latex-types';
 import { printRaw } from '@unified-latex/unified-latex-util-print-raw';
-import { type RawStamped } from '../ast-utils';
+import { getMacroFirstArg, getTextContent, type RawStamped } from '../ast-utils';
 import { buildNode, textNode, textNodes, collapseTextNodes, realMarks, type PmNode, type ConversionContext } from '../builders';
 import { ignoredMacros, SCOPED_SWITCHES } from '../macros';
 import { macroHandlers } from './macroHandlers';
@@ -117,6 +117,20 @@ export function convertNodeToInline(node: Node, ctx: ConversionContext): PmNode[
 		}
 		case 'group': {
 			const gcontent: Node[] = node.content || [];
+			// exactly the pair the serializer writes for a highlight with its own color
+			const [setColor, hl] = gcontent as Macro[];
+			if (
+				gcontent.length === 2 &&
+				setColor.type === 'macro' &&
+				setColor.content === 'sethlcolor' &&
+				hl.type === 'macro' &&
+				hl.content === 'hl'
+			) {
+				const color = setColor.args?.length ? getTextContent(getMacroFirstArg(setColor)) : '';
+				if (color && hl.args?.length) {
+					return convertNodesToInline(getMacroFirstArg(hl), { ...ctx, marks: [...ctx.marks, { type: 'highlight', attrs: { color } }] });
+				}
+			}
 			// a group scoping a font switch ({\large ...}) must keep its braces or the switch
 			// leaks past it. the chip carries ctx.marks itself (no text child to carry a
 			// surrounding \texttt mark), same reasoning as the unknown-macro chip above.

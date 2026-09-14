@@ -49,12 +49,12 @@ export function prepareLoose(text: string, dialect: AnchorDialect = 'tex'): Loos
  * The anchor's own quote/prefix/suffix are still normalized per call, and stay that way: they are
  * at most a sentence and a pair of 32-character windows, and they differ every time.
  */
-export function resolveAnchorLooseIn(h: LooseHaystack, a: CommentAnchor): ResolvedAnchor | null {
+export function resolveAnchorLooseIn(h: LooseHaystack, a: CommentAnchor, copy?: () => number): ResolvedAnchor | null {
 	const quote = normalizeForMatch(a.quote, h.dialect).text;
 	const prefix = normalizeForMatch(a.prefix, h.dialect).text;
 	const suffix = normalizeForMatch(a.suffix, h.dialect).text;
 	const point = quote.length < MIN_QUOTE;
-	const hit = point ? searchContext(h.text, quote, prefix, suffix, 0) : searchQuote(h.text, quote, prefix, suffix, 0);
+	const hit = point ? searchContext(h.text, quote, prefix, suffix, 0, copy) : searchQuote(h.text, quote, prefix, suffix, 0, copy);
 	if (!hit) return null;
 	const from = hit.from < h.map.length ? h.map[hit.from] : h.raw.length;
 	const to = hit.to < h.map.length ? h.map[hit.to] : h.raw.length;
@@ -111,19 +111,28 @@ export function resolveFragment(h: LooseHaystack, quote: string): ResolvedAnchor
 			end: 0
 		});
 	}
-	const hits: ResolvedAnchor[] = [];
-	let longest: { hit: ResolvedAnchor; len: number } | null = null;
+	const hits: { hit: ResolvedAnchor; from: number; to: number }[] = [];
+	let longest: (typeof hits)[number] | null = null;
 	for (const f of frags) {
 		if (f.text.trim().length < MIN_QUOTE) continue;
 		const hit = resolve(f);
 		if (!hit) continue;
-		hits.push(hit);
-		if (!longest || f.text.length > longest.len) longest = { hit, len: f.text.length };
+		hits.push({ hit, from: f.at, to: f.at + f.text.length });
+		if (!longest || f.text.length > longest.to - longest.from) longest = hits[hits.length - 1];
 	}
 	if (!hits.length) return null;
-	const ordered = hits.every((x, i) => i === 0 || x.from >= hits[i - 1].from);
-	if (ordered) return { from: hits[0].from, to: Math.max(...hits.map((x) => x.to)), exact: false, weak: hits.some((x) => x.weak) };
-	return longest!.hit;
+	const ordered = hits.every((x, i) => i === 0 || x.hit.from >= hits[i - 1].hit.from);
+	if (ordered) {
+		const last = hits[hits.length - 1];
+		return {
+			from: hits[0].hit.from,
+			to: Math.max(...hits.map((x) => x.hit.to)),
+			exact: false,
+			weak: hits.some((x) => x.hit.weak),
+			covers: { from: hits[0].from, to: last.to }
+		};
+	}
+	return { ...longest!.hit, covers: { from: longest!.from, to: longest!.to } };
 }
 
 /**

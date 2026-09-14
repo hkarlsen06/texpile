@@ -27,6 +27,7 @@ import {
 	type RelayNotice
 } from './protocol';
 import type { Transport, TransportStatus } from './transport';
+import { THIS_VERSION, sessionMismatch, type SessionVersion } from './compatibility';
 
 export type PeerInfo = {
 	name: string;
@@ -34,7 +35,7 @@ export type PeerInfo = {
 	role: 'host' | 'guest';
 };
 
-export type SessionEndReason = 'host-ended' | 'relay-closed' | 'quota' | 'error' | 'no-session' | 'full';
+export type SessionEndReason = 'host-ended' | 'relay-closed' | 'quota' | 'error' | 'no-session' | 'full' | 'host-outdated' | 'app-outdated';
 
 // the relay drops any WebSocket message over 1 MiB, which would crash the session into a reconnect
 // loop; stay under it with margin for the seal nonce/tag and the codec byte. Frames still over this
@@ -131,6 +132,9 @@ export class CollabSession {
 	private readonly assembler = new BlobAssembler();
 	private readonly uploadAssembler = new BlobAssembler();
 	private user: PeerInfo;
+	private readonly version: SessionVersion;
+	// peers on a version this one cannot share a session with; nothing they send is applied
+	private readonly outdated = new Set<number>();
 	private destroyed = false;
 	// the host's clientID, learned ONLY from frames the relay marked host-origin — never from a
 	// peer's self-reported role, so a guest can't impersonate the host
@@ -146,8 +150,10 @@ export class CollabSession {
 		role: 'host' | 'guest';
 		user: { name: string; color: string };
 		events?: SessionEvents;
+		version?: SessionVersion;
 	}) {
 		this.doc = opts.doc;
+		this.version = opts.version ?? THIS_VERSION;
 		this.transport = opts.transport;
 		this.key = opts.key;
 		this.role = opts.role;
@@ -233,9 +239,13 @@ export class CollabSession {
 		});
 	};
 
+	private hello(to: number): void {
+		this.post({ type: FrameType.HELLO, from: this.clientId, to, payload: { ...this.user, ...this.version } });
+	}
+
 	/** hello + sync step1 + full awareness; runs on every (re)connect. */
 	private handshake(): void {
-		this.post({ type: FrameType.HELLO, from: this.clientId, to: BROADCAST, payload: this.user });
+		this.hello(BROADCAST);
 		const enc = encoding.createEncoder();
 		syncProtocol.writeSyncStep1(enc, this.doc);
 		this.post({ type: FrameType.SYNC, from: this.clientId, to: BROADCAST, payload: encoding.toUint8Array(enc) });
@@ -286,6 +296,7 @@ export class CollabSession {
 		if (frame.to !== BROADCAST && frame.to !== this.clientId) return;
 		// any relay-authenticated host frame nails down the host's identity for the whole session
 		if (fromHost) this.authHostId = frame.from;
+		if (this.outdated.has(frame.from)) return;
 		switch (frame.type) {
 			case FrameType.SYNC: {
 				const dec = decoding.createDecoder(frame.payload);
@@ -303,7 +314,15 @@ export class CollabSession {
 			case FrameType.HELLO: {
 				// introduce ourselves and always re-offer our state, so a reconnecting peer catches
 				// up on edits made while it was gone (its step2 reply carries what we missed too)
-				this.post({ type: FrameType.HELLO, from: this.clientId, to: frame.from, payload: this.user });
+				this.hello(frame.from);
+				const mismatch = sessionMismatch(this.version, frame.payload);
+				if (mismatch) {
+					this.outdated.add(frame.from);
+					// builds from before the version check still understand a host ending the session
+					if (this.role === 'host') this.sendControl({ kind: 'session-end' }, frame.from);
+					else if (fromHost) this.end(mismatch.outdated === 'them' ? 'host-outdated' : 'app-outdated', mismatch.version);
+					break;
+				}
 				const enc = encoding.createEncoder();
 				syncProtocol.writeSyncStep1(enc, this.doc);
 				this.post({ type: FrameType.SYNC, from: this.clientId, to: frame.from, payload: encoding.toUint8Array(enc) });

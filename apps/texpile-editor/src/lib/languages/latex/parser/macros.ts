@@ -91,6 +91,7 @@ export const SCOPED_SWITCHES = new Set([
 	'rm',
 	'color',
 	'normalcolor',
+	'sethlcolor',
 	'centering',
 	'raggedright',
 	'raggedleft'
@@ -164,7 +165,11 @@ export const MACRO_SIGNATURES: NonNullable<ParseOptions['macros']> = {
 	// missing from the default DB. without a signature the {...} becomes an unrelated ADJACENT
 	// group converted with the outer context, silently losing the sub/sup mark for its content.
 	textsubscript: { signature: 'm' },
-	textsuperscript: { signature: 'm' }
+	textsuperscript: { signature: 'm' },
+
+	// soul, missing from the default DB
+	hl: { signature: 'm' },
+	sethlcolor: { signature: 'm' }
 };
 
 /** env signatures the default DB misses (it already has tabular*, minipage, table, figure, ...). */

@@ -55,12 +55,35 @@ it('draws old and new words in their paragraph, and keeps a region drawn across 
 	view.destroy();
 });
 
+it('tints a formula among typed words, whose source the formula keeps as content', () => {
+	const view = mount();
+	const second = view.state.doc.child(0).nodeSize + 1;
+	const to = second + view.state.doc.child(1).content.size;
+	setPmSuggestions(view, [{ id: 'typed', from: second, to, restore: '', old: [], mine: true, partial: false }]);
+	expect(view.dom.querySelector('.inline-math')?.classList.contains('pm-suggest-new')).toBe(true);
+	view.destroy();
+});
+
+it('tints a format change without striking out the words it keeps', () => {
+	const view = mount();
+	const at = 1 + view.state.doc.child(0).textContent.indexOf('driven');
+	const old = [{ text: 'driven', tags: [] }];
+	setPmSuggestions(view, [
+		{ id: 'f', from: at, to: at + 'driven'.length, restore: 'driven', old, mine: true, partial: false, format: true }
+	]);
+	expect([...view.dom.querySelectorAll('.pm-suggest-new')].map((e) => e.textContent)).toEqual(['driven']);
+	expect(view.dom.querySelector('.pm-suggest-old')).toBeNull();
+	view.destroy();
+});
+
 it('puts what is typed in front of old words when the arrow key put the caret there', () => {
 	editMode.current = 'suggesting';
 	const view = mount();
 	const text = view.state.doc.child(0).textContent;
 	const at = 1 + text.indexOf('driven');
-	setPmSuggestions(view, [{ id: 'r', from: at, to: at + 'driven'.length, restore: 'led', mine: true, partial: false }]);
+	setPmSuggestions(view, [
+		{ id: 'r', from: at, to: at + 'driven'.length, restore: 'led', old: [{ text: 'led', tags: [] }], mine: true, partial: false }
+	]);
 	view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at)));
 	takeTypedSides();
 

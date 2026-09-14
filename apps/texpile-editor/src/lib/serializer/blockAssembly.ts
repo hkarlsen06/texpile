@@ -111,8 +111,8 @@ export type BlockAssemblyOptions = {
 	 * directly followed `prev` in the source (consecutive seq). null keeps the default: a hard
 	 * blank line.
 	 */
-	boundary?: (prev: Node, next: Node, contiguous: boolean) => string | null;
-	beforeBreak?: (text: string, last: Node) => string;
+	boundary?: (prev: Node, next: Node, contiguous: boolean, before: string) => string | null;
+	beforeBreak?: (text: string, last: Node, next: Node) => string;
 };
 
 /**
@@ -166,16 +166,19 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 			if (!options.boundary || !lastNode) return null;
 			const a = origOf(lastNode)?.seq;
 			const b = origOf(next)?.seq;
-			return options.boundary(lastNode, next, typeof a === 'number' && b === a + 1);
+			return options.boundary(lastNode, next, typeof a === 'number' && b === a + 1, out);
 		}
-		function trimmedEnd(): string {
+		function trailingBreaks(): number {
 			let end = out.length;
 			while (end > 0 && out[end - 1] === '\n') end--;
-			return out.slice(0, end);
+			return out.length - end;
 		}
-		function beforeSeparator(sep: string): string {
+		function trimmedEnd(): string {
+			return out.slice(0, out.length - trailingBreaks());
+		}
+		function beforeSeparator(sep: string, next: Node): string {
 			const text = trimmedEnd();
-			return lastRegenerated && options.beforeBreak && /\n[ \t]*\n/.test(sep) ? options.beforeBreak(text, lastRegenerated) : text;
+			return lastRegenerated && options.beforeBreak && /\n[ \t]*\n/.test(sep) ? options.beforeBreak(text, lastRegenerated, next) : text;
 		}
 		while (i < n) {
 			const run = verbatimRun(doc, parts, i);
@@ -198,7 +201,7 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 					// hard boundary after regenerated output: exactly one blank line (a guaranteed
 					// parbreak; without it a verbatim paragraph could merge into its neighbour).
 					const sep = dialectBoundary(node) ?? '\n\n';
-					out = beforeSeparator(sep) + sep + orig.latex;
+					out = beforeSeparator(sep, node) + sep + orig.latex;
 				}
 				const lastSeq = origOf(doc.child(i + run - 1))?.seq;
 				prevSeq = typeof lastSeq === 'number' ? lastSeq : null;
@@ -209,8 +212,10 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 				if (parts[i] !== '') {
 					const node = doc.child(i);
 					const sep = out === '' ? null : dialectBoundary(node);
-					if (sep != null) out = beforeSeparator(sep) + sep + parts[i].replace(/^\n+/, '');
-					else out += prevSeq != null ? '\n\n' + parts[i].replace(/^\n+/, '') : parts[i];
+					const gap = '\n'.repeat(trailingBreaks()) + /^\n*/.exec(parts[i])![0];
+					if (sep != null) out = beforeSeparator(sep, node) + sep + parts[i].replace(/^\n+/, '');
+					else if (prevSeq != null) out += '\n\n' + parts[i].replace(/^\n+/, '');
+					else out = gap.length > 1 ? beforeSeparator(gap, node) + gap + parts[i].replace(/^\n+/, '') : out + parts[i];
 					prevSeq = null;
 					lastNode = node;
 					lastRegenerated = node;

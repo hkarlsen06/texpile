@@ -1,17 +1,15 @@
-# for join.texpile.com
+# for join.texpile.com, the browser guest. It has to match the released desktop app people host
+# sessions from, so release.yml deploys it after a stable tag publishes; run this by hand only to
+# redeploy a release, with that tag picked as the ref
 name: join
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - master
-    paths:
-      - 'apps/texpile-editor/**'
-      - '.github/workflows/join.yml'
+  workflow_call:
 
 jobs:
   deploy:
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
     runs-on: ubuntu-latest
     environment: CICD
     steps:

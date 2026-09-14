@@ -188,7 +188,7 @@ export function foldLog(events: CommentEvent[]): CommentThread[] {
 			// whatever was observed was observed about the old anchor
 			thread.detached = undefined;
 			thread.hidden = undefined;
-		} else {
+		} else if (e.t === 'delete') {
 			deleted.add(e.thread);
 		}
 	}

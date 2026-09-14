@@ -116,6 +116,7 @@ export const baseMarks = {
 
 	highlight: {
 		attrs: {
+			// null: the color the document sets itself (a bare \hl in LaTeX)
 			color: { default: 'yellow' }
 		},
 		parseDOM: [
@@ -133,7 +134,12 @@ export const baseMarks = {
 			}
 		],
 		toDOM(node) {
-			return ['span', { 'data-highlight': node.attrs.color, style: `background-color: ${node.attrs.color}; padding: 0 2px;` }, 0];
+			const color = node.attrs.color;
+			return [
+				'span',
+				{ ...(color ? { 'data-highlight': color } : {}), style: `background-color: ${color ?? 'yellow'}; padding: 0 2px;` },
+				0
+			];
 		}
 	} as MarkSpec,
 

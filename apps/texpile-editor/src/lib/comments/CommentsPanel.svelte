@@ -6,7 +6,8 @@
 	import CommentThreadConversation from './CommentThreadConversation.svelte';
 	import { oneLine } from './quoteLabel';
 	import type { CommentMessage, CommentThread } from '$lib/comments/log';
-	import { isSuggestion, shownWords, suggestionKind } from '$lib/comments/suggest';
+	import { isSuggestion, shownWords } from '$lib/comments/suggest';
+	import { suggestionLabel } from '$lib/comments/suggestionLabel';
 	import { m } from '$lib/paraglide/messages';
 
 	let {
@@ -92,12 +93,7 @@
 	function summary(t: CommentThread): string {
 		const body = t.messages[0]?.body ?? '';
 		if (body || !isSuggestion(t)) return body;
-		const kind = suggestionKind(t.anchor.quote, t.restore ?? '');
-		return kind === 'delete'
-			? m.comments_suggest_delete_label()
-			: kind === 'insert'
-				? m.comments_suggest_add_label()
-				: m.comments_suggest_replace_label();
+		return suggestionLabel(t.file, t.anchor.quote, t.restore ?? '');
 	}
 
 	function toggle(thread: CommentThread) {

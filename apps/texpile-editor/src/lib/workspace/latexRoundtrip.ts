@@ -155,7 +155,8 @@ export function serializeLatexFile(parsed: Pick<ParsedLatexFile, 'preamble' | 'p
 	// fragment file: body IS the entire file, no synthesized wrapper written back. a protected
 	// tail reproduces the original bytes through EOF, including a missing trailing newline.
 	if (parsed.hadDocumentEnv === false) return tailProtected ? text : text + '\n';
-	const body = dropParagraphEnd(text, trailingRegenerated);
+	const lastSeq = (doc.attrs.docTail as { afterSeq?: unknown } | null)?.afterSeq;
+	const body = dropParagraphEnd(text, trailingRegenerated, typeof lastSeq === 'number' ? lastSeq + 1 : undefined);
 	const leadSep = leadProtected ? '' : '\n';
 	const tailSep = tailProtected ? '' : '\n';
 	return `${parsed.preamble}${leadSep}${body}${tailSep}${parsed.postamble}`;

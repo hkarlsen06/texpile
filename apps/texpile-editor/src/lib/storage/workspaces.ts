@@ -21,6 +21,8 @@ export type FolderEntry = {
 	tabs?: string[];
 	/** per-file caret + scroll; shape owned and validated by workspace/docPositions.ts */
 	positions?: Record<string, unknown>;
+	/** left in Suggesting; a choice per project and per person, so not in the project's own config */
+	suggesting?: boolean;
 };
 
 type WorkspacesBlob = {

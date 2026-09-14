@@ -5,7 +5,10 @@
 	import InitialAvatar from '$lib/components/InitialAvatar.svelte';
 	import type { Snippet } from 'svelte';
 	import type { CommentMessage, CommentThread } from '$lib/comments/log';
-	import { isSuggestion, shownWords, suggestionKind } from '$lib/comments/suggest';
+	import { formatChange, isSuggestion, shownWords, suggestionKind } from '$lib/comments/suggest';
+	import { suggestionLabel } from '$lib/comments/suggestionLabel';
+	import { dialectOfPath } from '$lib/comments/anchorNormalize';
+	import { ATOM } from '$lib/comments/renderedWords';
 	import { m } from '$lib/paraglide/messages';
 
 	let {
@@ -59,18 +62,17 @@
      that wide is unreadable. Prose wants a measure, not the space available -->
 {#snippet change(quote: string, restore: string)}
 	{@const kind = suggestionKind(quote, restore)}
+	{@const format = formatChange(quote, restore, dialectOfPath(thread.file))}
 	<p class="leading-snug">
-		<span class="font-semibold">
-			{kind === 'delete'
-				? m.comments_suggest_delete_label()
-				: kind === 'insert'
-					? m.comments_suggest_add_label()
-					: m.comments_suggest_replace_label()}
-		</span>
-		<span class="text-muted line-clamp-3 italic">{shownWords(kind === 'insert' ? quote : restore)}</span>
-		{#if kind === 'replace'}
-			<span>{m.comments_suggest_replace_with()}</span>
-			<span class="text-muted line-clamp-3 italic">{shownWords(quote)}</span>
+		<span class="font-semibold">{suggestionLabel(thread.file, quote, restore)}</span>
+		{#if format}
+			<span class="text-muted line-clamp-3 italic">{format.words.replaceAll(ATOM, '…')}</span>
+		{:else}
+			<span class="text-muted line-clamp-3 italic">{shownWords(kind === 'insert' ? quote : restore)}</span>
+			{#if kind === 'replace'}
+				<span>{m.comments_suggest_replace_with()}</span>
+				<span class="text-muted line-clamp-3 italic">{shownWords(quote)}</span>
+			{/if}
 		{/if}
 	</p>
 {/snippet}

@@ -5,7 +5,8 @@
 	import { navigate } from '$lib/router.svelte';
 	import { collabGuest } from '$lib/collab/guestStore.svelte';
 	import { formatShareCode, isValidShareCode, normalizeShareCode } from '$lib/collab/e2e/shareCode';
-	import { pendingJoinCode, pendingJoinName, codeFromJoinLink, appLinkFor } from '$lib/collab/joinLink.svelte';
+	import { pendingJoinCode, pendingJoinName, codeFromJoinLink, appLinkFor, takeRejoin } from '$lib/collab/joinLink.svelte';
+	import { onMount } from 'svelte';
 	import AppFrame from '$lib/chrome/AppFrame.svelte';
 	import { settings, updateSettings, DEFAULT_COLLAB_RELAY_URL } from '$lib/settings';
 	import { userData, updateUserData } from '$lib/storage/userData';
@@ -13,6 +14,7 @@
 	import { RotateCcw, ShieldCheck, ChevronDown, ExternalLink } from '@lucide/svelte';
 	import Modal from '$lib/modals/Modal.svelte';
 	import ModalActions from '$lib/modals/ModalActions.svelte';
+	import JoinPreferencesButton from './JoinPreferencesButton.svelte';
 
 	let codeInput = $state('');
 	// a join link carries the code, whether this tab opened with one or the OS handed the running
@@ -39,6 +41,13 @@
 	function loadName(): string {
 		return userData.current.collabName;
 	}
+
+	onMount(() => {
+		if (takeRejoin() && isValidShareCode(pendingJoinCode.current) && nameInput.trim()) {
+			codeInput = formatShareCode(pendingJoinCode.current);
+			void join();
+		}
+	});
 
 	async function join() {
 		const trimmedRelay = relayDraft.trim();
@@ -128,6 +137,8 @@
 		if (err === 'invalid-code') return m.session_error_invalid_code();
 		if (err === 'no-session') return m.session_error_no_session();
 		if (err === 'session-full') return m.session_error_full();
+		if (err === 'host-outdated') return m.session_error_host_outdated({ version: collabGuest.joinErrorVersion });
+		if (err === 'app-outdated') return m.session_error_app_outdated({ version: collabGuest.joinErrorVersion });
 		return m.session_error_generic({ message: err });
 	}
 </script>
@@ -177,7 +188,9 @@
 
 				<!-- the browser build pins the relay: its CSP only allows the official one, so a custom
 				     address here would fail silently -->
-				{#if !__WEB__}
+				{#if __WEB__}
+					<JoinPreferencesButton code={codeInput} bind:name={nameInput} />
+				{:else}
 					<!-- plumbing almost nobody changes: collapsed unless they're already on a custom relay -->
 					<button
 						type="button"

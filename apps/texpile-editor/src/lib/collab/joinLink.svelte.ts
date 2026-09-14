@@ -37,8 +37,67 @@ export function codeFromJoinLink(text: string): string {
 	return m && isValidShareCode(m[1]) ? normalizeShareCode(m[1]) : '';
 }
 
+// the browser guest keeps the code in this tab while joined, so a reload after a deploy can come back
+const REMEMBERED_CODE = 'texpile:join-code';
+const REJOIN = 'texpile:rejoin';
+
+function tabStorage(): Storage | null {
+	try {
+		return __WEB__ && browser ? window.sessionStorage : null;
+	} catch {
+		return null;
+	}
+}
+
+export function rememberJoinCode(code: string): void {
+	try {
+		tabStorage()?.setItem(REMEMBERED_CODE, normalizeShareCode(code));
+	} catch {
+		// storage off: a reload just asks for the code again
+	}
+}
+
+export function forgetJoinCode(): void {
+	try {
+		tabStorage()?.removeItem(REMEMBERED_CODE);
+	} catch {
+		// nothing was kept
+	}
+}
+
+/** reload into the session this tab is in, joining again without the form */
+export function reloadIntoSession(): void {
+	try {
+		tabStorage()?.setItem(REJOIN, '1');
+	} catch {
+		// the reload still lands on a filled in form
+	}
+	window.location.reload();
+}
+
+/** whether this load came from reloadIntoSession; true once */
+export function takeRejoin(): boolean {
+	try {
+		const storage = tabStorage();
+		const asked = storage?.getItem(REJOIN) === '1';
+		storage?.removeItem(REJOIN);
+		return asked;
+	} catch {
+		return false;
+	}
+}
+
+function rememberedCode(): string {
+	try {
+		const code = tabStorage()?.getItem(REMEMBERED_CODE) ?? '';
+		return isValidShareCode(code) ? code : '';
+	} catch {
+		return '';
+	}
+}
+
 /** seeded from this tab's URL at load, hence main.ts importing before the router reads the hash */
-export const pendingJoinCode = box(takeFromHash());
+export const pendingJoinCode = box(takeFromHash() || rememberedCode());
 
 /** paired with pendingJoinCode: a desktop hand-off can carry the name the web form took. */
 export const pendingJoinName = box('');

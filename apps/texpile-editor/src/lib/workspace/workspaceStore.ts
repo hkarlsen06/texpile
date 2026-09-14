@@ -147,6 +147,18 @@ export function setLastFile(root: string, path: string): void {
 	});
 }
 
+/** whether this folder was left in Suggesting */
+export function savedSuggesting(root: string): boolean {
+	return getFolder(root).suggesting === true;
+}
+
+export function setSuggesting(root: string, on: boolean): void {
+	updateFolder(root, (draft) => {
+		if (on) draft.suggesting = true;
+		else delete draft.suggesting;
+	});
+}
+
 /**
  * Which typesetter Compile drives, decided by the main file and nothing else.
  *

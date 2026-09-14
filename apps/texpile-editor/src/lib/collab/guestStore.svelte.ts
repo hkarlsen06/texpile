@@ -11,6 +11,7 @@ import { GuestFileCache } from './guestFileCache';
 import { presenceIdentity } from './identity';
 import { GuestSyncRequests } from './guestSyncRequests';
 import { RelayTransport } from './transport';
+import { forgetJoinCode, rememberJoinCode } from './joinLink.svelte';
 import type { SharedCompileIntel } from './editSession';
 import type { ControlPayload, PreviewPayload } from './protocol';
 import type { CommentEvent } from '$lib/comments/log';
@@ -45,6 +46,8 @@ class GuestCollabController {
 	/** why the session ended, for the goodbye screen. */
 	endedReason = $state<'host-ended' | 'relay-closed' | 'quota' | 'error' | ''>('');
 	joinError = $state('');
+	/** the version a host-outdated or app-outdated join error names */
+	joinErrorVersion = $state('');
 	hostOnline = $state(true);
 	files = $state<GuestFile[]>([]);
 	peers = $state<PeerInfo[]>([]);
@@ -111,6 +114,7 @@ class GuestCollabController {
 			return;
 		}
 		this.status = 'joining';
+		rememberJoinCode(code);
 		this.selfName = presenceIdentity('guest', 0, name).name;
 		try {
 			const keys = await deriveSessionKeys(code);
@@ -161,12 +165,13 @@ class GuestCollabController {
 						} else if (s === 'host-gone') this.hostOnline = false;
 						else if (s === 'host-back') this.hostOnline = true;
 					},
-					onSessionEnd: (reason) => {
+					onSessionEnd: (reason, detail) => {
 						this.clearJoinTimer();
 						// a join-time rejection (unknown code, full room) is a join failure, not a
 						// mid-session end — surface it on the join form instead of the goodbye screen
-						if (reason === 'no-session' || reason === 'full') {
-							this.joinError = reason === 'full' ? 'session-full' : 'no-session';
+						if (reason === 'no-session' || reason === 'full' || reason === 'host-outdated' || reason === 'app-outdated') {
+							this.joinError = reason === 'full' ? 'session-full' : reason;
+							this.joinErrorVersion = detail ?? '';
 							this.teardown(false);
 							this.status = 'idle';
 						} else {
@@ -197,6 +202,7 @@ class GuestCollabController {
 				}
 			}, 8000);
 		} catch (e) {
+			forgetJoinCode();
 			this.status = 'idle';
 			this.joinError = e instanceof Error ? e.message : String(e);
 		}
@@ -399,6 +405,7 @@ class GuestCollabController {
 	}
 
 	private teardown(destroySession: boolean): void {
+		forgetJoinCode();
 		this.clearJoinTimer();
 		this.hostSeen = false;
 		this.fileWatchers.clear();

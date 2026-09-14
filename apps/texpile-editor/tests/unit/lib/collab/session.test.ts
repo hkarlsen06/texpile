@@ -4,9 +4,13 @@ import { describe, it, expect } from 'vitest';
 import * as Y from 'yjs';
 import { deriveSessionKeys } from '$lib/collab/e2e/keys';
 import { generateShareCode } from '$lib/collab/e2e/shareCode';
-import type { RelayNotice } from '$lib/collab/protocol';
+import { BROADCAST, FrameType, decodeFrame, encodeFrame, type Frame, type RelayNotice } from '$lib/collab/protocol';
+import { seal, unseal } from '$lib/collab/e2e/seal';
+import * as encoding from 'lib0/encoding';
+import * as syncProtocol from 'y-protocols/sync';
 import type { Transport, TransportStatus } from '$lib/collab/transport';
 import { CollabSession, manifestOf, locksOf, textOf } from '$lib/collab/session';
+import type { SessionVersion } from '$lib/collab/compatibility';
 import { HostMaterializer, spliceDiff, isShared, isGeneratedArtifact, decodeIfText, EDIT_ORIGIN } from '$lib/collab/materialize';
 
 class FakeHub {
@@ -78,18 +82,22 @@ function fakeFs(files: Record<string, string>) {
 }
 const join = (root: string, rel: string) => `${root}/${rel}`;
 
-async function makeParty(hub: FakeHub, role: 'host' | 'guest', name: string, key: CryptoKey) {
+async function makeParty(hub: FakeHub, role: 'host' | 'guest', name: string, key: CryptoKey, version?: SessionVersion) {
 	const doc = new Y.Doc();
 	const transport = new FakeTransport(hub, role);
-	const events: { ended?: string; blobs: { name: string; rev: number; bytes: Uint8Array }[] } = { blobs: [] };
+	const events: { ended?: string; endedDetail?: string; blobs: { name: string; rev: number; bytes: Uint8Array }[] } = { blobs: [] };
 	const session = new CollabSession({
 		doc,
 		transport,
 		key,
 		role,
 		user: { name, color: '#123456' },
+		version,
 		events: {
-			onSessionEnd: (reason) => (events.ended = reason),
+			onSessionEnd: (reason, detail) => {
+				events.ended = reason;
+				events.endedDetail = detail;
+			},
 			onBlob: (name_, rev, bytes) => events.blobs.push({ name: name_, rev, bytes })
 		}
 	});
@@ -408,6 +416,54 @@ describe('collab session end-to-end', () => {
 		host.session.endForEveryone();
 		await until(() => victim.events.ended === 'host-ended');
 		mat.destroy();
+	});
+
+	it('turns away a guest on a version the host cannot share with, and tells a guest its host is outdated', async () => {
+		const key = (await deriveSessionKeys(generateShareCode())).contentKey;
+		const hub = new FakeHub();
+		const { fs, disk } = fakeFs({ 'main.tex': 'shared' });
+		const host = await makeParty(hub, 'host', 'Host', key, { version: '1.3.0', oldest: '1.3.0' });
+		const mat = new HostMaterializer(host.doc, 'root', fs, join);
+		await mat.seed();
+		const current = await makeParty(hub, 'guest', 'Current', key, { version: '1.3.0', oldest: '1.3.0' });
+		await until(() => manifestOf(current.doc).has('main.tex'));
+
+		// a build from before the check: a HELLO without a version, then an edit
+		const legacy = new FakeTransport(hub, 'guest');
+		const legacyDoc = new Y.Doc();
+		const received: Frame[] = [];
+		const send = async (frame: Frame) => legacy.send(await seal(key, Uint8Array.of(0, ...encodeFrame(frame))));
+		legacy.onMessage = (data) => void unseal(key, data).then((plain) => received.push(decodeFrame(plain.subarray(1))));
+		legacy.start();
+		await send({
+			type: FrameType.HELLO,
+			from: legacyDoc.clientID,
+			to: BROADCAST,
+			payload: { name: 'Legacy', color: '#654321', role: 'guest' }
+		});
+		legacyDoc.getText('f:main.tex').insert(0, 'stale ');
+		const update = encoding.createEncoder();
+		syncProtocol.writeUpdate(update, Y.encodeStateAsUpdate(legacyDoc));
+		await send({ type: FrameType.SYNC, from: legacyDoc.clientID, to: BROADCAST, payload: encoding.toUint8Array(update) });
+		await until(() =>
+			received.some((f) => f.type === FrameType.CONTROL && f.to === legacyDoc.clientID && f.payload.kind === 'session-end')
+		);
+		await new Promise((r) => setTimeout(r, 60));
+		expect(textOf(host.doc, 'main.tex').toString()).toBe('shared');
+
+		const older = await makeParty(hub, 'guest', 'Older', key, { version: '1.2.0', oldest: '1.1.0' });
+		await until(() => older.events.ended !== undefined);
+		expect([older.events.ended, older.events.endedDetail]).toEqual(['app-outdated', '1.3.0']);
+		expect([...host.session.peers.values()].map((p) => p.name)).toEqual(['Current']);
+
+		const hub2 = new FakeHub();
+		const oldHost = await makeParty(hub2, 'host', 'Old host', key, { version: '1.2.0', oldest: '1.1.0' });
+		const newGuest = await makeParty(hub2, 'guest', 'New guest', key, { version: '1.3.0', oldest: '1.3.0' });
+		await until(() => newGuest.events.ended !== undefined);
+		expect([newGuest.events.ended, newGuest.events.endedDetail]).toEqual(['host-outdated', '1.2.0']);
+		expect(disk.get('main.tex')?.content).toBe('shared');
+		mat.destroy();
+		oldHost.session.destroy();
 	});
 
 	it('a reconnect re-handshake heals a gap in delivery', async () => {

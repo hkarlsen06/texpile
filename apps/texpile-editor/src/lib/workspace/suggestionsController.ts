@@ -1,6 +1,6 @@
 // turning edits to the open file into suggestions, and accepting or rejecting them
 import { buildAnchor, type CommentAnchor } from '$lib/comments/anchor';
-import { resolveExactly } from '$lib/comments/anchorSearch';
+import { copyIndex, resolveExactly, withoutEdgeSpace } from '$lib/comments/anchorSearch';
 import {
 	anchorEvent,
 	deleteEvent,
@@ -308,14 +308,18 @@ export class SuggestionsController {
 	}
 
 	private show(text: string, placed: PlacedSuggestion[]): void {
-		const marks = placed.map((s) => ({
-			id: s.id,
-			from: s.from,
-			to: s.to,
-			restore: s.restore,
-			mine: s.author === this.me,
-			anchor: buildAnchor(text, s.from, s.to)
-		}));
+		const marks = placed.map((s) => {
+			const anchor = buildAnchor(text, s.from, s.to);
+			return {
+				id: s.id,
+				from: s.from,
+				to: s.to,
+				restore: s.restore,
+				mine: s.author === this.me,
+				anchor,
+				copy: () => copyIndex(text, withoutEdgeSpace(anchor))
+			};
+		});
 		if (marks.length === 0 && activeSuggestions.current.length === 0) return;
 		activeSuggestions.current = marks;
 	}

@@ -49,7 +49,7 @@ describe('\\vspace round-trips verbatim; blank lines are semantic no-ops', () =>
 		]);
 		const out = serializeToLatex(doc);
 		expect(out).not.toContain('\\vspace');
-		expect(out).toBe('a \\par\n\nb \\par');
+		expect(out).toBe('a\n\nb \\par');
 	});
 
 	it('serializes a legacy lineBreak:false hard_break to nothing', () => {

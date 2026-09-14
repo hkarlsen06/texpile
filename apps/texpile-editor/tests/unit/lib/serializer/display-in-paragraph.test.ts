@@ -22,7 +22,7 @@ describe('display math inside a paragraph', () => {
 
 	it('a display between two paragraphs stays between them', () => {
 		const out = rt('First.\n\n\\[\nx = 1\n\\]\n\nSecond.');
-		expect(out).toMatch(/First\. \\par/);
+		expect(out).toMatch(/First\.\n\s*\n\\\[/);
 		expect(out).toMatch(/\\\]\n\s*\nSecond/);
 	});
 

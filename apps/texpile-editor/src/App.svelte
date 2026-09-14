@@ -9,6 +9,7 @@
 	import WhatsNewModal from '$lib/modals/window/WhatsNewModal.svelte';
 	import { entriesToShow, whatsNewOpen } from '$lib/whatsNew';
 	import { codeFromJoinLink, nameFromJoinLink, pendingJoinCode, pendingJoinName } from '$lib/collab/joinLink.svelte';
+	import { watchForNewDeploy } from '$lib/collab/webDeployNotice';
 
 	// every released CHANGELOG.md entry, injected at build (vite.config)
 	const whatsNew = __WHATS_NEW__;
@@ -71,7 +72,7 @@
 	// not during the launch itself: this is a DNS lookup, a TLS handshake and an HTTP round trip,
 	// and nothing about it is worth putting in front of the document opening
 	onMount(() => {
-		if (__WEB__) return; // a web page updates by reloading; there is no installer to offer
+		if (__WEB__) return watchForNewDeploy(); // a web page updates by reloading; there is no installer to offer
 		const t = setTimeout(async () => {
 			const s = await loadSettings();
 			// once per app SESSION, not per window: without this every new window would re-check

@@ -3,10 +3,11 @@ import { describe, it, expect, vi } from 'vitest';
 import { readFileSync, statSync } from 'node:fs';
 import { EditorState } from 'prosemirror-state';
 import { activeSuggestions } from '$lib/comments/activeSuggestions.svelte';
+import { placePmSuggestions } from '$lib/editor/visual/extensions/pmSuggestionsPlace';
 import { padTables } from '$lib/editor/visual/padTables';
 import { computeBlockPatch, syncOrigAttrs } from '$lib/editor/visual/blockPatch';
 import type { ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
-import { FORMATS, pick, prng, randomEdit, typed, type Format } from './visualEditsFuzz';
+import { FORMATS, pick, prng, randomEdit, renderedText, typed, type Format } from './visualEditsFuzz';
 
 let disk: Record<string, string> = {};
 
@@ -142,7 +143,128 @@ async function session(f: Format, original: string, run: number): Promise<{ text
 	return { text, refused, log };
 }
 
+type Edit = (s: EditorState) => EditorState;
+
+async function suggestTyping(f: Format, original: string, edits: Edit[]) {
+	disk = {};
+	who = 'me';
+	activeSuggestions.current = [];
+	let text = original;
+	const meta = f.parse(text);
+	let state = EditorState.create({ doc: meta.doc });
+	const ctl = new CommentsController({
+		root: () => ROOT,
+		preferredAuthor: () => who,
+		openFileAt: () => {},
+		activeText: () => text,
+		mode: () => 'suggesting',
+		rewraps: () => true,
+		applyEdit: async () => false,
+		saveNow: () => {}
+	});
+	await ctl.load(ROOT);
+	ctl.reanchor(`${ROOT}/doc.${f.name}`, text);
+	for (const edit of edits) {
+		const next = edit(state);
+		if (next === state) continue;
+		state = next;
+		text = f.serialize(meta, state.doc);
+		ctl.suggestions.textChanged(`${ROOT}/doc.${f.name}`, text);
+		await ctl.suggestions.settle();
+	}
+	const marks = activeSuggestions.current;
+	const shown = f.parse(text).doc;
+	return { text, marks, shown, placed: placePmSuggestions(shown, marks, f.name) };
+}
+
+function blockEnd(s: EditorState, block: number): number {
+	let pos = 0;
+	for (let i = 0; i <= block; i++) pos += s.doc.child(i).nodeSize;
+	return pos - 1;
+}
+
 describe('suggestions made in the visual editor', () => {
+	it('draws what is typed as words rather than a region', async () => {
+		const sources = {
+			tex: '\\documentclass{article}\n\\begin{document}\nAn inline \\textit{quotation} sits in running text. \\par\nA second one follows here.\n\nA third paragraph ends it.\n\\end{document}\n',
+			md: 'An inline *quotation* sits in running text.\n\nA second one follows here.\n\nA third paragraph ends it.\n',
+			typ: 'An inline _quotation_ sits in running text.\n\nA second one follows here.\n\nA third paragraph ends it.\n'
+		};
+		const edits: Record<string, Edit[]> = {
+			'new paragraphs at the end': [
+				(s) => s.apply(s.tr.split(blockEnd(s, s.doc.childCount - 1))),
+				(s) => s.apply(s.tr.insertText('Fresh words typed here.', blockEnd(s, s.doc.childCount - 1))),
+				(s) => s.apply(s.tr.split(blockEnd(s, s.doc.childCount - 1))),
+				(s) => s.apply(s.tr.insertText('More fresh words.', blockEnd(s, s.doc.childCount - 1)))
+			],
+			'words at the end of each paragraph': [0, 1, 2].map(
+				(i) => (s: EditorState) => s.apply(s.tr.insertText(' Typed 50% & more.', blockEnd(s, i)))
+			),
+			'words typed over a formatted phrase': [
+				(s) => s.apply(s.tr.insertText('Hello there', 1, 1 + s.doc.child(0).textContent.indexOf(' text.')))
+			]
+		};
+		for (const f of FORMATS) {
+			for (const [name, steps] of Object.entries(edits)) {
+				const { marks, placed } = await suggestTyping(f, sources[f.name], steps);
+				expect({ format: f.name, name, drawn: placed.ranges.filter((r) => !r.partial).length }).toEqual({
+					format: f.name,
+					name,
+					drawn: marks.length
+				});
+			}
+			const { placed } = await suggestTyping(f, sources[f.name], edits['words typed over a formatted phrase']);
+			expect(placed.ranges[0].old).toEqual([
+				{ text: 'An inline ', tags: [] },
+				{ text: 'quotation', tags: ['em'] },
+				{ text: ' sits in running', tags: [] }
+			]);
+		}
+		const joined = await suggestTyping(FORMATS[0], sources.tex, [(s) => s.apply(s.tr.delete(blockEnd(s, 0) - 5, blockEnd(s, 0) + 8))]);
+		expect([...joined.placed.partial]).toHaveLength(1);
+	});
+
+	it('tints the paragraph that was typed in when typing makes it match another', async () => {
+		const alike = '\\documentclass{article}\n\\begin{document}\nThe cat sat again.\n\nThe cat sat.\n\\end{document}\n';
+		const { placed, shown } = await suggestTyping(FORMATS[0], alike, [(s) => s.apply(s.tr.insertText(' again', blockEnd(s, 1) - 1))]);
+		expect(placed.ranges).toHaveLength(1);
+		expect(placed.ranges[0].from).toBeGreaterThan(shown.child(0).nodeSize);
+	});
+
+	for (const f of FORMATS) {
+		it(`${f.name}: draws old and new words exactly as rejecting them reads`, async () => {
+			const files = f.files.filter((p) => statSync(p).size < 20_000);
+			const failures: string[] = [];
+			for (let run = 1; run <= RUNS * 4 && failures.length < 2; run++) {
+				const rnd = prng(run * 7919);
+				const original = readFileSync(files[run % files.length], 'utf8').replace(/\r\n/g, '\n');
+				const steps = Array.from({ length: 1 + Math.floor(rnd() * 4) }, () => (s: EditorState) => {
+					const edit = randomEdit(s, rnd);
+					return edit ? s.apply(edit.tr) : s;
+				});
+				const { text, marks, shown, placed } = await suggestTyping(f, original, steps);
+				const drawn = placed.ranges.filter((r) => !r.partial);
+				if (!drawn.length) continue;
+				let rejected = text;
+				for (const m of marks.filter((x) => drawn.some((r) => r.id === x.id)).sort((a, b) => b.from - a.from))
+					rejected = rejected.slice(0, m.from) + m.restore + rejected.slice(m.to);
+				const want = renderedText(f.parse(rejected).doc);
+				const got = renderedText(
+					shown,
+					drawn.map((r) => ({ from: r.from, to: r.to, words: r.old.map((x) => x.text).join('') }))
+				);
+				if (want !== got) {
+					let s = 0;
+					while (want[s] === got[s]) s++;
+					failures.push(
+						`run ${run} (${files[run % files.length]}):\n want …${JSON.stringify(want.slice(Math.max(0, s - 60), s + 60))}\n got  …${JSON.stringify(got.slice(Math.max(0, s - 60), s + 60))}`
+					);
+				}
+			}
+			expect(failures).toEqual([]);
+		}, 600_000);
+	}
+
 	for (const f of FORMATS) {
 		it(`${f.name}: gives back every word and paragraph once all are rejected`, async () => {
 			const files = f.files.filter((p) => statSync(p).size < 20_000);

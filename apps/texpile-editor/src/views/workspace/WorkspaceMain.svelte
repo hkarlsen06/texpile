@@ -11,9 +11,8 @@
 	import TerminalDock from '$lib/terminal/TerminalDock.svelte';
 	import { ChevronLeft } from '@lucide/svelte';
 	import { m } from '$lib/paraglide/messages';
-	import { activeCompare } from '$lib/workspace/workspaceStore';
+	import { activeCompare, setSuggesting, workspaceRoot } from '$lib/workspace/workspaceStore';
 	import { activeSuggestions, suggesting } from '$lib/comments/activeSuggestions.svelte';
-	import { layout as windowLayout, updateLayout } from '$lib/storage/layout';
 	import type { WorkspaceMainProps } from './workspaceMainProps';
 
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- the pipelines are structural here
@@ -65,11 +64,10 @@
 	const syncToCursor = $derived(canSync ? (actions.syncForward as () => void) : null);
 	// a lone file has no project to hold the log, so the menus drop their Add comment entry
 	const canComment = $derived(!fileMode.current);
-	suggesting.current = windowLayout.current.suggesting === true;
 	function toggleSuggest(next: boolean) {
 		void commentsCtl.suggestions.settle();
 		suggesting.current = next;
-		updateLayout({ suggesting: next });
+		if (workspaceRoot.current) setSuggesting(workspaceRoot.current, next);
 	}
 	const beside = $derived(
 		new Set<string>(

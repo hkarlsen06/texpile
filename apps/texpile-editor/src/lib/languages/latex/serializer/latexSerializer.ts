@@ -174,8 +174,24 @@ function buildIncludegraphics(node: Node): string {
 	return `\\includegraphics[width=${DEFAULT_FIGURE_FRACTION}\\textwidth]{${src}}`;
 }
 
-export function dropParagraphEnd(text: string, last: Node | null): string {
-	return last?.type.name === 'paragraph' ? text.replace(/[ \t]*\\par$/, '') : text;
+type ParagraphOrig = { latex?: unknown; pre?: unknown; seq?: unknown } | null | undefined;
+
+function seqOf(node: Node | null): number | undefined {
+	const seq = (node?.attrs.orig as ParagraphOrig)?.seq;
+	return typeof seq === 'number' ? seq : undefined;
+}
+
+// a \par the source had stays while the same block follows, so typing never rewrites how a paragraph ends
+export function dropParagraphEnd(text: string, last: Node | null, nextSeq?: number): string {
+	if (last?.type.name !== 'paragraph') return text;
+	const orig = last.attrs.orig as ParagraphOrig;
+	const kept = typeof orig?.latex === 'string' && /\\par\s*$/.test(orig.latex) && nextSeq !== undefined && seqOf(last) === nextSeq - 1;
+	return kept ? text : text.replace(/[ \t]*\\par$/, '');
+}
+
+function paragraphGap(prev: Node, next: Node, contiguous: boolean, before: string): string | null {
+	const pre = (next.attrs.orig as ParagraphOrig)?.pre;
+	return contiguous && prev.type.name === 'paragraph' && typeof pre === 'string' && /\\par\s*$/.test(before.slice(-16)) ? pre : null;
 }
 
 function envBody(node: Node): string {
@@ -184,7 +200,10 @@ function envBody(node: Node): string {
 
 // doc assembly (verbatim `orig` substitution + per-block memo) is format-neutral and shared
 // with the markdown serializer; serializeNode hoists, so binding it here is safe.
-const assembly = createBlockAssembly((node, ctx) => serializeNode(node, ctx), { beforeBreak: dropParagraphEnd });
+const assembly = createBlockAssembly((node, ctx) => serializeNode(node, ctx), {
+	beforeBreak: (text, last, next) => dropParagraphEnd(text, last, seqOf(next)),
+	boundary: paragraphGap
+});
 
 function serializeDocChildrenDetailed(doc: Node): DocSerializeResult {
 	return assembly.serializeDocChildrenDetailed(doc);

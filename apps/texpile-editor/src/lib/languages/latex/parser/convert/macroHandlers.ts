@@ -91,6 +91,12 @@ export const macroHandlers: Record<string, MacroHandler> = {
 		const newCtx = { ...ctx, marks: [...ctx.marks, { type: 'textcolor', attrs: { color, model } }] };
 		return convertNodesToInline(content, newCtx);
 	},
+	// no color of its own: the document's \sethlcolor applies, and the serializer writes it bare again
+	hl: (macro, ctx) => {
+		if (!macro.args?.length) return null;
+		const newCtx = { ...ctx, marks: [...ctx.marks, { type: 'highlight', attrs: { color: null } }] };
+		return convertNodesToInline(getMacroFirstArg(macro), newCtx);
+	},
 	colorbox: (macro, ctx) => {
 		if (!macro.args || macro.args.length < 2) return null;
 		const mandatoryArgs = macro.args.filter((arg) => arg.openMark === '{');

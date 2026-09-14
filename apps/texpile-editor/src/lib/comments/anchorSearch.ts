@@ -37,6 +37,8 @@ export type ResolvedAnchor = {
 	 * than detached - a reader loses a glance to the warning and a whole thread to a detach.
 	 */
 	weak: boolean;
+	/** the stretch of the quote this hit stands for, when only a fragment of it could be placed */
+	covers?: { from: number; to: number };
 };
 
 /** matched context characters (both sides together) under which a relocated hit is weak. What a
@@ -90,32 +92,20 @@ export function searchQuote(
 	quote: string,
 	prefix: string,
 	suffix: string,
-	hint: number
+	hint: number,
+	copy?: () => number
 ): { from: number; to: number; context: number } | null {
 	if (quote.length < MIN_QUOTE) return null;
-	const hits = occurrences(text, quote);
-	if (hits.length === 0) return null;
-	// Too common to place. The scan stops at MAX_HITS, so scoring what it collected would rank the
-	// first 500 copies and ignore the rest - and a comment on `\begin` in a long document would land
-	// confidently near the top of the file, which is precisely the lie this module exists to avoid.
-	// Orphaned is the honest answer for a quote this repetitive.
-	if (hits.length >= MAX_HITS) return null;
+	const spots = quoteSpots(text, quote, prefix, suffix);
+	if (!spots) return null;
 	const a = { quote, prefix, suffix };
-	if (hits.length === 1)
-		return { from: hits[0], to: hits[0] + quote.length, context: contextScore(text, hits[0], hits[0] + quote.length, a) };
+	if (spots.length === 1)
+		return { from: spots[0], to: spots[0] + quote.length, context: contextScore(text, spots[0], spots[0] + quote.length, a) };
 
-	// repeated quote: the context decides. Ties go to whichever copy is nearest where the comment
-	// used to be, since edits move text a little more often than they move it a long way.
-	let best = hits[0];
-	let bestScore = -1;
-	for (const at of hits) {
-		const score = contextScore(text, at, at + quote.length, a);
-		if (score > bestScore || (score === bestScore && Math.abs(at - hint) < Math.abs(best - hint))) {
-			bestScore = score;
-			best = at;
-		}
-	}
-	return { from: best, to: best + quote.length, context: bestScore };
+	// repeated quote: the context decides
+	const tied = bestSpots(spots, (at) => contextScore(text, at, at + quote.length, a));
+	const best = pickCopy(spots, tied.at, hint, copy);
+	return { from: best, to: best + quote.length, context: tied.score };
 }
 
 export function searchContext(
@@ -123,28 +113,82 @@ export function searchContext(
 	quote: string,
 	prefix: string,
 	suffix: string,
-	hint: number
+	hint: number,
+	copy?: () => number
 ): { from: number; to: number; context: number } | null {
+	const spots = quoteSpots(text, quote, prefix, suffix);
+	if (!spots) return null;
+	const a = { prefix, suffix };
+	const tied = bestSpots(spots, (at) => contextScore(text, at, at + quote.length, a));
+	if (tied.score < Math.min(POINT_CONTEXT, prefix.length + suffix.length)) return null;
+	const best = pickCopy(spots, tied.at, hint, copy);
+	return { from: best, to: best + quote.length, context: tied.score };
+}
+
+/**
+ * Every place the quote occurs, in text order; the surroundings then rank them. Null when there
+ * are none, or too many: the scan stops at MAX_HITS, so scoring what it collected would rank the
+ * first 500 copies and ignore the rest - and a comment on `\begin` in a long document would land
+ * confidently near the top of the file, which is precisely the lie this module exists to avoid.
+ * Orphaned is the honest answer for a quote this repetitive.
+ */
+export function quoteSpots(text: string, quote: string, prefix: string, suffix: string): number[] | null {
+	if (quote.length >= MIN_QUOTE) {
+		const hits = occurrences(text, quote);
+		return hits.length && hits.length < MAX_HITS ? hits : null;
+	}
 	const after = quote + suffix;
 	const byAfter = after.length >= NEEDLE;
 	const needle = byAfter ? after.slice(0, NEEDLE) : prefix.slice(-NEEDLE);
 	if (!needle) return null;
 	const hits = occurrences(text, needle);
 	if (hits.length === 0 || hits.length >= MAX_HITS) return null;
-	const a = { prefix, suffix };
-	let best = -1;
+	const spots = hits.map((h) => (byAfter ? h : h + needle.length)).filter((at) => text.slice(at, at + quote.length) === quote);
+	return spots.length ? spots : null;
+}
+
+function bestSpots(spots: number[], score: (at: number) => number): { at: number[]; score: number } {
+	let best: number[] = [];
 	let bestScore = -1;
-	for (const h of hits) {
-		const at = byAfter ? h : h + needle.length;
-		if (text.slice(at, at + quote.length) !== quote) continue;
-		const score = contextScore(text, at, at + quote.length, a);
-		if (score > bestScore || (score === bestScore && Math.abs(at - hint) < Math.abs(best - hint))) {
-			bestScore = score;
-			best = at;
-		}
+	for (const at of spots) {
+		const s = score(at);
+		if (s > bestScore) {
+			bestScore = s;
+			best = [at];
+		} else if (s === bestScore) best.push(at);
 	}
-	if (best < 0 || bestScore < Math.min(POINT_CONTEXT, prefix.length + suffix.length)) return null;
-	return { from: best, to: best + quote.length, context: bestScore };
+	return { at: best, score: bestScore };
+}
+
+// copies the context cannot tell apart: the one the quote was counted as elsewhere, if that is one of
+// them, else whichever is nearest where the comment used to be, since edits move text a little more
+// often than they move it a long way
+function pickCopy(spots: number[], tied: number[], hint: number, copy?: () => number): number {
+	if (tied.length === 1) return tied[0];
+	const counted = copy && spots[copy()];
+	if (counted !== undefined && tied.includes(counted)) return counted;
+	return tied.reduce((best, at) => (Math.abs(at - hint) < Math.abs(best - hint) ? at : best));
+}
+
+/** the quote without the whitespace at its ends, which the rendered text may not keep beside it */
+export function withoutEdgeSpace(a: CommentAnchor): CommentAnchor {
+	const quote = a.quote.trim();
+	const lead = quote ? a.quote.indexOf(quote) : a.quote.length;
+	const tail = lead + quote.length;
+	return {
+		...a,
+		quote,
+		prefix: a.prefix + a.quote.slice(0, lead),
+		suffix: a.quote.slice(tail) + a.suffix,
+		start: a.start + lead,
+		end: a.start + tail
+	};
+}
+
+/** which occurrence of the quote sits at the anchor's own offset, when the text holds it more than once */
+export function copyIndex(text: string, a: CommentAnchor): number {
+	const spots = quoteSpots(text, a.quote, a.prefix, a.suffix);
+	return spots ? Math.max(0, spots.indexOf(a.start)) : 0;
 }
 
 /** how many characters of the remembered context still line up around a candidate */

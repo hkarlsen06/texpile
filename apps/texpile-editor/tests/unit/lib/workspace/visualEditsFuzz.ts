@@ -147,6 +147,29 @@ export function spotIn(doc: PMNode, b: Block, rnd: () => number): number | null 
 	return b.node.content.size === 0 ? b.pos + 1 : null;
 }
 
+/** what a reader sees, with drawn old words spliced in where their suggestion sits */
+export function renderedText(doc: PMNode, drawn: { from: number; to: number; words: string }[] = []): string {
+	let chars: { ch: string; pos: number; old?: boolean }[] = [];
+	doc.descendants((node, pos) => {
+		if (node.isTextblock) chars.push({ ch: '\n', pos: pos + 0.5 });
+		else if (node.isText) for (let i = 0; i < node.text!.length; i++) chars.push({ ch: node.text![i], pos: pos + i });
+		else if (node.isInline) chars.push({ ch: '#', pos });
+		return !node.isInline;
+	});
+	for (const r of [...drawn].sort((a, b) => b.from - a.from || b.to - a.to)) {
+		const kept = chars.filter((c) => c.old || !(c.pos >= r.from && c.pos < r.to));
+		const at = kept.findIndex((c) => c.pos >= r.from);
+		kept.splice(at < 0 ? kept.length : at, 0, ...[...r.words].map((ch) => ({ ch, pos: r.from, old: true })));
+		chars = kept;
+	}
+	return chars
+		.map((c) => c.ch)
+		.join('')
+		.replace(/[^\S\n]+/g, ' ')
+		.replace(/ *\n[\s]*/g, '\n')
+		.trim();
+}
+
 export type Edit = { label: string; tr: Transaction };
 
 export function randomEdit(state: EditorState, rnd: () => number): Edit | null {

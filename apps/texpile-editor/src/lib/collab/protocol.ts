@@ -23,6 +23,8 @@ export type HelloPayload = {
 	name: string;
 	color: string;
 	role: 'host' | 'guest';
+	version?: string;
+	oldest?: string;
 };
 
 export type BlobChunkPayload = {

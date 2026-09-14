@@ -9,11 +9,42 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 import { ROOT_CHANGELOG, parse } from './changelog.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_PKG = path.join(here, '../../../package.json');
 const APP_PKG = path.join(here, '../package.json');
+const COMPATIBILITY = 'apps/texpile-editor/src/lib/collab/compatibility.ts';
+const COLLAB_WIRE = ['apps/texpile-editor/src/lib/collab', 'apps/texpile-editor/src/lib/comments/log.ts'];
+
+function warnAboutCollabCompatibility(lastTag, next) {
+	const git = (...args) =>
+		execFileSync('git', args, { cwd: path.join(here, '../../..'), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+	const oldestIn = (source) => /COLLAB_OLDEST = '([^']+)'/.exec(source)?.[1];
+	let changed;
+	let before;
+	try {
+		changed = git('diff', '--name-only', lastTag, '--', ...COLLAB_WIRE)
+			.split('\n')
+			.filter((f) => f.endsWith('.ts'));
+	} catch {
+		console.warn(`\nwarning: could not compare collaboration code against ${lastTag}; check COLLAB_OLDEST in ${COMPATIBILITY} by hand`);
+		return;
+	}
+	try {
+		before = oldestIn(git('show', `${lastTag}:${COMPATIBILITY}`));
+	} catch {
+		before = undefined;
+	}
+	const now = oldestIn(fs.readFileSync(path.join(here, '../../..', COMPATIBILITY), 'utf8'));
+	if (!changed.length || (before !== undefined && before !== now)) return;
+	console.warn(`\nwarning: collaboration code changed since ${lastTag}, and COLLAB_OLDEST is still ${now}:`);
+	for (const f of changed) console.warn(`  ${f}`);
+	console.warn(
+		`If Texpile ${now} and ${next} could not share a session, set COLLAB_OLDEST in ${COMPATIBILITY} to ${next} before committing the release.`
+	);
+}
 
 const arg = process.argv[2];
 if (!arg) {
@@ -61,6 +92,7 @@ for (const pkg of [ROOT_PKG, APP_PKG]) {
 
 console.log(`released ${cur} -> ${next}`);
 console.log('  updated CHANGELOG.md, package.json (root + app)');
+warnAboutCollabCompatibility(`v${cur}`, next);
 console.log('\nnext:');
 console.log(`  git commit -am "release v${next}"`);
 console.log(`  git tag v${next} && git push --follow-tags   # release.yml builds + publishes`);

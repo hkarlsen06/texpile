@@ -60,7 +60,7 @@ const MARKS: Record<string, (attrs: Record<string, unknown>) => { open: string; 
 		open: `\\textcolor${typeof a.model === 'string' && a.model ? `[${a.model}]` : ''}{${esc(String(a.color ?? 'black'))}}{`,
 		close: '}'
 	}),
-	highlight: (a) => ({ open: `{\\sethlcolor{${esc(String(a.color ?? 'yellow'))}}\\hl{`, close: '}}' })
+	highlight: (a) => (a.color == null ? { open: '\\hl{', close: '}' } : { open: `{\\sethlcolor{${esc(String(a.color))}}\\hl{`, close: '}}' })
 };
 
 /** Wrap `result` in each mark's open/close pair, inner to outer. shared with non-text leaves

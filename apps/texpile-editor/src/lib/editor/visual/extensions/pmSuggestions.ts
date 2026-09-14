@@ -3,6 +3,7 @@ import { Plugin, PluginKey, TextSelection, type EditorState, type Transaction } 
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import type { PmSuggestionRange } from './pmSuggestionsPlace';
+import type { WordRun } from '$lib/comments/renderedWords';
 import { editMode, mapSuggestionEdges, noteTypedSide, typingSide } from '$lib/comments/activeSuggestions.svelte';
 import { clickedSide, sideAtOldWords, type CaretSide } from '$lib/comments/oldWordsCaret';
 import type { EditMode, TypingSide } from '$lib/comments/suggestCompare';
@@ -29,12 +30,25 @@ export function focusPmSuggestionMeta(id: string | null): PmSuggestionsMeta {
 	return { type: 'focus', id };
 }
 
-function oldWords(text: string, id: string, focused: boolean): HTMLElement {
+function oldWords(runs: WordRun[], id: string, focused: boolean): HTMLElement {
 	const span = document.createElement('span');
 	span.className = `pm-suggest-old${focused ? ' pm-suggest-focused' : ''}`;
 	span.dataset.comment = id;
-	span.textContent = text;
+	for (const run of runs) {
+		const node = run.tags.reduceRight<Node>((inner, tag) => {
+			const outer = document.createElement(tag);
+			// dressed like the link mark, without its target: these words are gone from the document
+			if (tag === 'a') outer.className = 'anchor';
+			outer.appendChild(inner);
+			return outer;
+		}, document.createTextNode(run.text));
+		span.appendChild(node);
+	}
 	return span;
+}
+
+function hasOldWords(r: PmSuggestionRange): boolean {
+	return !!r.restore && !r.partial && !r.format && r.old.length > 0;
 }
 
 function build(doc: PMNode, ranges: PmSuggestionRange[], focused: string | null, caret: CaretSide | null): DecorationSet {
@@ -51,18 +65,26 @@ function build(doc: PMNode, ranges: PmSuggestionRange[], focused: string | null,
 			});
 			continue;
 		}
-		if (r.restore) {
-			const { restore, id } = r;
+		if (hasOldWords(r)) {
+			const { old, id } = r;
 			const side = caret?.at === r.from ? caret.side : typingSide(r);
 			decos.push(
-				Decoration.widget(r.from, () => oldWords(restore, id, on), {
+				Decoration.widget(r.from, () => oldWords(old, id, on), {
 					side: side === 'after' ? -1 : 1,
 					ignoreSelection: true,
-					key: `old-${id}-${on}-${side}-${restore}`
+					key: `old-${id}-${on}-${side}-${JSON.stringify(old)}`
 				})
 			);
 		}
-		if (r.to > r.from) decos.push(Decoration.inline(r.from, r.to, { class: `pm-suggest-new${focus}`, 'data-comment': r.id }));
+		if (r.to > r.from) {
+			decos.push(Decoration.inline(r.from, r.to, { class: `pm-suggest-new${focus}`, 'data-comment': r.id }));
+			// an inline formula keeps its source as content, so an inline decoration lands on text nobody draws
+			doc.nodesBetween(r.from, r.to, (node, pos) => {
+				if (node.isInline && node.isAtom && !node.isLeaf)
+					decos.push(Decoration.node(pos, pos + node.nodeSize, { class: `pm-suggest-new${focus}` }));
+				return !node.isAtom;
+			});
+		}
 	}
 	return DecorationSet.create(doc, decos);
 }
@@ -72,7 +94,7 @@ export function pmSuggestionAt(state: EditorState, pos: number): PmSuggestionRan
 }
 
 function struckAt(state: EditorState, at: number): PmSuggestionRange[] {
-	return (pmSuggestionsKey.getState(state)?.ranges ?? []).filter((r) => r.restore && !r.partial && r.from === at);
+	return (pmSuggestionsKey.getState(state)?.ranges ?? []).filter((r) => hasOldWords(r) && r.from === at);
 }
 
 function setCaret(view: EditorView, caret: CaretSide, tr: Transaction = view.state.tr): void {
@@ -128,7 +150,7 @@ export function pmSuggestions(): Plugin<PmSuggestionsState> {
 					return { ...value, caret, deco: build(tr.doc, value.ranges, value.focused, caret), mode };
 				}
 				const ranges = value.ranges.flatMap((r) => {
-					const side = typed && r.restore && !r.partial && r.from === typed.at ? typed.side : undefined;
+					const side = typed && hasOldWords(r) && r.from === typed.at ? typed.side : undefined;
 					if (side) noteTypedSide(r.id, side);
 					return mapSuggestionEdges(r, (pos, assoc) => tr.mapping.map(pos, assoc), side);
 				});

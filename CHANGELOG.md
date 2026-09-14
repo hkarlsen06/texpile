@@ -6,7 +6,7 @@ Release notes for Texpile Desktop. Add notes under `## [Unreleased]` as you work
 ## [Unreleased]
 
 - feat: a Suggesting mode, where edits go into the file as suggestions that someone accepts or rejects
-- fix: editing a paragraph in the visual editor no longer adds `\par` to the file
+- fix: editing a paragraph in the visual editor no longer adds or removes `\par` in the file
 - feat: a Collaboration tab in Preferences sets the name and color other people see in a shared session
 - feat: review comments are signed with that display name, and fall back to the git user name
 - feat: review comments show beside the text they are about

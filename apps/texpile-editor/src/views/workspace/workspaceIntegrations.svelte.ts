@@ -36,8 +36,10 @@ import {
 	isDirty,
 	mainFile,
 	setLastFile,
-	effectiveCompileFormat
+	effectiveCompileFormat,
+	savedSuggesting
 } from '$lib/workspace/workspaceStore';
+import { suggesting } from '$lib/comments/activeSuggestions.svelte';
 import { settings } from '$lib/settings';
 import type { WorkspaceProvider } from '$lib/workspace/workspaceProvider';
 import type { EditSession } from '$lib/collab/editSession';
@@ -179,11 +181,12 @@ export class WorkspaceIntegrations {
 		// a new folder starts blank: the previous folder's log, PDF and macros are meaningless here
 		// (the switch now flips the root before its scan, so these would otherwise linger on screen)
 		$effect(() => {
-			void workspaceRoot.current; // dependency: re-run per folder
+			const root = workspaceRoot.current; // dependency: re-run per folder
 			void fileMode.current; // and when a lone file takes over a folder already open in this window
 			// untracked: resolveNow reads mainFile/compileConfig, and tracking those would replay
 			// this whole reset (blank PDF, dock steal) on a mere main-file or live-mode change
 			untrack(() => {
+				suggesting.current = !!root && savedSuggesting(root);
 				compileLog.current = null;
 				pdfStore.current = null; // initProject's loadExistingPdf refills it for the new folder
 				wsdoc.projectMacros = '';
