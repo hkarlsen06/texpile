@@ -89,8 +89,8 @@ const NODES: Record<string, NodeHandler> = {
 	heading(node) {
 		const level = Math.min(6, Math.max(1, Number(node.attrs.level ?? 1)));
 		const label = node.attrs.label ? ` <${String(node.attrs.label)}>` : '';
-		const inner = renderInline(node, false);
-		if (node.attrs.numbered === false) return `#heading(level: ${level}, numbering: none)[${inner}]${label}\n\n`;
+		if (node.attrs.numbered === false) return `#heading(level: ${level}, numbering: none)[${renderInline(node, false)}]${label}\n\n`;
+		const inner = renderInline(node, false, '', true);
 		// an empty heading is still a heading (it steps the counter); `=` alone is one
 		return `${'='.repeat(level)}${inner ? ' ' + inner : ''}${label}\n\n`;
 	},
@@ -179,7 +179,7 @@ const NODES: Record<string, NodeHandler> = {
 		const title = node.childCount > 0 && node.child(0).type.name === 'term_title' ? node.child(0) : null;
 		const desc = renderBlocks(node, title ? 1 : 0);
 		// the first unescaped colon ends the term, so one in the title is escaped
-		return `/ ${title ? renderInline(title, false, ':') : ''}: ${indentAfterFirstLine(desc, '  ')}\n\n`;
+		return `/ ${title ? renderInline(title, false, ':', true) : ''}: ${indentAfterFirstLine(desc, '  ')}\n\n`;
 	},
 
 	list(node) {

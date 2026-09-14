@@ -142,8 +142,8 @@ export const macroHandlers: Record<string, MacroHandler> = {
 	'{': (_m, ctx) => textNodes('{', ctx.marks.length > 0 ? ctx.marks : null),
 	'}': (_m, ctx) => textNodes('}', ctx.marks.length > 0 ? ctx.marks : null),
 	textbackslash: (_m, ctx) => textNodes('\\', ctx.marks.length > 0 ? ctx.marks : null),
-	// no '~' entry: a tie is a STRING node in unified-latex, never a macro, so one here could never
-	// fire. it is converted with the other ligatures, in latexLigaturesToUnicode.
+	textasciitilde: (_m, ctx) => textNodes('~', ctx.marks.length > 0 ? ctx.marks : null),
+	textasciicircum: (_m, ctx) => textNodes('^', ctx.marks.length > 0 ? ctx.marks : null),
 	ldots: (_m, ctx) => textNodes('…', ctx.marks.length > 0 ? ctx.marks : null),
 	dots: (_m, ctx) => textNodes('…', ctx.marks.length > 0 ? ctx.marks : null),
 	textendash: (_m, ctx) => textNodes('–', ctx.marks.length > 0 ? ctx.marks : null),

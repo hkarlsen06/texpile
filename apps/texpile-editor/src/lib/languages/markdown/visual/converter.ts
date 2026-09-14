@@ -74,6 +74,10 @@ function convertInline(children: Token[], marks: PmMark[]): PmNode[] {
 				out.push(withMarks(buildNode('inline_math', null, textNodes(tok.content)), marks));
 				break;
 			case 'html_inline':
+				if (/^<br\s*\/?>$/i.test(tok.content)) {
+					out.push(buildNode('hard_break', { lineBreak: true, command: 'br' }));
+					break;
+				}
 				// chip per tag (not per element): the prose between <span> and </span> stays
 				// editable text instead of getting swallowed into one opaque chip
 				out.push(withMarks(buildNode('inline_latex', { lang: 'html' }, textNodes(tok.content)), marks));

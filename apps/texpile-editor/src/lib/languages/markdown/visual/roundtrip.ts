@@ -6,6 +6,7 @@
 import { markdownToProseMirror } from './converter';
 import { serializeToMarkdownDetailed, serializeMdNode } from './serializer';
 import { fillOrigNorms } from '$lib/serializer/blockAssembly';
+import { padTables } from '$lib/editor/visual/padTables';
 import type { Node } from 'prosemirror-model';
 import type { ParsedLatexFile, ParsePhase } from '$lib/workspace/latexRoundtrip';
 
@@ -40,7 +41,7 @@ export function parseMarkdownFile(markdown: string, _projectMacros = '', onPhase
 	const body = markdown.slice(preamble.length);
 	const { doc: parsedDoc } = markdownToProseMirror(body);
 	onPhase?.('finalizing');
-	const doc = fillOrigNorms(parsedDoc, serializeMdNode);
+	const doc = fillOrigNorms(padTables(parsedDoc), serializeMdNode);
 
 	if (import.meta.env.DEV) {
 		try {

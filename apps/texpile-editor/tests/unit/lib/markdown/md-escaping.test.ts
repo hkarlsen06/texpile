@@ -47,7 +47,7 @@ describe('prose escaping', () => {
 		const br = mdSchema.nodes.hard_break.create({ lineBreak: true });
 		expect(serializeToMarkdown(docOf(para('a', br)))).toBe('a');
 		const heading = mdSchema.nodes.heading.create({ level: 1 }, [mdSchema.text('a'), br, mdSchema.text('b')]);
-		expect(serializeToMarkdown(docOf(heading))).toBe('# a b');
+		expect(serializeToMarkdown(docOf(heading))).toBe('# a<br>b');
 	});
 
 	// M21

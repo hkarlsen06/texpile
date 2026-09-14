@@ -2,11 +2,10 @@
 // block-patches the live doc. Serialize->parse is lossy at a block's in-progress tail in every
 // dialect - trailing whitespace is dropped, a whitespace-only paragraph disappears - so without
 // protectCaretBlock the patch clobbers the block being typed in. These tests mirror the real
-// flow: parse, normalize (fixTables), type, serialize, re-parse, guard, patch.
+// flow: parse, type, serialize, re-parse, guard, patch.
 import { describe, it, expect } from 'vitest';
 import { EditorState } from 'prosemirror-state';
 import type { Node as PMNode } from 'prosemirror-model';
-import { fixTables } from 'prosemirror-tables';
 import { parseTypstFile, serializeTypstFile } from '$lib/languages/typst/visual/roundtrip';
 import { parseMarkdownFile, serializeMarkdownFile } from '$lib/languages/markdown/visual/roundtrip';
 import { parseLatexFile, serializeLatexFile } from '$lib/workspace/latexRoundtrip';
@@ -30,14 +29,6 @@ const lanes: Lane[] = [
 	}
 ];
 
-// VisualCollab.normalizeParsedDoc, replicated: the mount path's normalization
-function normalize(doc: PMNode): PMNode {
-	let s = EditorState.create({ schema: doc.type.schema, doc });
-	const fix = fixTables(s);
-	if (fix) s = s.apply(fix);
-	return s.doc;
-}
-
 function blockTexts(doc: PMNode): string[] {
 	const out: string[] = [];
 	for (let i = 0; i < doc.childCount; i++) out.push(doc.child(i).textContent);
@@ -48,7 +39,7 @@ function blockTexts(doc: PMNode): string[] {
  *  paragraph stays tolerated - empty paragraphs serialize to nothing, so either side of the
  *  patch may legitimately hold one more than the other). */
 function assertNothingLost(live: PMNode, head: number, parsed: { doc: PMNode }, label: string) {
-	const guarded = protectCaretBlock(live, normalize(parsed.doc), head);
+	const guarded = protectCaretBlock(live, parsed.doc, head);
 	const patch = computeBlockPatch(live, guarded);
 	let result = live;
 	if (patch) {
@@ -69,7 +60,7 @@ for (const lane of lanes) {
 		for (const probe of probes) {
 			it(`typing ${JSON.stringify(probe)} at the end of a paragraph survives the re-parse`, () => {
 				const parsed = lane.parse(lane.src);
-				const live0 = normalize(parsed.doc);
+				const live0 = parsed.doc;
 				let s = EditorState.create({ schema: live0.type.schema, doc: live0 });
 				const head = 1 + live0.child(0).content.size;
 				s = s.apply(s.tr.insertText(probe, head));
@@ -80,7 +71,7 @@ for (const lane of lanes) {
 
 			it(`typing ${JSON.stringify(probe)} in a just-opened paragraph at doc end survives the re-parse`, () => {
 				const parsed = lane.parse(lane.src);
-				const live0 = normalize(parsed.doc);
+				const live0 = parsed.doc;
 				let s = EditorState.create({ schema: live0.type.schema, doc: live0 });
 				// Enter at the end of the document opens a fresh paragraph; type into it
 				const at = live0.content.size;
@@ -94,7 +85,7 @@ for (const lane of lanes) {
 
 		it('a just-opened empty paragraph mid-doc survives the re-parse', () => {
 			const parsed = lane.parse(lane.src);
-			const live0 = normalize(parsed.doc);
+			const live0 = parsed.doc;
 			let s = EditorState.create({ schema: live0.type.schema, doc: live0 });
 			const para = live0.type.schema.nodes.paragraph.create();
 			const at = live0.child(0).nodeSize; // between the first and second block
@@ -106,10 +97,10 @@ for (const lane of lanes) {
 
 		it('a genuine remote edit in the caret block still applies', () => {
 			const parsed = lane.parse(lane.src);
-			const live = normalize(parsed.doc);
+			const live = parsed.doc;
 			// remote rewrote the first paragraph; caret sits inside it
 			const remote = lane.parse(lane.src.replace('Hello world.', 'Hello REMOTE world.'));
-			const guarded = protectCaretBlock(live, normalize(remote.doc), 3);
+			const guarded = protectCaretBlock(live, remote.doc, 3);
 			const patch = computeBlockPatch(live, guarded);
 			expect(patch).not.toBeNull();
 			expect(patch!.nodes.some((n) => n.textContent.includes('REMOTE'))).toBe(true);

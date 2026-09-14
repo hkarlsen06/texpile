@@ -341,7 +341,7 @@ export function latexToProseMirror(latex: string, options: ConversionOptions = {
 	const cap = capture.last;
 	capture.last = null;
 	let docAttrs: Record<string, unknown> | null = null;
-	if (cap && cap.prevEnd < cap.source.length) {
+	if (cap && cap.prevEnd <= cap.source.length) {
 		docAttrs = { docTail: { text: cap.source.slice(cap.prevEnd, cap.source.length), afterSeq: cap.seq - 1 } };
 	}
 	const doc = mergeAdjacentRawBlocks(buildNode('doc', docAttrs, blocks.length > 0 ? blocks : [buildNode('paragraph')]));

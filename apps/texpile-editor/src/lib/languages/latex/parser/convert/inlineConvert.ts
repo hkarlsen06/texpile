@@ -11,19 +11,13 @@ import { containsTabular } from './tableConvert';
 import { mathBodyRawSource, nodeRawSource, capture } from './origCapture';
 
 export function latexLigaturesToUnicode(text: string): string {
-	return (
-		text
-			.replace(/---/g, '—') // em-dash
-			.replace(/--/g, '–') // en-dash
-			.replace(/``/g, '“')
-			.replace(/''/g, '”')
-			.replace(/`/g, '‘')
-			.replace(/'/g, '’')
-			// a bare ~ means exactly one thing in LaTeX source, so this needs no context test. the
-			// macroHandlers entry keyed '~' never fired: unified-latex emits a tie as a STRING node,
-			// never a macro, which is why ties reached the editor as visible tildes
-			.replace(/~/g, ' ')
-	);
+	return text
+		.replace(/---/g, '—') // em-dash
+		.replace(/--/g, '–') // en-dash
+		.replace(/``/g, '“')
+		.replace(/''/g, '”')
+		.replace(/`/g, '‘')
+		.replace(/'/g, '’');
 }
 
 /** Apply ligatures to ordinary prose text nodes (not \texttt/code, where -- and `` are literal). */
@@ -77,7 +71,8 @@ export function convertNodeToInline(node: Node, ctx: ConversionContext): PmNode[
 	switch (node.type) {
 		case 'string':
 			if (node.content) {
-				return textNodes(node.content, ctx.marks.length > 0 ? ctx.marks : null);
+				const code = ctx.marks.some((m) => m.type === 'code');
+				return textNodes(code ? node.content : node.content.replace(/~/g, ' '), ctx.marks.length > 0 ? ctx.marks : null);
 			}
 			return null;
 		case 'whitespace':
@@ -185,9 +180,12 @@ export function isWhitespaceTextNode(n?: PmNode): boolean {
 // merged text re-parses to the same fragments, which re-merge identically.
 export function mergeAdjacentInlineLatex(nodes: PmNode[]): PmNode[] {
 	const out: PmNode[] = [];
+	function mergeable(n?: PmNode) {
+		return isInlineLatexNode(n) && !n!.textContent.startsWith('%');
+	}
 	let i = 0;
 	while (i < nodes.length) {
-		if (!isInlineLatexNode(nodes[i])) {
+		if (!mergeable(nodes[i])) {
 			out.push(nodes[i]);
 			i++;
 			continue;
@@ -196,11 +194,11 @@ export function mergeAdjacentInlineLatex(nodes: PmNode[]): PmNode[] {
 		let j = i + 1;
 		let merged = false;
 		while (j < nodes.length) {
-			if (isInlineLatexNode(nodes[j])) {
+			if (mergeable(nodes[j])) {
 				raw += nodes[j].textContent;
 				j++;
 				merged = true;
-			} else if (isWhitespaceTextNode(nodes[j]) && isInlineLatexNode(nodes[j + 1])) {
+			} else if (isWhitespaceTextNode(nodes[j]) && mergeable(nodes[j + 1])) {
 				raw += (nodes[j].text ?? '') + nodes[j + 1].textContent;
 				j += 2;
 				merged = true;

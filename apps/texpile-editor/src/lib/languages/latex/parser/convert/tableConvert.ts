@@ -110,13 +110,7 @@ function extractTableComponents(content: Node[], ctx: ConversionContext) {
 	}
 
 	// preBody is plumbing, not prose the user edits: round-trip raw (byte-sliced when possible)
-	const preBody =
-		preNodes.length > 0
-			? preNodes
-					.map((n) => nodeRawSource(n) ?? printRaw(n))
-					.join(' ')
-					.trim() || null
-			: null;
+	const preBody = preNodes.length > 0 ? joinRaw(preNodes) : null;
 
 	// trim whitespace-only edges before deciding notes exist, or the near-universal newline
 	// between \end{tabular} and \end{table} earns every table a spurious empty {\small } wrapper
@@ -131,12 +125,11 @@ function extractTableComponents(content: Node[], ctx: ConversionContext) {
 	// STARTS the post-tabular content; real notes after a leading switch keep the \small treatment.
 	let postBody: string | null = null;
 	const firstNote = noteNodes.find((n) => n.type !== 'whitespace' && n.type !== 'parbreak');
-	if (leadsWithSkip(firstNote)) {
-		postBody =
-			noteNodes
-				.map((n) => nodeRawSource(n) ?? printRaw(n))
-				.join(' ')
-				.trim() || null;
+	if (
+		leadsWithSkip(firstNote) ||
+		(firstNote && noteNodes.every((n) => n.type === 'whitespace' || n.type === 'parbreak' || n.type === 'comment'))
+	) {
+		postBody = joinRaw(noteNodes);
 		noteNodes = [];
 	}
 
@@ -154,6 +147,16 @@ function extractTableComponents(content: Node[], ctx: ConversionContext) {
 }
 
 /** a bare \vskip, a scoped switch, or a group led by a skip: setup after the tabular, not notes */
+function joinRaw(nodes: Node[]): string | null {
+	let out = '';
+	for (const n of nodes) {
+		const raw = (nodeRawSource(n) ?? printRaw(n)).replace(/\n$/, '');
+		if (out) out += /(^|[^\\])(\\\\)*%[^\n]*$/.test(out) ? '\n' : ' ';
+		out += raw;
+	}
+	return out.trim() || null;
+}
+
 function leadsWithSkip(n: Node | undefined): boolean {
 	if (!n) return false;
 	if (n.type === 'macro') {
@@ -406,17 +409,27 @@ export function unwrapSpans(content: Node[]): { colspan: number; rowspan: number
 
 export function createTableCell(content: Node[]): PmNode {
 	const { colspan, rowspan, inner, mcAlign } = unwrapSpans(content);
-	// trim blank AST nodes BEFORE conversion, not the merged text string after: a macro that
-	// produces literal spaces as real content (\quad row-label indents) is indistinguishable from
-	// incidental whitespace once flattened, and a string-level trim silently eats it.
-	let start = 0;
-	let end = inner.length;
-	while (start < end && isBlankCellNode(inner[start])) start++;
-	while (end > start && isBlankCellNode(inner[end - 1])) end--;
-	const ctx = createDefaultContext();
-	const inlineContent = convertNodesToInline(inner.slice(start, end), ctx);
-
-	return buildNode('table_cell', { colspan, rowspan, colwidth: null, mcAlign }, [buildNode('paragraph', null, inlineContent)]);
+	const pieces: Node[][] = [[]];
+	for (const n of inner) {
+		if (isMacroNamed(n, 'par')) pieces.push([]);
+		else pieces[pieces.length - 1].push(n);
+	}
+	const paragraphs: PmNode[] = [];
+	for (const piece of pieces) {
+		// trim blank AST nodes BEFORE conversion, not the merged text string after: a macro that
+		// produces literal spaces as real content (\quad row-label indents) is indistinguishable from
+		// incidental whitespace once flattened, and a string-level trim silently eats it.
+		let start = 0;
+		let end = piece.length;
+		while (start < end && isBlankCellNode(piece[start])) start++;
+		while (end > start && isBlankCellNode(piece[end - 1])) end--;
+		if (start === end && paragraphs.length > 0) continue;
+		const inlineContent = convertNodesToInline(piece.slice(start, end), createDefaultContext());
+		if (inlineContent.length === 0 && paragraphs.length > 0) continue;
+		paragraphs.push(buildNode('paragraph', null, inlineContent));
+	}
+	const kept = paragraphs.length > 1 && paragraphs[0].content.size === 0 ? paragraphs.slice(1) : paragraphs;
+	return buildNode('table_cell', { colspan, rowspan, colwidth: null, mcAlign }, kept);
 }
 
 // drop the placeholder cells LaTeX writes UNDER a \multirow so the prosemirror-tables covered-

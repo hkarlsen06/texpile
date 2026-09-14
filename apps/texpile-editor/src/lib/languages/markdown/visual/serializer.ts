@@ -5,239 +5,12 @@
 // node per item), so list/emphasis logic lives here; escaping follows prosemirror-markdown's
 // rules. Convention: every block handler ends with its own separation ('\n\n', lists '\n'
 // mid-run), so plain concatenation of parts is a valid document.
-import type { Node, Mark } from 'prosemirror-model';
+import type { Node } from 'prosemirror-model';
 import { createBlockAssembly, type DocSerializeResult } from '$lib/serializer/blockAssembly';
 import type { Ctx } from '$lib/serializer/types';
-import { escMd, codeSpan, formatLinkDest, formatLinkTitle, formatImage } from './inlineSyntax';
+import { escMd } from './inlineSyntax';
+import { imageMarkdown, renderInline } from './markdownInline';
 import { listFamily, listMarker, sameList } from './listAttrs';
-
-type MarkDelims = {
-	open: string;
-	close: string;
-	/** emphasis family: delimiters can't touch whitespace, boundary ws moves outside. */
-	expel?: boolean;
-};
-
-function markDelims(mark: Mark, inTableCell: boolean): MarkDelims | null {
-	const a = mark.attrs;
-	switch (mark.type.name) {
-		case 'link': {
-			const title = formatLinkTitle(a.title == null ? '' : String(a.title), inTableCell);
-			return { open: '[', close: `](${formatLinkDest(String(a.href ?? ''), inTableCell)}${title})` };
-		}
-		case 'strong':
-			return { open: '**', close: '**', expel: true };
-		case 'em':
-			return { open: '*', close: '*', expel: true };
-		case 's':
-			return { open: '~~', close: '~~', expel: true };
-		case 'u':
-			return { open: '<u>', close: '</u>' };
-		case 'sup':
-			return { open: '<sup>', close: '</sup>' };
-		case 'sub':
-			return { open: '<sub>', close: '</sub>' };
-		case 'textcolor':
-			return { open: `<span style="color: ${String(a.color ?? 'black')}">`, close: '</span>' };
-		case 'highlight':
-			return { open: '<mark>', close: '</mark>' };
-		default:
-			return null;
-	}
-}
-
-// canonical nesting order (outermost first); code is innermost and handled inside run content
-const MARK_ORDER = ['link', 'strong', 'em', 's', 'u', 'sup', 'sub', 'textcolor', 'highlight'];
-
-function orderedMarks(marks: readonly Mark[]): Mark[] {
-	return marks
-		.filter((m) => m.type.name !== 'code')
-		.sort((a, b) => {
-			const ia = MARK_ORDER.indexOf(a.type.name);
-			const ib = MARK_ORDER.indexOf(b.type.name);
-			return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
-		});
-}
-
-/** marks already open stay open while the next run still carries them (`*em **both** em*`) */
-function alignMarks(active: Mark[], marks: Mark[]): Mark[] {
-	const kept: Mark[] = [];
-	for (const m of active) {
-		if (!marks.some((x) => x.eq(m))) break;
-		kept.push(m);
-	}
-	return [...kept, ...marks.filter((m) => !kept.some((k) => k.eq(m)))];
-}
-
-type InlineRun = {
-	content: string;
-	marks: Mark[];
-	/** plain prose (whitespace and punctuation expelling applies); false for chips and breaks */
-	isText: boolean;
-};
-
-type InlineOptions = {
-	/** the first run may start a source line: block markers get escaped, indentation dropped */
-	startOfLine?: boolean;
-	inTableCell?: boolean;
-	/** headings and titles cannot hold a line break; one becomes a space */
-	singleLine?: boolean;
-};
-
-const HARD_BREAK = '\\\n';
-
-function cellSafe(s: string): string {
-	return s.replace(/\n/g, ' ').replace(/\|/g, '\\|');
-}
-
-/** a bare autolink whose visible text IS the href, with no title to carry, renders as <href> */
-function bareLinkRun(node: Node): string | null {
-	const link = node.marks.find((m) => m.type.name === 'link');
-	if (!link?.attrs?.bare || link.attrs.title) return null;
-	const href = String(link.attrs.href ?? '');
-	return node.isText && node.text === href && !/[\s<>]/.test(href) ? `<${href}>` : null;
-}
-
-function inlineMath(node: Node, inTableCell: boolean): string {
-	// edge whitespace and a bare `$` inside would both stop the parser reading it back as math
-	const tex = node.textContent
-		.trim()
-		.replace(/\n{2,}/g, '\n')
-		.replace(/(^|[^\\])\$/g, '$1\\$');
-	if (!tex) return '';
-	return inTableCell ? cellSafe(`$${tex}$`) : `$${tex}$`;
-}
-
-function imageMarkdown(node: Node, inTableCell = false): string {
-	// the caption text is the title; a hidden caption still keeps it in the file
-	const caption = renderInline(node, { singleLine: true, inTableCell }).trim();
-	return formatImage(String(node.attrs.alt ?? ''), String(node.attrs.src ?? ''), caption, inTableCell);
-}
-
-function buildRuns(parent: Node, opts: InlineOptions): InlineRun[] {
-	const inTableCell = opts.inTableCell ?? false;
-	const singleLine = opts.singleLine ?? false;
-	const runs: InlineRun[] = [];
-	let atLineStart = opts.startOfLine ?? false;
-	parent.forEach((node) => {
-		if (node.isText) {
-			const text = node.text ?? '';
-			const bare = bareLinkRun(node);
-			if (bare != null) {
-				runs.push({ content: bare, marks: [], isText: false });
-			} else if (node.marks.some((m) => m.type.name === 'code')) {
-				runs.push({ content: codeSpan(text, inTableCell), marks: orderedMarks(node.marks), isText: false });
-			} else {
-				runs.push({ content: escMd(text, atLineStart, inTableCell), marks: orderedMarks(node.marks), isText: true });
-			}
-			atLineStart = false;
-			return;
-		}
-		switch (node.type.name) {
-			case 'hard_break':
-				if (node.attrs?.lineBreak === false) return; // legacy no-op break
-				runs.push({ content: singleLine ? ' ' : inTableCell ? '<br>' : HARD_BREAK, marks: [], isText: false });
-				atLineStart = !singleLine && !inTableCell;
-				return;
-			case 'inline_math':
-				runs.push({ content: inlineMath(node, inTableCell), marks: orderedMarks(node.marks), isText: false });
-				break;
-			case 'inline_latex':
-				runs.push({ content: inTableCell ? cellSafe(node.textContent) : node.textContent, marks: orderedMarks(node.marks), isText: false });
-				break;
-			case 'citation':
-				// pandoc-style passthrough; only reachable by pasting from a .tex doc
-				runs.push({ content: node.textContent ? `[@${node.textContent}]` : '', marks: [], isText: false });
-				break;
-			case 'ref':
-				runs.push({ content: node.textContent, marks: [], isText: false });
-				break;
-			case 'image':
-				runs.push({ content: imageMarkdown(node, inTableCell), marks: [], isText: false });
-				break;
-			default:
-				runs.push({ content: node.isLeaf ? '' : renderInline(node, { inTableCell }), marks: orderedMarks(node.marks), isText: false });
-		}
-		atLineStart = false;
-	});
-	const kept = runs.filter((r) => r.content !== '').map((r) => (singleLine ? { ...r, content: r.content.replace(/\n/g, ' ') } : r));
-	// a break with nothing after it is not one the parser would keep
-	while (kept.length > 0 && kept[kept.length - 1].content === HARD_BREAK) kept.pop();
-	return kept;
-}
-
-const WORD_CHAR = /[\p{L}\p{N}]/u;
-const PUNCT_TAIL = /(?:\\?[\p{P}\p{S}])+$/u;
-const PUNCT_HEAD = /^(?:\\?[\p{P}\p{S}])+/u;
-
-/** minimal open/close mark transitions over same-mark runs. emphasis delimiters may not touch
- *  whitespace, nor sit between punctuation and a letter (CommonMark's flanking rule), so
- *  boundary whitespace and punctuation move outside them. */
-export function renderInline(parent: Node, opts: InlineOptions = {}): string {
-	const inTableCell = opts.inTableCell ?? false;
-	const runs = buildRuns(parent, opts);
-	let out = '';
-	let active: Mark[] = [];
-	// where the last run's content starts in `out` when it was prose, else -1
-	let textStart = -1;
-
-	function expels(marks: Mark[]): boolean {
-		return marks.some((m) => markDelims(m, inTableCell)?.expel);
-	}
-
-	function emitCloses(closing: Mark[], next: string) {
-		let stolen = '';
-		if (expels(closing)) {
-			const ws = out.match(/\s+$/);
-			if (ws && ws[0].length < out.length) {
-				out = out.slice(0, -ws[0].length);
-				stolen = ws[0];
-			} else if (textStart >= 0 && WORD_CHAR.test(next.charAt(0))) {
-				const tail = out.slice(textStart).match(PUNCT_TAIL);
-				if (tail && tail[0].length < out.length - textStart) {
-					out = out.slice(0, -tail[0].length);
-					stolen = tail[0];
-				}
-			}
-		}
-		for (const m of closing) {
-			const d = markDelims(m, inTableCell);
-			if (d) out += d.close;
-		}
-		out += stolen;
-	}
-
-	for (const run of runs) {
-		const marks = alignMarks(active, run.marks);
-		let keep = 0;
-		while (keep < active.length && keep < marks.length && active[keep].eq(marks[keep])) keep++;
-		emitCloses(active.slice(keep).reverse(), run.content);
-		const opening = marks.slice(keep);
-		let content = run.content;
-		if (run.isText && expels(opening)) {
-			const lead = content.match(/^\s+/);
-			if (lead && lead[0].length < content.length) {
-				out += lead[0];
-				content = content.slice(lead[0].length);
-			} else if (WORD_CHAR.test(out.charAt(out.length - 1))) {
-				const head = content.match(PUNCT_HEAD);
-				if (head && head[0].length < content.length) {
-					out += head[0];
-					content = content.slice(head[0].length);
-				}
-			}
-		}
-		for (const m of opening) {
-			const d = markDelims(m, inTableCell);
-			if (d) out += d.open;
-		}
-		textStart = run.isText ? out.length : -1;
-		out += content;
-		active = marks;
-	}
-	emitCloses([...active].reverse(), '');
-	return out;
-}
 
 function indentAfterFirstLine(text: string, indent: string): string {
 	return text
@@ -280,7 +53,12 @@ function tableRows(node: Node): { header: string[] | null; body: string[][]; col
 			if (cell.type.name !== 'table_header') isHeader = false;
 			const parts: string[] = [];
 			cell.forEach((p) => parts.push(renderInline(p, { inTableCell: true })));
-			cells.push(parts.join(' ').trim());
+			cells.push(
+				parts
+					.map((p) => p.trim())
+					.filter(Boolean)
+					.join('<br>')
+			);
 			// a colspan'd cell still occupies its extra columns in the pipe grid
 			for (let s = 1; s < Number(cell.attrs.colspan ?? 1); s++) cells.push('');
 		});
@@ -358,7 +136,9 @@ const NODES: Record<string, NodeHandler> = {
 		if (node.childCount === 0) return '';
 		const level = Math.min(6, Math.max(1, Number(node.attrs.level ?? 1)));
 		// a trailing `#` run after a space is a closing sequence to the parser
-		const text = renderInline(node, { singleLine: true }).replace(/(^|\s)(#+)$/, '$1\\$2');
+		const text = renderInline(node, { singleLine: true })
+			.replace(/\s+$/, '')
+			.replace(/(^|\s)(#+)$/, '$1\\$2');
 		return `${'#'.repeat(level)} ${text}\n\n`;
 	},
 

@@ -24,6 +24,10 @@ export function escLineStart(str: string): string {
 	return str.replace(/^(\s*)([-+/=])/, '$1\\$2').replace(/^(\s*)(\d+)\./, '$1$2\\.');
 }
 
+function wordy(ch: string): boolean {
+	return /[\p{L}\p{N}]/u.test(ch) && !/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(ch);
+}
+
 /**
  * Backslash-escape Typst markup structure. `_` stays literal intraword (Typst emphasis only
  * opens at word boundaries, so snake_case is safe); `@` only starts a ref before a word char;
@@ -39,12 +43,16 @@ export function escTypst(str: string, startOfLine = false, extra = ''): string {
 			continue;
 		}
 		if (ch === '_') {
-			const intraword = i > 0 && i + 1 < str.length && /\w/.test(str[i - 1]) && /\w/.test(str[i + 1]);
+			const intraword = i > 0 && i + 1 < str.length && wordy(str[i - 1]) && wordy(str[i + 1]);
 			out += intraword ? ch : '\\_';
 			continue;
 		}
-		if (ch === '@' && /[\p{L}\p{N}_]/u.test(str[i + 1] ?? '')) {
+		if (ch === '@' && /[\p{L}\p{N}\p{M}\p{Pc}-]/u.test(str[i + 1] ?? '')) {
 			out += '\\@';
+			continue;
+		}
+		if (ch === '-' && str[i + 1] === '?') {
+			out += '\\-';
 			continue;
 		}
 		if (ch === '/' && str[i + 1] === '/') {
@@ -156,7 +164,7 @@ type InlineRun = {
 	kind: 'text' | 'comment' | 'ref' | 'break' | 'other';
 };
 
-function buildRuns(parent: Node, startOfLine: boolean, extra: string): InlineRun[] {
+function buildRuns(parent: Node, startOfLine: boolean, extra: string, singleLine: boolean): InlineRun[] {
 	const runs: InlineRun[] = [];
 	let atLineStart = startOfLine;
 	parent.forEach((node) => {
@@ -168,8 +176,9 @@ function buildRuns(parent: Node, startOfLine: boolean, extra: string): InlineRun
 				// a space typed after a hard break stays on the break's line (typst drops
 				// indentation after a line end, so `\` + newline + space would lose it)
 				const prev = runs[runs.length - 1];
-				if (prev?.kind === 'break' && /^[ \t]/.test(text)) prev.content = '\\';
-				runs.push({ content: escTypst(text, atLineStart, extra), marks: orderedMarks(node.marks), kind: 'text' });
+				const marks = orderedMarks(node.marks);
+				if (prev?.kind === 'break' && /^[ \t]/.test(text) && marks.length === 0) prev.content = '\\';
+				runs.push({ content: escTypst(text, atLineStart, extra), marks, kind: 'text' });
 			}
 			atLineStart = false;
 			return;
@@ -177,8 +186,8 @@ function buildRuns(parent: Node, startOfLine: boolean, extra: string): InlineRun
 		switch (node.type.name) {
 			case 'hard_break':
 				if (node.attrs?.lineBreak === false) return; // legacy no-op break
-				runs.push({ content: '\\\n', marks: [], kind: 'break' });
-				atLineStart = true;
+				runs.push({ content: singleLine ? '\\ ' : '\\\n', marks: [], kind: 'break' });
+				atLineStart = !singleLine;
 				return;
 			case 'inline_latex': {
 				const text = node.textContent;
@@ -235,27 +244,53 @@ function extendsRef(s: string): boolean {
 	return /^[\p{L}\p{N}_-]/u.test(s) || /^[.:]+[\p{L}\p{N}_-]/u.test(s);
 }
 
+function extendsUrl(s: string): boolean {
+	const on = /^[0-9A-Za-z#$%&*+\-/=@_~[(]/;
+	return on.test(s) || on.test(s.replace(/^[!,.:;?']+/, ''));
+}
+
+function continuesCode(code: string, s: string): boolean {
+	if (/^[([;]/.test(s) || /^\.[\p{L}_]/u.test(s)) return true;
+	return /[\p{L}\p{N}_-]$/u.test(code) && /^[\p{L}\p{N}\p{M}_-]/u.test(s);
+}
+
 type ActiveMark = { mark: Mark; close: string; expel: boolean };
 
 /** minimal open/close mark transitions over same-mark runs, expelling boundary whitespace out
  *  of emphasis delimiters (`* bold*` never parses back as strong). */
-export function renderInline(parent: Node, startOfLine = true, extra = ''): string {
-	const runs = buildRuns(parent, startOfLine, extra);
+export function renderInline(parent: Node, startOfLine = true, extra = '', singleLine = false): string {
+	const runs = buildRuns(parent, startOfLine, extra, singleLine);
 	let out = '';
 	let active: ActiveMark[] = [];
 	// where the last @ref was written, while the next emission may still extend it
 	let refAt = -1;
 	let refTarget = '';
+	let urlEnd = -1;
+	let codeEnd = -1;
+	let code = '';
 	// a // comment owns the rest of its line: the next emission starts a new one
 	let lineEnd = false;
 
-	function emit(s: string) {
+	function emit(s: string, text = false) {
 		if (!s) return;
+		let piece = s;
 		if (refAt >= 0) {
-			if (extendsRef(s)) out = out.slice(0, refAt) + `#ref(<${refTarget}>)`;
+			if (extendsRef(piece)) out = out.slice(0, refAt) + `#ref(<${refTarget}>)`;
 			refAt = -1;
 		}
-		out += s;
+		const escapable = text && !piece.startsWith('u{');
+		if (urlEnd === out.length && extendsUrl(piece)) {
+			if (escapable) piece = '\\' + piece;
+			else {
+				const start = out.search(/https?:\/\/\S*$/);
+				out = out.slice(0, start) + `#link(${typStr(out.slice(start))})`;
+			}
+		}
+		urlEnd = -1;
+		if (escapable && codeEnd === out.length && continuesCode(code, piece)) piece = '\\' + piece;
+		codeEnd = -1;
+		if (/^[/*]/.test(piece) && /(^|[^\\])(\\\\)*\/$/.test(out)) out = out.slice(0, -1) + '\\/';
+		out += piece;
 	}
 
 	function emitCloses(closing: ActiveMark[], allowSteal: boolean) {
@@ -331,7 +366,12 @@ export function renderInline(parent: Node, startOfLine = true, extra = ''): stri
 		}
 		// a `[` body starts fresh markup, where a marker binds like at a line start
 		if (bracketBody && run.kind === 'text') content = escLineStart(content);
-		emit(content);
+		emit(content, run.kind === 'text');
+		if (run.kind === 'other' && /^https?:\/\/\S+$/.test(content)) urlEnd = out.length;
+		if (run.kind === 'other' && content.startsWith('#')) {
+			codeEnd = out.length;
+			code = content;
+		}
 		if (run.kind === 'ref') {
 			refAt = out.length - content.length;
 			refTarget = content.slice(1);

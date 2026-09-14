@@ -1,7 +1,6 @@
 // a source edit applied to the mounted visual editor as one undoable step
 import type { EditorView as PMEditorView } from 'prosemirror-view';
 import { computeBlockPatch, syncOrigAttrs } from '$lib/editor/visual/blockPatch';
-import { normalizeParsedDoc } from '$lib/collab/remotePatch';
 import type { DocumentBuffer } from '$lib/workspace/documentBuffer.svelte';
 import type { ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
 
@@ -18,11 +17,10 @@ export async function patchVisualFromSource(
 		doc.replaceSource(next, { dirty: true });
 		return true;
 	}
-	const fresh = normalizeParsedDoc(parsed.doc);
-	const patch = computeBlockPatch(view.state.doc, fresh);
+	const patch = computeBlockPatch(view.state.doc, parsed.doc);
 	const tr = view.state.tr;
 	if (patch) tr.replaceWith(patch.from, patch.to, patch.nodes);
-	syncOrigAttrs(tr, fresh);
+	syncOrigAttrs(tr, parsed.doc);
 	if (!tr.steps.length) return false;
 	view.dispatch(tr);
 	return true;

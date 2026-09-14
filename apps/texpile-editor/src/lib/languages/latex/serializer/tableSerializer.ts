@@ -6,6 +6,7 @@
 
 import type { Node } from 'prosemirror-model';
 import type { Ctx } from '$lib/serializer/types';
+import { joinInline } from './textEscapes';
 
 type SerializeNodeFn = (node: Node, ctx: Ctx) => string;
 
@@ -43,11 +44,11 @@ export function serializeTable(node: Node, serializeNode: SerializeNodeFn): stri
 }
 
 function renderInline(node: Node, serializeNode: SerializeNodeFn): string {
-	let out = '';
+	const pieces: string[] = [];
 	node.forEach((child, _offset, index) => {
-		out += serializeNode(child, { parent: node, index, isLastChild: index === node.childCount - 1, inTableCell: true });
+		pieces.push(serializeNode(child, { parent: node, index, isLastChild: index === node.childCount - 1, inTableCell: true }));
 	});
-	return out;
+	return joinInline(pieces);
 }
 
 function childByType(node: Node, typeName: string): Node | null {

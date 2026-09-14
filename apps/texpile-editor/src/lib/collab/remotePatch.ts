@@ -1,10 +1,9 @@
-// Landing a re-parsed remote document in the live view: normalize the fresh parse, replace
-// only the block range that changed, re-anchor a caret inside it through the source, and hold
-// the topmost visible line still so the patch never reads as a scroll jump.
-import { EditorState, TextSelection } from 'prosemirror-state';
+// Landing a re-parsed remote document in the live view: replace only the block range that
+// changed, re-anchor a caret inside it through the source, and hold the topmost visible line
+// still so the patch never reads as a scroll jump.
+import { TextSelection } from 'prosemirror-state';
 import type { EditorView as PMEditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
-import { fixTables } from 'prosemirror-tables';
 import { buildBlockMap, pmPosToSourceOffset, sourceOffsetToPmPos } from '$lib/editor/visual/sourceMap';
 import { computeBlockPatch, protectCaretBlock, syncOrigAttrs } from '$lib/editor/visual/blockPatch';
 import { spliceDiff } from './materialize';
@@ -18,16 +17,6 @@ function scrollParent(el: HTMLElement | null): HTMLElement | null {
 		cur = cur.parentElement;
 	}
 	return null;
-}
-
-// the mount path's normalization, applied to a fresh parse so it diffs cleanly against the live doc.
-// doc.type.schema, never an imported one: this serves both editors and a doc parsed into mdSchema
-// cannot be re-stated under the tex schema (nodes from different Schema objects never mix)
-export function normalizeParsedDoc(doc: PMNode): PMNode {
-	let s = EditorState.create({ schema: doc.type.schema, doc });
-	const fix = fixTables(s);
-	if (fix) s = s.apply(fix);
-	return s.doc;
 }
 
 export function applyRemotePatch(

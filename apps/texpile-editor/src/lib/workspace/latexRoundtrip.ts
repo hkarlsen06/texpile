@@ -3,6 +3,7 @@
 import * as LatexParser from '$lib/languages/latex/parser/latexParser';
 import { dropParagraphEnd, serializeToLatexDetailed, serializeNode } from '$lib/languages/latex/serializer/latexSerializer';
 import { fillOrigNorms } from '$lib/serializer/blockAssembly';
+import { padTables } from '$lib/editor/visual/padTables';
 import type { Node } from 'prosemirror-model';
 
 // the importer runs in max-fidelity mode: unrecognized constructs are preserved as raw/inline LaTeX
@@ -115,7 +116,7 @@ export function parseLatexFile(latex: string, projectMacros = '', onPhase?: (pha
 	const { doc: parsedDoc } = LatexParser.latexToProseMirror(body, { preamble: scanPreamble, onPhase });
 	onPhase?.('finalizing');
 	// complete the verbatim stamps: untouched blocks then round-trip byte-for-byte
-	const doc = fillOrigNorms(parsedDoc, serializeNode);
+	const doc = fillOrigNorms(padTables(parsedDoc), serializeNode);
 
 	// dev-only tripwire: a doc that violates the content model renders fine but freezes the editor
 	// on the first structural edit (PM throws mid-dispatch). production still opens the file, degraded.
@@ -155,12 +156,9 @@ export function serializeLatexFile(parsed: Pick<ParsedLatexFile, 'preamble' | 'p
 	// tail reproduces the original bytes through EOF, including a missing trailing newline.
 	if (parsed.hadDocumentEnv === false) return tailProtected ? text : text + '\n';
 	const body = dropParagraphEnd(text, trailingRegenerated);
-	// postamble runs to EOF and usually ends with \n; normalize its trailing newlines
-	// to exactly one or the file grows a blank line per save
-	const tail = parsed.postamble.replace(/\n+$/, '') + '\n';
 	const leadSep = leadProtected ? '' : '\n';
 	const tailSep = tailProtected ? '' : '\n';
-	return `${parsed.preamble}${leadSep}${body}${tailSep}${tail}`;
+	return `${parsed.preamble}${leadSep}${body}${tailSep}${parsed.postamble}`;
 }
 
 /** minimal skeleton for a brand-new .tex, no template system. */

@@ -6,6 +6,7 @@
 import { typstToProseMirror } from './converter';
 import { serializeToTypstDetailed, serializeTypNode } from './serializer';
 import { fillOrigNorms } from '$lib/serializer/blockAssembly';
+import { padTables } from '$lib/editor/visual/padTables';
 import type { Node } from 'prosemirror-model';
 import type { ParsedLatexFile, ParsePhase } from '$lib/workspace/latexRoundtrip';
 
@@ -13,7 +14,7 @@ export function parseTypstFile(source: string, _projectMacros = '', onPhase?: (p
 	onPhase?.('parsing');
 	const { doc: parsedDoc } = typstToProseMirror(source);
 	onPhase?.('finalizing');
-	const doc = fillOrigNorms(parsedDoc, serializeTypNode);
+	const doc = fillOrigNorms(padTables(parsedDoc), serializeTypNode);
 
 	if (import.meta.env.DEV) {
 		try {

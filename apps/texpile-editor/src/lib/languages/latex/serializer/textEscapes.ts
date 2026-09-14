@@ -11,12 +11,33 @@ const ESCAPE_MAP: Record<string, string> = {
 	'&': '\\&',
 	$: '\\$',
 	_: '\\_',
-	'^': '\\^{}'
+	'^': '\\textasciicircum{}'
 };
 
 /** text-mode escaping, single pass (runs per text node on every serialization). */
 export function sanitizeText(text: string): string {
 	return text.replace(ESCAPE_RE, (ch) => ESCAPE_MAP[ch]);
+}
+
+export function joinInline(pieces: string[]): string {
+	let out = '';
+	for (const piece of pieces) {
+		// if the previous chunk ends in a control word and this one starts with a letter, direct
+		// concatenation FUSES them into an undefined command (\answerYes + See = \answerYesSee;
+		// happens when a separating construct didn't survive conversion). a single space restores
+		// the boundary and is render-neutral: TeX eats whitespace after a control word. purely
+		// lexical, runs on serialized output where no AST exists. only the tail needs testing (an
+		// end-anchored regex on the whole accumulator is quadratic across pieces); 256 chars is
+		// far past any real control-word length.
+		if (piece && /\\[a-zA-Z@]+$/.test(out.slice(-256)) && /^[a-zA-Z]/.test(piece)) out += ' ';
+		// A comment owns a WHOLE line, both ends: emitted mid-line it would swallow the rest of the
+		// line, and it arrived from source on its own line (a raw '%' can only open a comment chip;
+		// escaped text starts with \%). With serializeNode closing the line after the chip, comment
+		// chips are a round-trip fixed point instead of degrading into strippable trailing comments.
+		if (piece.startsWith('%') && out && !out.endsWith('\n')) out += '\n';
+		out += piece;
+	}
+	return out;
 }
 
 export type EscMode = 'text' | 'href' | 'math' | 'verbatim' | 'raw';

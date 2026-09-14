@@ -12,7 +12,7 @@ import { createBlockAssembly, type DocSerializeResult } from '$lib/serializer/bl
 import type { Ctx, NodeHandler } from '$lib/serializer/types';
 // direct, not through the image barrel: that one pulls in svelte and the DOM
 import { DEFAULT_FIGURE_FRACTION } from '$lib/editor/visual/extensions/image/figureDefaults';
-import { esc, applyMarks, markableMarks, marksKey } from './textEscapes';
+import { esc, applyMarks, joinInline, markableMarks, marksKey } from './textEscapes';
 import { blockMath, alignEnvironment } from './mathBlocks';
 export { esc, sanitizeText, type EscMode } from './textEscapes';
 
@@ -65,24 +65,7 @@ export function renderChildren(node: Node, inTableCell: boolean): string {
 		i = j;
 	}
 
-	let out = '';
-	for (const piece of pieces) {
-		// if the previous chunk ends in a control word and this one starts with a letter, direct
-		// concatenation FUSES them into an undefined command (\answerYes + See = \answerYesSee;
-		// happens when a separating construct didn't survive conversion). a single space restores
-		// the boundary and is render-neutral: TeX eats whitespace after a control word. purely
-		// lexical, runs on serialized output where no AST exists. only the tail needs testing (an
-		// end-anchored regex on the whole accumulator is quadratic across pieces); 256 chars is
-		// far past any real control-word length.
-		if (piece && /\\[a-zA-Z@]+$/.test(out.slice(-256)) && /^[a-zA-Z]/.test(piece)) out += ' ';
-		// A comment owns a WHOLE line, both ends: emitted mid-line it would swallow the rest of the
-		// line, and it arrived from source on its own line (a raw '%' can only open a comment chip;
-		// escaped text starts with \%). With serializeNode closing the line after the chip, comment
-		// chips are a round-trip fixed point instead of degrading into strippable trailing comments.
-		if (piece.startsWith('%') && out && !out.endsWith('\n')) out += '\n';
-		out += piece;
-	}
-	return out;
+	return joinInline(pieces);
 }
 
 /**
@@ -128,7 +111,9 @@ function splitLeadingLabel(item: Node): { latex: string; body: Node } | null {
 	// (`\item[A $x$ B]` puts inline math there) carries no marks of its own
 	let last = -1;
 	for (let i = 0; i < item.childCount; i++) {
-		if (item.child(i).marks.some((m) => m.type.name === 'item_label')) last = i;
+		const child = item.child(i);
+		if (child.marks.some((m) => m.type.name === 'item_label')) last = i;
+		else if (child.isText) break;
 	}
 	if (last < 0) return null;
 	let size = 0;
@@ -258,7 +243,8 @@ const NODES: Record<string, NodeHandler> = {
 
 		// trim edge whitespace: the parser re-absorbs a space before \par, so it would
 		// accumulate one per save.
-		const content = rawContent.replace(/^\s+|\s+$/g, '');
+		const trimmed = rawContent.replace(/^\s+|\s+$/g, '');
+		const content = /(^|[^\\])(\\\\)*%[^\n]*$/.test(trimmed) ? trimmed + '\n' : trimmed;
 		// first-line indent override (Tab cycles it): 'auto' emits nothing
 		const indent = node.attrs.indent === 'indent' ? '\\indent ' : node.attrs.indent === 'noindent' ? '\\noindent ' : '';
 		const prev = prevSibling(ctx);
@@ -293,11 +279,12 @@ const NODES: Record<string, NodeHandler> = {
 		return applyMarks(bareText(node), node.marks);
 	},
 
-	hard_break(node) {
+	hard_break(node, ctx) {
 		// legacy lineBreak:false (a blank-line gap) is a semantic no-op: emit nothing
 		if (node.attrs?.lineBreak === false) return '';
-		if (node.attrs?.command === 'newline') return '\\newline\n';
-		return `\\\\${typeof node.attrs?.suffix === 'string' ? node.attrs.suffix : ''}\n`;
+		const suffix = typeof node.attrs?.suffix === 'string' ? node.attrs.suffix : '';
+		if (node.attrs?.command === 'newline' || (ctx.inTableCell && !suffix)) return '\\newline\n';
+		return `\\\\${suffix}\n`;
 	},
 
 	block_math(node) {

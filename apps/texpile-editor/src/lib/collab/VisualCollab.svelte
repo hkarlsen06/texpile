@@ -8,7 +8,7 @@
 	import * as Y from 'yjs';
 	import type { Node as PMNode } from 'prosemirror-model';
 	import { setRemoteCursors, type RemotePeerSel } from '$lib/editor/visual/extensions/remoteCursors';
-	import { applyRemotePatch, normalizeParsedDoc } from './remotePatch';
+	import { applyRemotePatch } from './remotePatch';
 	import { computeBlockPatch, protectCaretBlock } from '$lib/editor/visual/blockPatch';
 	import { buildBlockMap, pmPosToSourceOffset, sourceOffsetToPmPos } from '$lib/editor/visual/sourceMap';
 	import { stripFor } from '$lib/editor/visual/stripFor';
@@ -106,7 +106,7 @@
 		if (!parsed) return; // unparsable mid-edit state; the next change retries
 		const oldPreLen = bodyOffset();
 		const oldSource = api.texSource;
-		const newDoc = normalizeParsedDoc(parsed.doc);
+		const newDoc = parsed.doc;
 		// A pure self-restamp (no remote edit waiting) whose patch would rebuild the block the
 		// caret sits in: hold it. Applying here is what made the editor visibly jump ~1s after
 		// typing anything that parses into a different structure (text spilling out of a raw

@@ -75,6 +75,7 @@ export const VERBATIM_ENVS = new Set([
 	'filecontents',
 	'filecontents*',
 	'alltt',
+	'thebibliography',
 	'tabular',
 	'tabularx',
 	'longtable',
