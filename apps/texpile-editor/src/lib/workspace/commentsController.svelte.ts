@@ -34,6 +34,10 @@ import {
 import { lineOf } from '$lib/comments/anchorLocate';
 import { resolveAuthor, forgetAuthor } from '$lib/comments/author';
 import type { CommentRange } from '$lib/editor/visual/extensions/comments';
+import { isSuggestion } from '$lib/comments/suggest';
+import { activeSuggestions, suggestionVisibility } from '$lib/comments/activeSuggestions.svelte';
+import type { EditMode } from '$lib/comments/suggestCompare';
+import { SuggestionsController, type SourceEdit } from './suggestionsController';
 
 type Deps = {
 	/** absolute workspace root, or null before a folder is open */
@@ -62,6 +66,11 @@ type Deps = {
 	 * ingest() never publishes.
 	 */
 	publish?: (event: CommentEvent) => void;
+	mode?: () => EditMode;
+	applyEdit?: (edit: SourceEdit) => Promise<boolean>;
+	saveNow?: () => void;
+	compares?: () => boolean;
+	rewraps?: () => boolean;
 };
 
 export class CommentsController {
@@ -79,7 +88,7 @@ export class CommentsController {
 	 * these merely have no rendered text to sit on, and switching to source brings them back.
 	 * Empty whenever the source editor is the view; it draws everything it can resolve.
 	 */
-	notVisible = $state<Set<string>>(new Set());
+	private hiddenNow = $state<Set<string>>(new Set());
 	/**
 	 * Threads on the active file that were found, but whose surroundings changed (see
 	 * ResolvedAnchor.weak). If the file holds their sentence twice the highlight may be on the
@@ -106,7 +115,7 @@ export class CommentsController {
 	private activeLost = new Set<string>();
 	private activeHidden = new Set<string>();
 	/** the reader is in the visual editor; see setVisualMode for why the hidden badge depends on it */
-	private visual = false;
+	private visual = $state(false);
 	/** a thread we are opening a different file for; selected once that file re-anchors */
 	private pendingOpen: string | null = null;
 	/** verdicts whose place event is still being written, keyed d:/h: + thread id; a second pass
@@ -125,7 +134,32 @@ export class CommentsController {
 		});
 	}
 
-	constructor(private readonly deps: Deps) {}
+	readonly suggestions: SuggestionsController;
+
+	constructor(private readonly deps: Deps) {
+		this.suggestions = new SuggestionsController({
+			store: this.store,
+			activeFile: () => this.file,
+			activeText: () => this.fresh(),
+			mode: () => deps.mode?.() ?? 'editing',
+			author: () => this.author(),
+			commit: (...events) => this.commit(...events),
+			publish: (event) => deps.publish?.(event),
+			applyEdit: (edit) => deps.applyEdit?.(edit) ?? Promise.resolve(false),
+			saveNow: () => deps.saveNow?.(),
+			compares: () => deps.compares?.() ?? true,
+			rewraps: () => deps.rewraps?.() ?? false
+		});
+	}
+
+	get notVisible(): Set<string> {
+		const hidden = suggestionVisibility.current.hidden;
+		return this.visual && hidden.size ? new Set([...this.hiddenNow, ...hidden]) : this.hiddenNow;
+	}
+
+	get partial(): Set<string> {
+		return this.visual ? suggestionVisibility.current.partial : new Set();
+	}
 
 	get threads(): CommentThread[] {
 		return this.store.threads;
@@ -135,7 +169,7 @@ export class CommentsController {
 		const out = new Set<string>();
 		const expanded = new Set(this.ranges.filter((r) => r.to > r.from).map((r) => r.id));
 		for (const r of this.ranges) if (r.to === r.from) out.add(r.id);
-		for (const t of this.store.threads) if (!t.anchor.quote && !expanded.has(t.id)) out.add(t.id);
+		for (const t of this.store.threads) if (!t.anchor.quote && !expanded.has(t.id) && !isSuggestion(t)) out.add(t.id);
 		for (const [id, a] of this.knownAnchors) if (!a.quote && !expanded.has(id)) out.add(id);
 		return out;
 	}
@@ -144,19 +178,20 @@ export class CommentsController {
 	}
 
 	async load(root: string | null): Promise<void> {
+		if (root !== this.store.root) await this.suggestions.finish();
 		forgetAuthor();
 		this.selected = null;
 		this.pendingOpen = null;
 		this.pending = null;
 		this.activeHidden = new Set();
 		this.activeLost = new Set();
-		this.notVisible = new Set();
+		this.hiddenNow = new Set();
 		this.weak = new Set();
 		this.knownAnchors = new Map();
 		this.lastWords.clear();
 		this.carried = null;
 		await this.store.load(root);
-		const ghosts = this.store.threads.filter((t) => !t.anchor.quote);
+		const ghosts = this.store.threads.filter((t) => !t.anchor.quote && !isSuggestion(t));
 		if (ghosts.length && this.store.writable) {
 			const by = await this.author();
 			const at = new Date().toISOString();
@@ -225,7 +260,7 @@ export class CommentsController {
 				if (t.hidden) hidden.add(t.id);
 			}
 		}
-		this.notVisible = hidden;
+		this.hiddenNow = hidden;
 	}
 
 	/**
@@ -265,6 +300,7 @@ export class CommentsController {
 			this.ranges = [];
 			this.activeLost = new Set();
 			this.weak = new Set();
+			this.suggestions.clear();
 			this.applyOrphans();
 			return;
 		}
@@ -281,6 +317,7 @@ export class CommentsController {
 		// normalized once for the whole file, and only if something actually misses the fast path
 		let hay: LooseHaystack | null = null;
 		for (const t of this.store.forFile(this.file)) {
+			if (isSuggestion(t)) continue;
 			let exact = live?.get(t.id) ?? handed?.get(t.id) ?? null;
 			if (exact) {
 				exact = this.wordsBack(t, exact, text);
@@ -319,6 +356,7 @@ export class CommentsController {
 				this.lastWords.set(t.id, buildAnchor(text, hit.from, hit.to));
 			} else lost.add(t.id);
 		}
+		for (const id of this.suggestions.place(this.file, text)) lost.add(id);
 		if (knownChanged) this.knownAnchors = known;
 		this.ranges = ranges;
 		this.activeLost = lost;
@@ -395,7 +433,7 @@ export class CommentsController {
 		this.activeHidden = file === this.file ? lost : new Set();
 		this.applyOrphans();
 		if (!this.store.writable) return;
-		const stale = this.store.forFile(file).filter((t) => asFlag(t.hidden) !== lost.has(t.id));
+		const stale = this.store.forFile(file).filter((t) => !isSuggestion(t) && asFlag(t.hidden) !== lost.has(t.id));
 		await this.recordPlacement('h:', stale, lost, (t) => ({ thread: t.id, hidden: lost.has(t.id) }));
 	}
 
@@ -496,7 +534,7 @@ export class CommentsController {
 		const moved: { id: string; anchor: CommentAnchor }[] = [];
 		for (const t of this.store.forFile(this.file)) {
 			const anchor = live.get(t.id);
-			if (!anchor || t.resolved) continue;
+			if (!anchor || t.resolved || isSuggestion(t)) continue;
 			const hit = resolveAnchor(text, t.anchor);
 			if (hit && !hit.weak && hit.from === anchor.start && hit.to === anchor.end) continue;
 			moved.push({ id: t.id, anchor });
@@ -518,6 +556,10 @@ export class CommentsController {
 
 	async setResolved(thread: CommentThread, resolved: boolean, by?: string): Promise<void> {
 		await this.commit(resolveEvent({ thread: thread.id, by: await this.author(by), resolved, at: new Date().toISOString() }));
+		if (isSuggestion(thread)) {
+			if (thread.file === this.file) this.resolve();
+			return;
+		}
 		this.ranges = this.ranges.map((r) => (r.id === thread.id ? { ...r, resolved } : r));
 	}
 
@@ -602,6 +644,11 @@ export class CommentsController {
 		// comment as detached on their own screen.
 		if (event.t === 'open' && this.store.threads.some((t) => t.id === event.id)) return;
 		await this.store.append(event);
+		const about = this.store.threads.find((t) => t.id === (event.t === 'open' ? event.id : 'thread' in event ? event.thread : ''));
+		if (about && isSuggestion(about)) {
+			if (about.file === this.file) this.resolve();
+			return;
+		}
 		if (event.t === 'open' && event.file === this.file) {
 			this.placeOne(event.id, event.anchor, false);
 		} else if (event.t === 'resolve') {
@@ -650,7 +697,7 @@ export class CommentsController {
 		// paragraph landed at the top of the paragraph. Falls through when the reader is in source, or
 		// when this thread is one the visual view could not draw.
 		if (this.deps.revealInVisual?.(id)) return;
-		const hit = this.ranges.find((r) => r.id === id);
+		const hit = this.ranges.find((r) => r.id === id) ?? activeSuggestions.current.find((s) => s.id === id);
 		// an orphaned thread has nowhere to scroll to; the panel says so rather than jumping to line 1
 		if (hit) this.deps.openFileAt(`${this.deps.root()}/${this.file}`, lineOf(this.text, hit.from));
 	}

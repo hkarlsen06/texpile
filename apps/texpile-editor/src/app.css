@@ -431,6 +431,26 @@ select option {
 .TexpileEditor .pm-comment-focused {
 	background-color: color-mix(in srgb, var(--comment-tint) 30%, transparent);
 }
+.TexpileEditor .pm-suggest-new {
+	background-color: color-mix(in srgb, var(--diff-insert-tint) 18%, transparent);
+}
+.TexpileEditor .pm-suggest-old {
+	background-color: color-mix(in srgb, var(--diff-delete-tint) 16%, transparent);
+	text-decoration: line-through;
+	user-select: none;
+}
+.TexpileEditor .pm-suggest-new.pm-suggest-focused {
+	background-color: color-mix(in srgb, var(--diff-insert-tint) 34%, transparent);
+}
+.TexpileEditor .pm-suggest-old.pm-suggest-focused {
+	background-color: color-mix(in srgb, var(--diff-delete-tint) 30%, transparent);
+}
+.TexpileEditor .pm-suggest-partial {
+	background-color: color-mix(in srgb, var(--color-warning-500) 10%, transparent);
+}
+.TexpileEditor .pm-suggest-partial.pm-suggest-focused {
+	background-color: color-mix(in srgb, var(--color-warning-500) 20%, transparent);
+}
 .comment-card {
 	position: absolute;
 	left: calc(18px - var(--comment-card-shift, 0px));

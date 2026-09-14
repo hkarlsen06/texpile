@@ -5,6 +5,7 @@
 	import InitialAvatar from '$lib/components/InitialAvatar.svelte';
 	import type { Snippet } from 'svelte';
 	import type { CommentMessage, CommentThread } from '$lib/comments/log';
+	import { isSuggestion, shownWords, suggestionKind } from '$lib/comments/suggest';
 	import { m } from '$lib/paraglide/messages';
 
 	let {
@@ -13,6 +14,7 @@
 		lost,
 		hidden,
 		unsure = false,
+		partial = false,
 		dense = false,
 		onReply,
 		onEditMessage,
@@ -26,6 +28,7 @@
 		hidden: boolean;
 		/** placed, but the words around the quote changed; see CommentsPanel's weak */
 		unsure?: boolean;
+		partial?: boolean;
 		dense?: boolean;
 		onReply: (thread: CommentThread, body: string) => void;
 		onEditMessage: (message: CommentMessage, body: string) => void;
@@ -54,9 +57,29 @@
 
 <!-- max-w: the dock is as wide as the editor, and a conversation set in a column
      that wide is unreadable. Prose wants a measure, not the space available -->
+{#snippet change(quote: string, restore: string)}
+	{@const kind = suggestionKind(quote, restore)}
+	<p class="leading-snug">
+		<span class="font-semibold">
+			{kind === 'delete'
+				? m.comments_suggest_delete_label()
+				: kind === 'insert'
+					? m.comments_suggest_add_label()
+					: m.comments_suggest_replace_label()}
+		</span>
+		<span class="text-muted line-clamp-3 italic">{shownWords(kind === 'insert' ? quote : restore)}</span>
+		{#if kind === 'replace'}
+			<span>{m.comments_suggest_replace_with()}</span>
+			<span class="text-muted line-clamp-3 italic">{shownWords(quote)}</span>
+		{/if}
+	</p>
+{/snippet}
+
 <div class="space-y-2 break-words {dense ? '' : 'max-w-2xl px-2 pt-1 pb-3 pl-7'}">
 	{#if fileGone}
 		<p class="text-warning-ink">{m.comments_file_gone()}</p>
+	{:else if lost && isSuggestion(thread)}
+		<p class="text-warning-ink">{m.comments_suggest_lost()}</p>
 	{:else if lost}
 		<p class="text-warning-ink">{m.comments_orphaned()}</p>
 		{#if onAttach}
@@ -65,9 +88,11 @@
 	{:else if unsure}
 		<p class="text-warning-ink">{m.comments_weak()}</p>
 	{:else if hidden}
-		<p class="text-muted">{m.comments_not_in_view()}</p>
+		<p class="text-muted">{isSuggestion(thread) ? m.comments_suggest_not_in_view() : m.comments_not_in_view()}</p>
+	{:else if partial}
+		<p class="text-muted">{m.comments_suggest_partial()}</p>
 	{/if}
-	{#each thread.messages as msg (msg.id)}
+	{#each thread.messages as msg, i (msg.id)}
 		<div class="group/msg flex items-start gap-2 leading-snug">
 			<InitialAvatar name={msg.by} class="mt-0.5 size-5 text-[10px]" />
 			<div class="min-w-0 flex-1">
@@ -95,7 +120,19 @@
 						<button class="btn btn-xs hover:preset-tonal" onclick={() => (editing = null)}>{m.comments_cancel()}</button>
 					</div>
 				{:else}
-					<p class="whitespace-pre-wrap">{msg.body}</p>
+					{#if i === 0 && isSuggestion(thread)}
+						{@render change(thread.anchor.quote, thread.restore ?? '')}
+						{#if thread.decision}
+							<p class="text-muted">
+								{thread.decision === 'accepted'
+									? m.comments_suggest_accepted()
+									: thread.decision === 'rejected'
+										? m.comments_suggest_rejected()
+										: m.comments_suggest_closed()}
+							</p>
+						{/if}
+					{/if}
+					{#if msg.body}<p class="whitespace-pre-wrap">{msg.body}</p>{/if}
 				{/if}
 			</div>
 			{#if editing !== msg.id}

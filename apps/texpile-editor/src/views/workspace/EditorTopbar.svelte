@@ -15,6 +15,7 @@
 	import type { ComponentProps } from 'svelte';
 	import type { FileKind } from '$lib/workspace/documentBuffer.svelte';
 	import { m } from '$lib/paraglide/messages';
+	import EditModePicker from './EditModePicker.svelte';
 	import {
 		ArrowRight,
 		FileText,
@@ -68,6 +69,8 @@
 		/** open review threads in the project; 0 hides the badge, like a clean compile hides Problems */
 		commentCount?: number;
 		onShowComments?: () => void;
+		suggesting?: boolean;
+		onToggleSuggest?: (suggesting: boolean) => void;
 		onTogglePdf: () => void;
 		onSave: () => void;
 		/**
@@ -109,6 +112,8 @@
 		onShowProblems,
 		commentCount = 0,
 		onShowComments = () => {},
+		suggesting = false,
+		onToggleSuggest,
 		onTogglePdf,
 		onSave,
 		onSyncToCursor = null,
@@ -197,6 +202,9 @@
 		{/if}
 	</div>
 	<div class="flex items-center gap-2">
+		{#if onToggleSuggest}
+			<EditModePicker {suggesting} onChange={onToggleSuggest} />
+		{/if}
 		{#if commentCount > 0}
 			<!-- unresolved review threads, project-wide. Leftmost of the cluster on purpose: the row is
 			     right-aligned, so out here the badge's appearance grows into free space instead of

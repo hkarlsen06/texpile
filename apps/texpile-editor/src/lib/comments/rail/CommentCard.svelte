@@ -1,9 +1,10 @@
 <script lang="ts">
 	// One thread in the margin, always the whole of it: every message and the reply box, the same
 	import { tip } from '$lib/components/tooltip.svelte';
-	import { Check } from '@lucide/svelte';
+	import { Check, X } from '@lucide/svelte';
 	import CommentThreadConversation from '$lib/comments/CommentThreadConversation.svelte';
 	import type { CommentMessage, CommentThread } from '$lib/comments/log';
+	import { isOpenSuggestion } from '$lib/comments/suggest';
 	import { sized } from './sized';
 	import { m } from '$lib/paraglide/messages';
 
@@ -11,10 +12,13 @@
 		thread,
 		selected,
 		unsure = false,
+		partial = false,
 		hovered = false,
 		top,
 		onSelect,
 		onResolve,
+		onAccept,
+		onReject,
 		onReply,
 		onEditMessage,
 		onDeleteMessage,
@@ -23,10 +27,13 @@
 		thread: CommentThread;
 		selected: boolean;
 		unsure?: boolean;
+		partial?: boolean;
 		hovered?: boolean;
 		top: number;
 		onSelect: () => void;
 		onResolve: () => void;
+		onAccept: () => void;
+		onReject: () => void;
 		onReply: (thread: CommentThread, body: string) => void;
 		onEditMessage: (message: CommentMessage, body: string) => void;
 		onDeleteMessage: (thread: CommentThread, message: CommentMessage) => void;
@@ -54,19 +61,39 @@
 		lost={false}
 		hidden={false}
 		{unsure}
+		{partial}
 		{onReply}
 		{onEditMessage}
 		{onDeleteMessage}
 	>
 		{#snippet footer()}
-			<button
-				class="text-muted hover:preset-tonal flex h-7 w-7 shrink-0 items-center justify-center rounded-base"
-				use:tip={m.comments_resolve()}
-				aria-label={m.comments_resolve()}
-				onclick={onResolve}
-			>
-				<Check class="size-4" />
-			</button>
+			{#if isOpenSuggestion(thread)}
+				<button
+					class="text-muted hover:preset-tonal flex h-7 w-7 shrink-0 items-center justify-center rounded-base"
+					use:tip={m.suggestmode_accept()}
+					aria-label={m.suggestmode_accept()}
+					onclick={onAccept}
+				>
+					<Check class="size-4" />
+				</button>
+				<button
+					class="text-muted hover:preset-tonal flex h-7 w-7 shrink-0 items-center justify-center rounded-base"
+					use:tip={m.suggestmode_reject()}
+					aria-label={m.suggestmode_reject()}
+					onclick={onReject}
+				>
+					<X class="size-4" />
+				</button>
+			{:else}
+				<button
+					class="text-muted hover:preset-tonal flex h-7 w-7 shrink-0 items-center justify-center rounded-base"
+					use:tip={m.comments_resolve()}
+					aria-label={m.comments_resolve()}
+					onclick={onResolve}
+				>
+					<Check class="size-4" />
+				</button>
+			{/if}
 		{/snippet}
 	</CommentThreadConversation>
 </div>

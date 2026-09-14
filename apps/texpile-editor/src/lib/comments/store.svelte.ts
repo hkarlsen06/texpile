@@ -11,7 +11,27 @@
 // commit.
 import { readTextFile, writeTextFile } from '$lib/workspace/fileSystem';
 import { ensureTexpileIgnore, texpilePath } from '$lib/workspace/texpileDir';
-import { foldLog, parseLog, serializeLog, type CommentEvent, type CommentThread } from './log';
+import { foldLog, parseLog, type CommentEvent, type CommentThread } from './log';
+import { collapseStaged } from './stagedEvents';
+
+function keptLines(text: string): string[] {
+	return text
+		.split('\n')
+		.map((line) => line.trim())
+		.filter((line) => {
+			if (!line.startsWith('{')) return false;
+			try {
+				const parsed: unknown = JSON.parse(line);
+				return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed);
+			} catch {
+				return false;
+			}
+		});
+}
+
+function threadOf(e: CommentEvent): string {
+	return e.t === 'open' ? e.id : 'thread' in e ? e.thread : '';
+}
 
 export class CommentStore {
 	/** every thread in the workspace, in the order they were opened */
@@ -20,8 +40,10 @@ export class CommentStore {
 	root = $state<string | null>(null);
 	loading = $state(false);
 
-	/** the log verbatim, so appending never has to re-serialize anything it did not parse */
 	private events: CommentEvent[] = [];
+	/** the log verbatim, so appending never has to re-serialize anything it did not parse */
+	private lines: string[] = [];
+	private staged: CommentEvent[] = [];
 
 	/** stale-load guard: reloads fire on every save (the fs watcher reports our own writes) and
 	 *  an older read landing after a newer one would publish stale threads */
@@ -39,25 +61,21 @@ export class CommentStore {
 	 *  fold replaces them in one step. */
 	async load(root: string | null): Promise<void> {
 		const my = ++this.loadSeq;
+		if (root !== this.root) this.staged = [];
 		this.root = root;
 		const path = root ? this.path(root) : null;
 		if (!path) {
-			this.events = [];
-			this.threads = [];
+			this.adoptLog('');
 			return;
 		}
 		this.loading = true;
 		try {
 			const text = await readTextFile(path);
 			if (my !== this.loadSeq) return;
-			this.events = parseLog(text);
-			this.threads = foldLog(this.events);
+			this.adoptLog(text);
 		} catch {
 			// no log yet is the normal state for a project nobody has commented on
-			if (my === this.loadSeq) {
-				this.events = [];
-				this.threads = [];
-			}
+			if (my === this.loadSeq) this.adoptLog('');
 		} finally {
 			if (my === this.loadSeq) this.loading = false;
 		}
@@ -81,13 +99,45 @@ export class CommentStore {
 	 * machines are already handled - that is what the log format is for.
 	 */
 	async append(...events: CommentEvent[]): Promise<void> {
-		if (events.length === 0) return;
-		this.events = [...this.events, ...events];
+		if (events.length === 0 && this.staged.length === 0) return;
+		const written = [...collapseStaged(this.staged), ...events];
+		this.staged = [];
+		this.events = [...this.events, ...written];
+		this.lines = [...this.lines, ...written.map((e) => JSON.stringify(e))];
 		this.threads = foldLog(this.events);
 		const path = this.root ? this.path(this.root) : null;
 		if (!path) return;
 		await this.ensureIgnore();
-		await writeTextFile(path, serializeLog(this.events));
+		await writeTextFile(path, this.serialize());
+	}
+
+	stage(...events: CommentEvent[]): void {
+		if (events.length === 0) return;
+		this.staged = [...this.staged, ...events];
+		this.threads = foldLog([...this.events, ...this.staged]);
+	}
+
+	get hasStaged(): boolean {
+		return this.staged.length > 0;
+	}
+
+	hasStagedFor(file: string): boolean {
+		const ids = this.idsOn(file);
+		return this.staged.some((e) => ids.has(threadOf(e)));
+	}
+
+	discardStaged(file: string): void {
+		const ids = this.idsOn(file);
+		const kept = this.staged.filter((e) => !ids.has(threadOf(e)));
+		if (kept.length === this.staged.length) return;
+		this.staged = kept;
+		this.threads = foldLog([...this.events, ...this.staged]);
+	}
+
+	private idsOn(file: string): Set<string> {
+		const ids = new Set(this.threads.filter((t) => t.file === file).map((t) => t.id));
+		for (const e of this.staged) if (e.t === 'open' && e.file === file) ids.add(e.id);
+		return ids;
 	}
 
 	/** seeded if absent, never over one the user has edited; shared with the config writer */
@@ -98,12 +148,13 @@ export class CommentStore {
 	/** replace everything from a log served over the wire; a guest's catch-up on join */
 	adoptLog(text: string): void {
 		this.events = parseLog(text);
-		this.threads = foldLog(this.events);
+		this.lines = keptLines(text);
+		this.threads = foldLog([...this.events, ...this.staged]);
 	}
 
 	/** the log as it would be written, for the host to serve to a joining guest */
 	serialize(): string {
-		return serializeLog(this.events);
+		return this.lines.join('\n') + '\n';
 	}
 
 	/** false when this workspace has nowhere to keep a log - a guest session, or no folder open */

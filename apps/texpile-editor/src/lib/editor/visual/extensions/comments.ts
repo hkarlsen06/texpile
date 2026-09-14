@@ -12,6 +12,7 @@
 import { EditorView, Decoration, type DecorationSet, ViewPlugin, gutterLineClass, GutterMarker, type BlockInfo } from '@codemirror/view';
 import { StateEffect, StateField, RangeSet, type Extension, type EditorState } from '@codemirror/state';
 import { settings, updateSettings } from '$lib/settings';
+import { cmSuggestions, suggestionAt } from '$lib/editor/source/cmSuggestions';
 import { observe } from '$lib/runes/observe.svelte';
 import { m } from '$lib/paraglide/messages';
 
@@ -197,13 +198,14 @@ export function comments({ onSelect, onAdd, addLabel = 'Comment' }: CommentsConf
 				if (!onSelect) return false;
 				const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
 				if (pos === null) return false;
-				const hit = commentAt(view.state, pos);
+				const hit = commentAt(view.state, pos) ?? suggestionAt(view.state, pos);
 				if (!hit) return false;
 				onSelect(hit.id);
 				// not handled: the click should still place the caret where it landed
 				return false;
 			}
 		}),
+		cmSuggestions(),
 		onAdd ? addButton(onAdd, addLabel) : [],
 		theme
 	];

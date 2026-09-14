@@ -230,26 +230,6 @@
 <style lang="postcss">
 	@reference "../../../../app.css";
 
-	:global(.suggestion-add) {
-		background-color: color-mix(in srgb, var(--diff-insert-tint) 2%, transparent);
-		border-bottom: 2px solid color-mix(in srgb, var(--diff-insert-tint) 5%, transparent);
-	}
-	:global(.suggestion-delete) {
-		background-color: color-mix(in srgb, var(--diff-delete-tint) 15%, transparent);
-		text-decoration: line-through;
-		text-decoration-color: color-mix(in srgb, var(--diff-delete-tint) 6%, transparent);
-		opacity: 0.7;
-	}
-	:global(.suggestion-node-insert) {
-		outline: 2px solid color-mix(in srgb, var(--diff-insert-tint) 5%, transparent);
-		background-color: color-mix(in srgb, var(--diff-insert-tint) 8%, transparent);
-	}
-	:global(.suggestion-node-delete) {
-		outline: 2px solid color-mix(in srgb, var(--diff-delete-tint) 4%, transparent);
-		background-color: color-mix(in srgb, var(--diff-delete-tint) 8%, transparent);
-		opacity: 0.6;
-	}
-
 	:global(.agent-diff-insert) {
 		background-color: color-mix(in srgb, var(--diff-insert-tint) 2%, transparent);
 		outline: 2px solid color-mix(in srgb, var(--diff-insert-tint) 4%, transparent);

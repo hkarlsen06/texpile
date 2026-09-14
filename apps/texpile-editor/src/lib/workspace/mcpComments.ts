@@ -11,6 +11,8 @@ import { dialectOfPath, prepareLoose, resolveAnchor, resolveAnchorLooseIn, type 
 import { lineOf, locateQuote } from '$lib/comments/anchorLocate';
 import type { CommentsController } from './commentsController.svelte';
 import type { CommentThread } from '$lib/comments/log';
+import { resolveExactly } from '$lib/comments/anchorSearch';
+import { isSuggestion } from '$lib/comments/suggest';
 
 export type McpCommentDeps = {
 	comments: CommentsController;
@@ -106,12 +108,18 @@ type ThreadReport = {
 	fileExists: boolean;
 	placed: ReturnType<typeof place>;
 	unsaved: boolean;
+	suggestion: { oldWords: string; decision: string | null } | null;
 	messages: { id: string; at: string; by: string; body: string; editedAt: string | null }[];
 };
 
 /** where a thread sits in `text`, or null when its quote is gone */
 function place(text: string, t: CommentThread, hay: () => LooseHaystack) {
-	const hit = resolveAnchor(text, t.anchor) ?? resolveAnchorLooseIn(hay(), t.anchor);
+	const hit = isSuggestion(t)
+		? (() => {
+				const at = resolveExactly(text, t.anchor);
+				return at && { ...at, exact: true, weak: false };
+			})()
+		: (resolveAnchor(text, t.anchor) ?? resolveAnchorLooseIn(hay(), t.anchor));
 	if (!hit) return null;
 	return {
 		line: lineOf(text, hit.from),
@@ -161,6 +169,7 @@ export async function commentsPayload(
 			placed: src ? place(src.text, t, () => hayOf(t.file, src.text)) : null,
 			// the open file with unsaved changes: lines refer to the buffer, not to disk
 			unsaved: src?.unsaved ?? false,
+			suggestion: t.restore === undefined ? null : { oldWords: t.restore, decision: t.decision ?? null },
 			messages: t.messages.map((m) => ({ id: m.id, at: m.at, by: m.by, body: m.body, editedAt: m.editedAt ?? null }))
 		});
 	}
@@ -190,6 +199,7 @@ export async function reanchorCommentPayload(deps: McpCommentDeps, a: Args) {
 	if (!ctl.store.writable) return fail(NO_LOG);
 	const thread = threadOf(ctl, a.thread);
 	if (!thread) return fail('no thread with that id; get_comments lists them');
+	if (isSuggestion(thread)) return fail('a suggestion stays on the words it put in the file and cannot be moved');
 	const rel = relOf(a.path) ?? thread.file;
 	const target = await readTarget(deps, rel);
 	if (!target.ok) return target;
@@ -216,6 +226,12 @@ export async function resolveCommentPayload(deps: McpCommentDeps, a: Args) {
 	const thread = threadOf(ctl, a.thread);
 	if (!thread) return fail('no thread with that id; get_comments lists them');
 	const resolved = a.resolved !== false;
+	if (isSuggestion(thread)) {
+		if (!resolved || thread.resolved) return fail('a decided suggestion cannot be reopened');
+		const src = await textOf(deps, thread.file);
+		if (src && resolveExactly(src.text, thread.anchor))
+			return fail('an open suggestion is accepted or rejected in the editor; only one whose words are gone can be resolved');
+	}
 	await ctl.setResolved(thread, resolved, author(a));
 	return { ok: true, thread: thread.id, resolved };
 }

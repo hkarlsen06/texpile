@@ -21,6 +21,7 @@ export type LayoutState = {
 	 *  /themes/<name>.css */
 	themeName: string;
 	viewMode: 'visual' | 'source' | 'diff';
+	suggesting: boolean;
 	diffLayout: 'unified' | 'split';
 	sidebarOpen: boolean;
 	sidebarWidth: number;
@@ -50,6 +51,7 @@ const DEFAULTS: LayoutState = {
 	theme: 'system',
 	themeName: 'theme',
 	viewMode: 'visual',
+	suggesting: false,
 	diffLayout: 'unified',
 	sidebarOpen: true,
 	sidebarWidth: 256,

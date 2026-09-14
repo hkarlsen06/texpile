@@ -21,6 +21,7 @@ export type CommentAnchor = {
 	/** where the quote sat when the comment was written; re-checked, never trusted */
 	start: number;
 	end: number;
+	rank?: number;
 };
 
 export type ResolvedAnchor = {
@@ -71,6 +72,15 @@ export function resolveAnchor(text: string, a: CommentAnchor): ResolvedAnchor | 
 	if (text.slice(a.start, a.end) === a.quote) return { from: a.start, to: a.end, exact: true, weak: false };
 	const hit = searchQuote(text, a.quote, a.prefix, a.suffix, a.start);
 	return hit ? { from: hit.from, to: hit.to, exact: false, weak: hit.context < WEAK_CONTEXT } : null;
+}
+
+export function resolveExactly(text: string, a: CommentAnchor): { from: number; to: number } | null {
+	const whole = a.prefix + a.quote + a.suffix;
+	if (text.slice(a.start - a.prefix.length, a.end + a.suffix.length) === whole) return { from: a.start, to: a.end };
+	const hits = occurrences(text, whole);
+	if (hits.length === 0 || hits.length >= MAX_HITS) return null;
+	const at = hits.reduce((best, h) => (Math.abs(h + a.prefix.length - a.start) < Math.abs(best + a.prefix.length - a.start) ? h : best));
+	return { from: at + a.prefix.length, to: at + a.prefix.length + a.quote.length };
 }
 
 /** the search behind resolveAnchor, shared with the loose path; `hint` breaks exact-score ties,

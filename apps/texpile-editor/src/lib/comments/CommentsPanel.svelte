@@ -6,6 +6,7 @@
 	import CommentThreadConversation from './CommentThreadConversation.svelte';
 	import { oneLine } from './quoteLabel';
 	import type { CommentMessage, CommentThread } from '$lib/comments/log';
+	import { isSuggestion, shownWords, suggestionKind } from '$lib/comments/suggest';
 	import { m } from '$lib/paraglide/messages';
 
 	let {
@@ -88,6 +89,17 @@
 		return t.messages.at(-1)?.at;
 	}
 
+	function summary(t: CommentThread): string {
+		const body = t.messages[0]?.body ?? '';
+		if (body || !isSuggestion(t)) return body;
+		const kind = suggestionKind(t.anchor.quote, t.restore ?? '');
+		return kind === 'delete'
+			? m.comments_suggest_delete_label()
+			: kind === 'insert'
+				? m.comments_suggest_add_label()
+				: m.comments_suggest_replace_label();
+	}
+
 	function toggle(thread: CommentThread) {
 		if (beside.has(thread.id)) {
 			expanded = null;
@@ -124,6 +136,13 @@
 				{@const lost = !fileGone && orphaned.has(thread.id)}
 				{@const hidden = !fileGone && !lost && notVisible.has(thread.id)}
 				{@const unsure = !fileGone && !lost && !hidden && weak.has(thread.id)}
+				{@const action = !isSuggestion(thread)
+					? thread.resolved
+						? m.comments_reopen()
+						: m.comments_resolve()
+					: !thread.resolved && (lost || fileGone)
+						? m.comments_suggest_dismiss()
+						: null}
 				<div data-thread={thread.id} class="border-surface-wash border-b last:border-b-0 {selected === thread.id ? 'bg-surface-tint' : ''}">
 					<!-- the summary and the thread actions are SIBLINGS: a button cannot contain a button,
 					     and Resolve/Delete belong on the header rather than under the reply box, where
@@ -148,12 +167,14 @@
 							<span class="min-w-0 flex-1">
 								<!-- the quote first: it is what tells you which comment this is, faster than the
 								     body does, and it is the only part that ties the row to the document -->
-								<span class="text-muted block truncate font-mono" use:tip={thread.anchor.quote}>{oneLine(thread.anchor.quote)}</span>
+								<span class="text-muted block truncate font-mono" use:tip={thread.anchor.quote || thread.restore}
+									>{oneLine(shownWords(thread.anchor.quote || (thread.restore ?? '')))}</span
+								>
 								<!-- the body preview goes when the thread opens: the messages below start with
 								     this same text, and showing both made every thread look like it had a
 								     duplicate first reply -->
 								{#if !isOpen}
-									<span class="block truncate" use:tip={thread.messages[0]?.body}>{thread.messages[0]?.body}</span>
+									<span class="block truncate" use:tip={summary(thread)}>{summary(thread)}</span>
 								{/if}
 							</span>
 							<!-- one centred cluster: the row is items-start (the quote block can be two lines),
@@ -177,16 +198,18 @@
 								<span class="text-muted font-mono">{thread.file}</span>
 							</span>
 						</button>
-						<div class="flex shrink-0 items-center gap-0.5 py-1.5 pr-2 {isOpen ? '' : 'opacity-0 group-hover:opacity-100'}">
-							<button
-								class="btn-icon btn-icon-xs hover:preset-tonal"
-								use:tip={thread.resolved ? m.comments_reopen() : m.comments_resolve()}
-								aria-label={thread.resolved ? m.comments_reopen() : m.comments_resolve()}
-								onclick={() => onResolve(thread, !thread.resolved)}
-							>
-								<Check class="size-3.5" />
-							</button>
-						</div>
+						{#if action}
+							<div class="flex shrink-0 items-center gap-0.5 py-1.5 pr-2 {isOpen ? '' : 'opacity-0 group-hover:opacity-100'}">
+								<button
+									class="btn-icon btn-icon-xs hover:preset-tonal"
+									use:tip={action}
+									aria-label={action}
+									onclick={() => onResolve(thread, !thread.resolved)}
+								>
+									<Check class="size-3.5" />
+								</button>
+							</div>
+						{/if}
 					</div>
 					{#if isOpen}
 						<CommentThreadConversation

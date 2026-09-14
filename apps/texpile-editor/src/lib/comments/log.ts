@@ -20,10 +20,12 @@ type Base = {
 	by: string;
 };
 
+export type SuggestionDecision = 'accepted' | 'rejected' | 'closed';
+
 export type CommentEvent =
-	| (Base & { t: 'open'; id: string; file: string; body: string; anchor: CommentAnchor })
+	| (Base & { t: 'open'; id: string; file: string; body: string; anchor: CommentAnchor; restore?: string })
 	| (Base & { t: 'reply'; id: string; thread: string; body: string })
-	| (Base & { t: 'resolve'; thread: string; resolved: boolean })
+	| (Base & { t: 'resolve'; thread: string; resolved: boolean; decision?: SuggestionDecision })
 	| (Base & { t: 'delete'; thread: string })
 	// one message rather than the whole thread. The log is a file anyone can open in an editor, so
 	// withholding these from the UI would only mean the fastest way to fix a typo is Notepad.
@@ -36,7 +38,7 @@ export type CommentEvent =
 	// the thread re-pinned to other text, after an edit rewrote the quote it sat on (an agent acting
 	// on the comment, mostly). `file` only when it also changed. Same version, same degrade story as
 	// move: an older build keeps the old anchor and shows the thread detached.
-	| (Base & { t: 'anchor'; thread: string; anchor: CommentAnchor; file?: string })
+	| (Base & { t: 'anchor'; thread: string; anchor: CommentAnchor; file?: string; restore?: string })
 	// The last thing a Texpile instance SAW when it looked for this thread's text. Unlike every other
 	// event here it records an observation rather than a decision, and it is written only when the
 	// answer changed - so browsing a project appends nothing, and the file stays quiet in git.
@@ -63,6 +65,8 @@ export type CommentThread = {
 	anchor: CommentAnchor;
 	resolved: boolean;
 	messages: CommentMessage[];
+	restore?: string;
+	decision?: SuggestionDecision;
 	/**
 	 * The last recorded observation of whether this thread's text could still be found (`detached`)
 	 * and whether the visual editor could draw it (`hidden`). Undefined means nobody has looked yet.
@@ -123,7 +127,8 @@ export function foldLog(events: CommentEvent[]): CommentThread[] {
 				file: e.file,
 				anchor: e.anchor,
 				resolved: false,
-				messages: [{ id: e.id, at: e.at, by: e.by, body: e.body }]
+				messages: [{ id: e.id, at: e.at, by: e.by, body: e.body }],
+				...(e.restore !== undefined ? { restore: e.restore } : {})
 			};
 			byId.set(e.id, thread);
 			owner.set(e.id, thread);
@@ -169,6 +174,7 @@ export function foldLog(events: CommentEvent[]): CommentThread[] {
 			}
 		} else if (e.t === 'resolve') {
 			thread.resolved = e.resolved;
+			thread.decision = e.resolved ? e.decision : undefined;
 		} else if (e.t === 'place') {
 			// each field independently, because the two are observed by different halves of the app:
 			// source placement by the controller, visual placement by the editor that rendered it. A
@@ -178,6 +184,7 @@ export function foldLog(events: CommentEvent[]): CommentThread[] {
 		} else if (e.t === 'anchor') {
 			thread.anchor = e.anchor;
 			if (e.file) thread.file = e.file;
+			if (e.restore !== undefined) thread.restore = e.restore;
 			// whatever was observed was observed about the old anchor
 			thread.detached = undefined;
 			thread.hidden = undefined;
@@ -188,7 +195,15 @@ export function foldLog(events: CommentEvent[]): CommentThread[] {
 	return [...byId.values()].filter((t) => !deleted.has(t.id));
 }
 
-export function openEvent(o: { id: string; file: string; by: string; body: string; anchor: CommentAnchor; at: string }): CommentEvent {
+export function openEvent(o: {
+	id: string;
+	file: string;
+	by: string;
+	body: string;
+	anchor: CommentAnchor;
+	at: string;
+	restore?: string;
+}): CommentEvent {
 	return {
 		v: LOG_VERSION,
 		t: 'open',
@@ -204,7 +219,13 @@ export function replyEvent(o: { id: string; thread: string; by: string; body: st
 	};
 }
 
-export function resolveEvent(o: { thread: string; by: string; resolved: boolean; at: string }): CommentEvent {
+export function resolveEvent(o: {
+	thread: string;
+	by: string;
+	resolved: boolean;
+	at: string;
+	decision?: SuggestionDecision;
+}): CommentEvent {
 	return {
 		v: LOG_VERSION,
 		t: 'resolve',
@@ -248,7 +269,14 @@ export function moveEvent(o: { from: string; to: string; by: string; at: string 
 	};
 }
 
-export function anchorEvent(o: { thread: string; anchor: CommentAnchor; file?: string; by: string; at: string }): CommentEvent {
+export function anchorEvent(o: {
+	thread: string;
+	anchor: CommentAnchor;
+	file?: string;
+	by: string;
+	at: string;
+	restore?: string;
+}): CommentEvent {
 	return {
 		v: LOG_VERSION,
 		t: 'anchor',
@@ -263,11 +291,21 @@ function isEvent(x: unknown): x is CommentEvent {
 	if (typeof e.at !== 'string' || typeof e.by !== 'string') return false;
 	switch (e.t) {
 		case 'open':
-			return typeof e.id === 'string' && typeof e.file === 'string' && typeof e.body === 'string' && isAnchor(e.anchor);
+			return (
+				typeof e.id === 'string' &&
+				typeof e.file === 'string' &&
+				typeof e.body === 'string' &&
+				isAnchor(e.anchor) &&
+				(e.restore === undefined || typeof e.restore === 'string')
+			);
 		case 'reply':
 			return typeof e.id === 'string' && typeof e.thread === 'string' && typeof e.body === 'string';
 		case 'resolve':
-			return typeof e.thread === 'string' && typeof e.resolved === 'boolean';
+			return (
+				typeof e.thread === 'string' &&
+				typeof e.resolved === 'boolean' &&
+				(e.decision === undefined || e.decision === 'accepted' || e.decision === 'rejected' || e.decision === 'closed')
+			);
 		case 'delete':
 			return typeof e.thread === 'string';
 		case 'place':
@@ -285,7 +323,12 @@ function isEvent(x: unknown): x is CommentEvent {
 		case 'move':
 			return typeof (e as { from?: unknown }).from === 'string' && typeof (e as { to?: unknown }).to === 'string';
 		case 'anchor':
-			return typeof e.thread === 'string' && isAnchor(e.anchor) && (e.file === undefined || typeof e.file === 'string');
+			return (
+				typeof e.thread === 'string' &&
+				isAnchor(e.anchor) &&
+				(e.file === undefined || typeof e.file === 'string') &&
+				(e.restore === undefined || typeof e.restore === 'string')
+			);
 		default:
 			return false;
 	}

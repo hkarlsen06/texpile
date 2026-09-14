@@ -8,6 +8,12 @@ import type { EditorView } from 'prosemirror-view';
 import type { CommentThread } from '$lib/comments/log';
 import type { AnchorDialect } from '$lib/comments/anchor';
 import { setPmComments, focusPmComment, resolvePmComments, setPmCommentPending } from './pmComments';
+import { setPmSuggestions } from './pmSuggestions';
+import { placePmSuggestions } from './pmSuggestionsPlace';
+import { isSuggestion } from '$lib/comments/suggest';
+import { activeSuggestions, suggestionVisibility, type SuggestionMark } from '$lib/comments/activeSuggestions.svelte';
+
+const PLACE_MS = 150;
 
 export type PmCommentsSyncArgs = {
 	/** the mounted view, or null until it exists */
@@ -42,7 +48,7 @@ export function syncPmComments(args: PmCommentsSyncArgs): void {
 	let lastEpoch = -1;
 	$effect(() => {
 		const v = args.view();
-		const threads = args.threads();
+		const threads = args.threads().filter((t) => !isSuggestion(t));
 		const epoch = args.epoch();
 		if (!v) return;
 		const fp = threads.map((t) => `${t.id}:${t.resolved ? 1 : 0}:${t.anchor.start}-${t.anchor.end}`).join('|');
@@ -52,6 +58,37 @@ export function syncPmComments(args: PmCommentsSyncArgs): void {
 		const placed = resolvePmComments(v.state.doc, threads, args.dialect);
 		setPmComments(v, placed.ranges);
 		args.onPlaced?.(placed.lost);
+	});
+
+	let lastMarks: SuggestionMark[] | null = null;
+	let lastMarksEpoch = -1;
+	let placedAt = 0;
+	let later: ReturnType<typeof setTimeout> | null = null;
+	function placeSuggestions(v: EditorView, marks: SuggestionMark[]) {
+		if (later) clearTimeout(later);
+		later = null;
+		lastMarks = marks;
+		placedAt = performance.now();
+		const placed = placePmSuggestions(v.state.doc, marks, args.dialect);
+		setPmSuggestions(v, placed.ranges);
+		suggestionVisibility.current = { partial: placed.partial, hidden: placed.hidden };
+	}
+	$effect(() => {
+		const v = args.view();
+		const marks = activeSuggestions.current;
+		const epoch = args.epoch();
+		if (!v || (marks === lastMarks && epoch === lastMarksEpoch)) return;
+		const swapped = epoch !== lastMarksEpoch;
+		lastMarksEpoch = epoch;
+		const wait = placedAt + PLACE_MS - performance.now();
+		if (swapped || wait <= 0) return placeSuggestions(v, marks);
+		const doc = v.state.doc;
+		if (later) clearTimeout(later);
+		later = setTimeout(() => (v.state.doc === doc ? placeSuggestions(v, marks) : (later = null)), wait);
+	});
+	$effect(() => () => {
+		if (later) clearTimeout(later);
+		suggestionVisibility.current = { partial: new Set(), hidden: new Set() };
 	});
 
 	$effect(() => {

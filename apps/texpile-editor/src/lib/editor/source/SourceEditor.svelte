@@ -3,6 +3,8 @@
 	import { EditorView, type ViewUpdate } from '@codemirror/view';
 	import { EditorState, Compartment } from '@codemirror/state';
 	import { setCommentRanges, focusCommentThread, type CommentRange } from '$lib/editor/visual/extensions/comments';
+	import { setSuggestionRanges, focusSuggestion, fitsSuggestion } from '$lib/editor/source/cmSuggestions';
+	import { activeSuggestions } from '$lib/comments/activeSuggestions.svelte';
 	import { flashLineEffect } from '$lib/languages/latex/source/synctexFlash';
 	import { bindModalKeymap, modalKeymapCompartment } from '$lib/editor/source/extensions/keybindings/modalKeymap';
 	import { typstServerGen } from '$lib/languages/typst/intellisense/lspClient';
@@ -234,6 +236,17 @@
 		v.dispatch({ effects: setCommentRanges.of(list) });
 	});
 
+	let lastSuggestions: typeof activeSuggestions.current | null = null;
+	$effect(() => {
+		const marks = activeSuggestions.current;
+		const v = view;
+		void value;
+		if (!v || !onAddComment || marks === lastSuggestions) return;
+		if (!marks.every((r) => fitsSuggestion(v.state, r))) return;
+		lastSuggestions = marks;
+		v.dispatch({ effects: setSuggestionRanges.of(marks.map(({ id, from, to, restore, mine }) => ({ id, from, to, restore, mine }))) });
+	});
+
 	// kept apart from the ranges: selecting happens far more often and must not rebuild the whole set
 	let lastFocus: string | null = null;
 	$effect(() => {
@@ -241,7 +254,7 @@
 		const v = view;
 		if (!v || !onAddComment || id === lastFocus) return;
 		lastFocus = id;
-		v.dispatch({ effects: focusCommentThread.of(id) });
+		v.dispatch({ effects: [focusCommentThread.of(id), focusSuggestion.of(id)] });
 	});
 
 	// the effect still runs per keystroke (value is a dependency), but the feed skips dispatches

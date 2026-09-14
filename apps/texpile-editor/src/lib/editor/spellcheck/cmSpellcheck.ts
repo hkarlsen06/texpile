@@ -9,6 +9,7 @@ import { editorConfigStore } from '$lib/stores/editorStore';
 import { observe } from '$lib/runes/observe.svelte';
 import { docText } from '$lib/editor/source/docText';
 import { maskTex, overlapsMask, type TexMask } from './texMask';
+import { clearOfOldWords, liveSuggestionRanges } from '$lib/editor/source/cmSuggestions';
 import './suggestion.css';
 
 /**
@@ -69,6 +70,7 @@ function splitParagraphs(masked: string): Paragraph[] {
 
 class SpellPlugin {
 	decorations: DecorationSet = Decoration.none;
+	shown: DecorationSet = Decoration.none;
 	private timer: ReturnType<typeof setTimeout> | null = null;
 	private gen = 0;
 	private enabled = false;
@@ -93,6 +95,7 @@ class SpellPlugin {
 				else {
 					this.gen++;
 					this.decorations = Decoration.none;
+					this.shown = Decoration.none;
 					this.view.dispatch({});
 				}
 			}
@@ -105,6 +108,9 @@ class SpellPlugin {
 			this.gen++;
 			this.decorations = this.decorations.map(u.changes);
 			this.schedule(DEBOUNCE_MS);
+		}
+		if (u.docChanged || liveSuggestionRanges(u.startState) !== liveSuggestionRanges(u.state)) {
+			this.shown = clearOfOldWords(this.decorations, u.state);
 		}
 	}
 
@@ -243,12 +249,13 @@ class SpellPlugin {
 			return;
 		}
 		this.decorations = builder.finish();
+		this.shown = clearOfOldWords(this.decorations, this.view.state);
 		this.view.dispatch({});
 	}
 }
 
 const spellPlugin = ViewPlugin.fromClass(SpellPlugin, {
-	decorations: (p) => p.decorations,
+	decorations: (p) => p.shown,
 	eventHandlers: {
 		click(e, view) {
 			const plugin = view.plugin(spellPlugin);

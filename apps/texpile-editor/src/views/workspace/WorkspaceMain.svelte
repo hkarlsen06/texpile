@@ -12,6 +12,8 @@
 	import { ChevronLeft } from '@lucide/svelte';
 	import { m } from '$lib/paraglide/messages';
 	import { activeCompare } from '$lib/workspace/workspaceStore';
+	import { activeSuggestions, suggesting } from '$lib/comments/activeSuggestions.svelte';
+	import { layout as windowLayout, updateLayout } from '$lib/storage/layout';
 	import type { WorkspaceMainProps } from './workspaceMainProps';
 
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- the pipelines are structural here
@@ -63,8 +65,18 @@
 	const syncToCursor = $derived(canSync ? (actions.syncForward as () => void) : null);
 	// a lone file has no project to hold the log, so the menus drop their Add comment entry
 	const canComment = $derived(!fileMode.current);
+	suggesting.current = windowLayout.current.suggesting === true;
+	function toggleSuggest(next: boolean) {
+		void commentsCtl.suggestions.settle();
+		suggesting.current = next;
+		updateLayout({ suggesting: next });
+	}
 	const beside = $derived(
-		new Set<string>(panes.commentRanges.filter((r: Any) => !r.resolved && !panes.commentsNotVisible.has(r.id)).map((r: Any) => r.id))
+		new Set<string>(
+			[...panes.commentRanges.filter((r: Any) => !r.resolved), ...activeSuggestions.current]
+				.map((r: Any) => r.id)
+				.filter((id: string) => !panes.commentsNotVisible.has(id))
+		)
 	);
 </script>
 
@@ -102,6 +114,8 @@
 		onShowProblems={actions.showProblems}
 		commentCount={panes.comments.filter((t: Any) => !t.resolved && !panes.commentGhosts.has(t.id)).length}
 		onShowComments={actions.showComments}
+		suggesting={suggesting.current}
+		onToggleSuggest={canComment && !session.active ? toggleSuggest : undefined}
 		onTogglePdf={layout.togglePdfPane}
 		onSave={actions.save}
 		onSyncToCursor={layout.pdfPopout && !mainUnset ? syncToCursor : null}

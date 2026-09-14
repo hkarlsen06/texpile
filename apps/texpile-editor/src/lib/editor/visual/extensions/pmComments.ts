@@ -24,6 +24,7 @@ import { observe } from '$lib/runes/observe.svelte';
 import { m } from '$lib/paraglide/messages';
 
 import { flattenDoc } from './pmCommentsResolve';
+import { focusPmSuggestionMeta, pmSuggestionAt, pmSuggestions, pmSuggestionsKey } from './pmSuggestions';
 
 export { flattenDoc, resolvePmComments, type FlatDoc } from './pmCommentsResolve';
 
@@ -56,7 +57,11 @@ export function setPmComments(view: EditorView, ranges: PmCommentRange[]): void 
 
 /** which thread the reader is looking at, so its highlight can be picked out from the rest */
 export function focusPmComment(view: EditorView, id: string | null): void {
-	view.dispatch(view.state.tr.setMeta(pmCommentsKey, { type: 'focus', id } satisfies PmCommentsMeta));
+	view.dispatch(
+		view.state.tr
+			.setMeta(pmCommentsKey, { type: 'focus', id } satisfies PmCommentsMeta)
+			.setMeta(pmSuggestionsKey, focusPmSuggestionMeta(id))
+	);
 }
 
 /**
@@ -85,7 +90,9 @@ export function setPmCommentPending(view: EditorView, range: { from: number; to:
  * is what was asked for, and yanking the caret out of the dock is not.
  */
 export function revealPmComment(view: EditorView, id: string): boolean {
-	const r = (pmCommentsKey.getState(view.state)?.ranges ?? []).find((x) => x.id === id);
+	const r =
+		(pmCommentsKey.getState(view.state)?.ranges ?? []).find((x) => x.id === id) ??
+		(pmSuggestionsKey.getState(view.state)?.ranges ?? []).find((x) => x.id === id);
 	if (!r) return false;
 	const $at = view.state.doc.resolve(r.from);
 	// TextSelection.near rather than .create: a comment can start at a block edge, and near() finds
@@ -210,7 +217,7 @@ export function pmComments({ onSelect, onAdd, addLabel = 'Comment' }: PmComments
 			},
 			handleClick(view, pos) {
 				if (!onSelect) return false;
-				const hit = pmCommentAt(view.state, pos);
+				const hit = pmCommentAt(view.state, pos) ?? pmSuggestionAt(view.state, pos);
 				if (!hit) return false;
 				onSelect(hit.id);
 				// not handled: the click should still place the caret where it landed
@@ -218,7 +225,7 @@ export function pmComments({ onSelect, onAdd, addLabel = 'Comment' }: PmComments
 			}
 		}
 	});
-	return [state, ...(onAdd ? [addPill(onAdd, addLabel)] : [])];
+	return [state, pmSuggestions(), ...(onAdd ? [addPill(onAdd, addLabel)] : [])];
 }
 
 /** the pill fades in rather than flashing under the pointer for every drag it passes through */

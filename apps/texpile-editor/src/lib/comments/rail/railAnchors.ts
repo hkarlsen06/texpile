@@ -2,6 +2,7 @@
 import type { EditorView as CodeMirrorView } from '@codemirror/view';
 import type { EditorView as ProseMirrorView } from 'prosemirror-view';
 import type { CommentRange } from '$lib/editor/visual/extensions/comments';
+import type { SuggestionRange } from '$lib/editor/source/cmSuggestions';
 
 export const PENDING_ANCHOR = 'pending';
 
@@ -9,7 +10,9 @@ export function measurePmAnchors(view: ProseMirrorView, rail: HTMLElement, pendi
 	const root = view.dom as HTMLElement;
 	const top = rail.getBoundingClientRect().top;
 	const out = new Map<string, number>();
-	for (const el of root.querySelectorAll<HTMLElement>('.pm-comment[data-comment]')) {
+	for (const el of root.querySelectorAll<HTMLElement>(
+		'.pm-comment[data-comment], .pm-suggest-old[data-comment], .pm-suggest-new[data-comment], .pm-suggest-partial[data-comment]'
+	)) {
 		const id = el.dataset.comment;
 		if (!id || out.has(id)) continue;
 		const rect = el.getBoundingClientRect();
@@ -49,13 +52,19 @@ export function measureCmAnchors(
 	view: CodeMirrorView,
 	ranges: CommentRange[],
 	pending: { from?: number } | null,
-	rail: HTMLElement
+	rail: HTMLElement,
+	suggestions: SuggestionRange[] = []
 ): Map<string, number> {
 	const top = rail.getBoundingClientRect().top;
 	const len = view.state.doc.length;
 	const out = new Map<string, number>();
 	for (const r of ranges) {
 		if (r.resolved || r.to === r.from || out.has(r.id)) continue;
+		const c = view.coordsAtPos(Math.min(r.from, len));
+		if (c) out.set(r.id, Math.round(c.top - top));
+	}
+	for (const r of suggestions) {
+		if (out.has(r.id)) continue;
 		const c = view.coordsAtPos(Math.min(r.from, len));
 		if (c) out.set(r.id, Math.round(c.top - top));
 	}

@@ -18,6 +18,10 @@ import { flatFiles } from '$lib/workspace/treeRefresh';
 import { relativeTo } from '$lib/comments/store.svelte';
 import { hasVisualMode, type DocumentBuffer, type FileKind } from '$lib/workspace/documentBuffer.svelte';
 import type { ViewModeSwitch } from '$lib/workspace/viewModeSwitch.svelte';
+import type { ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
+import type { SourceEdit } from '$lib/workspace/suggestionsController';
+import { patchVisualFromSource } from '$lib/workspace/visualSourcePatch';
+import { editMode, suggesting } from '$lib/comments/activeSuggestions.svelte';
 
 type CommentsDeps = {
 	doc: DocumentBuffer;
@@ -25,12 +29,17 @@ type CommentsDeps = {
 	kind: () => FileKind;
 	guest: () => boolean;
 	jumpToFileLine: (abs: string, line: number) => void;
+	parseVisual: (text: string) => Promise<ParsedLatexFile | null>;
+	flushSave: () => void;
 };
 
 export class WorkspaceComments {
 	readonly ctl: CommentsController;
 
 	constructor(private d: CommentsDeps) {
+		function mode() {
+			return suggesting.current && !d.guest() && !collabHost.active && !fileMode.current ? 'suggesting' : 'editing';
+		}
 		this.ctl = new CommentsController({
 			root: () => workspaceRoot.current,
 			// a guest has no git repo to fall back to (its root is the 'session' sentinel), but it DOES
@@ -58,7 +67,22 @@ export class WorkspaceComments {
 			publish: (event) => {
 				if (d.guest()) collabGuest.sendComment(event);
 				else if (collabHost.active) collabHost.broadcastComment(event);
-			}
+			},
+			mode,
+			compares: () => !d.guest(),
+			rewraps: () => d.modes.mode === 'visual' && hasVisualMode(d.kind()),
+			applyEdit: (edit) => this.applyEdit(edit),
+			saveNow: () => d.flushSave()
+		});
+
+		$effect(() => {
+			editMode.current = mode();
+		});
+
+		$effect(() => {
+			const text = this.activeText();
+			const path = d.doc.path;
+			if (!d.guest()) untrack(() => this.ctl.suggestions.textChanged(path, text));
 		});
 
 		// "not in this view" is a statement about the VISUAL view; source draws everything it resolves,
@@ -123,6 +147,39 @@ export class WorkspaceComments {
 	/** the live buffer the anchors resolve against */
 	activeText(): string {
 		return hasVisualMode(this.d.kind()) ? this.d.doc.texSource : this.d.doc.rawContent;
+	}
+
+	private async applyEdit(edit: SourceEdit): Promise<boolean> {
+		const before = this.activeText();
+		if (edit.from < 0 || edit.to > before.length || edit.to < edit.from) return false;
+		const next = before.slice(0, edit.from) + edit.insert + before.slice(edit.to);
+		if (this.d.modes.mode === 'visual' && hasVisualMode(this.d.kind())) {
+			const v = editorViewStore.current;
+			return !!v && patchVisualFromSource(v, this.d.doc, this.d.parseVisual, before, next);
+		}
+		const cm = sourceCmView.current;
+		if (!cm || cm.state.doc.toString() !== before) return false;
+		cm.dispatch({ changes: { from: edit.from, to: edit.to, insert: edit.insert } });
+		return true;
+	}
+
+	async beforeSave(absPath: string, content: string): Promise<void> {
+		const root = workspaceRoot.current;
+		if (!root || this.d.guest() || fileMode.current) return;
+		const file = relativeTo(root, absPath);
+		if (file === absPath.replace(/\\/g, '/')) return;
+		await this.ctl.suggestions.beforeSave(file, content);
+	}
+
+	discarded(absPath: string): void {
+		const root = workspaceRoot.current;
+		if (root) this.ctl.suggestions.discardUnsaved(relativeTo(root, absPath));
+	}
+
+	async adoptDisk(): Promise<void> {
+		const file = this.ctl.activeFile;
+		if (file) await this.ctl.suggestions.adoptDisk(file, this.activeText());
+		this.reanchorNow();
 	}
 
 	/** re-search the open file's threads against its text as it is now; see the reanchor effect */

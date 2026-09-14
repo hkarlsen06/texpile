@@ -80,13 +80,19 @@
 		modes,
 		kind: () => kind,
 		guest: () => guest,
-		jumpToFileLine: (abs, line) => nav.syncJumpToFileLine(abs, line)
+		jumpToFileLine: (abs, line) => nav.syncJumpToFileLine(abs, line),
+		parseVisual: async (text) => (await wsdoc.tryParseVisual(text)).parsed ?? null,
+		flushSave: () => saver.flush()
 	});
 	const commentsCtl = commentsW.ctl;
 	// an outside write adopted into the open file (an agent, vim) re-places its threads now, so a
 	// rewritten quote badges detached at once rather than at the next mode switch
-	external.onAdopted = () => commentsW.reanchorNow();
-	saver.beforeWrite = (path, content) => commentsCtl.syncAnchorsToText(path, content);
+	external.onAdopted = () => void commentsW.adoptDisk();
+	unsaved.onDiscard = (path) => commentsW.discarded(path);
+	saver.beforeWrite = async (path, content) => {
+		await commentsW.beforeSave(path, content);
+		await commentsCtl.syncAnchorsToText(path, content);
+	};
 	modes.beforeSwitch = () => commentsCtl.carryLive();
 
 	const folderEmpty = $derived(texFiles.current.length === 0);

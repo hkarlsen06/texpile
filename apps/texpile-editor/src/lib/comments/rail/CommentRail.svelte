@@ -5,9 +5,13 @@
 	import type { CommentThread } from '$lib/comments/log';
 	import { editorViewStore, sourceCmView } from '$lib/stores/editorStore';
 	import { liveCommentRanges } from '$lib/editor/visual/extensions/comments';
+	import { liveSuggestionRanges } from '$lib/editor/source/cmSuggestions';
+	import { activeSuggestions } from '$lib/comments/activeSuggestions.svelte';
+	import { toaster } from '$lib/modals/toaster-svelte';
 	import { revealPmComment } from '$lib/editor/visual/extensions/pmComments';
 	import { COMMENT_RAIL_PEEK, COMMENT_RAIL_WIDTH, EDITOR_TEXT_MIN, EDITOR_TEXT_PAD } from '$lib/workspace/paneGeometry';
 	import { RailGeometry } from './railGeometry.svelte';
+	import { RailGlide } from './railGlide.svelte';
 	import { cmTextExtent, measureCmAnchors, measurePmAnchors, PENDING_ANCHOR } from './railAnchors';
 	import { stackRailItems, type RailBounds, type RailItem } from './railLayout';
 	import CommentCard from './CommentCard.svelte';
@@ -63,7 +67,8 @@
 					view,
 					liveCommentRanges(view.state),
 					untrack(() => ctl.pending),
-					el
+					el,
+					liveSuggestionRanges(view.state)
 				);
 			}
 		});
@@ -71,6 +76,7 @@
 	$effect(() => {
 		void ctl.pending;
 		void threads;
+		void activeSuggestions.current;
 		geometry.schedule();
 	});
 
@@ -88,7 +94,24 @@
 
 	const placed = $derived(threads.filter((t) => !t.resolved && anchors.has(t.id)).sort((a, b) => anchors.get(a.id)! - anchors.get(b.id)!));
 	const composing = $derived(!!ctl.pending && anchors.has(PENDING_ANCHOR));
-	const showing = $derived(placed.length > 0 || composing);
+	const glide: RailGlide = new RailGlide(() => ({
+		rail,
+		box: mode === 'visual' ? scroller : (cmView?.scrollDOM ?? null),
+		inflow,
+		showing
+	}));
+	const showing: boolean = $derived(placed.length > 0 || composing || glide.leaving);
+	let hadCards = false;
+	$effect.pre(() => {
+		const cards = placed.length > 0 || composing;
+		if (hadCards && !cards) untrack(() => glide.closeColumn());
+		hadCards = cards;
+	});
+	$effect(() => {
+		void cmView;
+		void scroller;
+		glide.leaving = false;
+	});
 
 	const heights = new Map<string, number>();
 	let positions = $state.raw<Map<string, number>>(new Map());
@@ -153,70 +176,23 @@
 		return () => ro.disconnect();
 	});
 
-	function reveal(afterJump = false) {
-		const el = rail;
-		const box = mode === 'visual' ? scroller : cmView?.scrollDOM;
-		if (!el || !box) return;
-		const whole = () => {
-			const edge = box.getBoundingClientRect().left + box.clientWidth + 1;
-			return [...el.querySelectorAll('.comment-card')].every((c) => c.getBoundingClientRect().right <= edge);
-		};
-		const go = (again = 2) => {
-			if (whole()) return;
-			const edge = box.getBoundingClientRect().left + box.clientWidth;
-			const over = Math.max(...[...el.querySelectorAll('.comment-card')].map((c) => c.getBoundingClientRect().right - edge));
-			box.scrollTo({ left: box.scrollLeft + over, behavior: glide() });
-			let last = box.scrollLeft;
-			const stop = () => {
-				box.removeEventListener('scroll', onScroll);
-				clearTimeout(timer);
-			};
-			const onScroll = () => {
-				const now = box.scrollLeft;
-				if (whole() || now < last) return stop();
-				if (now === last) {
-					stop();
-					if (again > 0) go(again - 1);
-				}
-				last = now;
-			};
-			const timer = setTimeout(() => {
-				stop();
-				if (again > 0 && !whole()) go(0);
-			}, 900);
-			box.addEventListener('scroll', onScroll);
-		};
-		if (afterJump) setTimeout(go, 120);
-		else go();
-	}
-	function glide(): ScrollBehavior {
-		return matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
-	}
-	function retreat() {
-		const el = rail;
-		const box = mode === 'visual' ? scroller : cmView?.scrollDOM;
-		if (!el || !box || !showing) return;
-		const rest = Math.max(
-			0,
-			el.getBoundingClientRect().left - box.getBoundingClientRect().left + box.scrollLeft + inflow - box.clientWidth
-		);
-		if (box.scrollLeft <= rest + 1) return;
-		box.scrollTo({ left: rest, behavior: glide() });
-	}
-
 	let revealedSeq = 0;
 	$effect(() => {
 		const req = ctl.toReveal;
 		if (!req || req.seq === revealedSeq || !placed.some((t) => t.id === req.id)) return;
 		revealedSeq = req.seq;
 		if (mode === 'visual' && pmView) revealPmComment(pmView, req.id);
-		reveal(true);
+		glide.reveal(true);
 	});
 	let composingWas = false;
 	$effect(() => {
-		if (composing && !composingWas) reveal();
+		if (composing && !composingWas) glide.reveal();
 		composingWas = composing;
 	});
+
+	async function reject(t: CommentThread) {
+		if (!(await ctl.suggestions.reject(t))) toaster.warning({ title: m.comments_suggest_reject_failed() });
+	}
 
 	let hovered = $state<string | null>(null);
 	$effect(() => {
@@ -231,7 +207,7 @@
 		}
 		function click() {
 			const collapsed = mode === 'visual' ? pmView?.state.selection.empty : cmView?.state.selection.main.empty;
-			if (collapsed) retreat();
+			if (collapsed) glide.retreat();
 		}
 		root.addEventListener('mouseover', over);
 		root.addEventListener('mouseleave', leave);
@@ -251,7 +227,9 @@
 		: ''}"
 	style="width: {showing ? inflow : 0}px; --comment-rail-tail: {tail}px; --comment-card-shift: {shift}px"
 	aria-label={m.wsview_comments_label()}
-	onclick={() => reveal()}
+	onclick={(e) => {
+		if (!(e.target as HTMLElement).closest('button')) glide.reveal();
+	}}
 	onkeydown={(e) => {
 		// Escape in a reply box drops the selection; the composer handles its own
 		if (e.key === 'Escape' && (e.target as HTMLElement).closest('.comment-card:not(.comment-card-pending)')) ctl.selected = null;
@@ -262,10 +240,13 @@
 			thread={t}
 			selected={t.id === ctl.selected}
 			unsure={ctl.weak.has(t.id)}
+			partial={ctl.partial.has(t.id)}
 			hovered={hovered === t.id}
 			top={topOf(t.id)}
 			onSelect={() => onSelect(t.id)}
 			onResolve={() => void ctl.setResolved(t, !t.resolved)}
+			onAccept={() => void ctl.suggestions.accept(t)}
+			onReject={() => void reject(t)}
 			onReply={(thread, body) => void ctl.reply(thread, body)}
 			onEditMessage={(msg, body) => void ctl.editMessage(msg, body)}
 			onDeleteMessage={(thread, msg) => void ctl.removeMessage(thread, msg)}

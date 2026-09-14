@@ -40,6 +40,8 @@ export class UnsavedGuard {
 	 * visually on it) and this carries where the user was headed */
 	held: { target: string | null } | null = null;
 
+	onDiscard: ((path: string) => void) | null = null;
+
 	constructor(private deps: UnsavedGuardDeps) {}
 
 	private get saver(): SavePipeline {
@@ -86,6 +88,7 @@ export class UnsavedGuard {
 						return;
 					}
 					if (choice === 'save') void this.saver.enqueueWithEol(outgoing.path, outgoing.content, false, eol);
+					else this.onDiscard?.(outgoing.path);
 					resolve(true);
 				}
 			};
@@ -108,6 +111,7 @@ export class UnsavedGuard {
 			return;
 		}
 		if (choice === 'save') void this.saver.enqueueWithEol(prompt.outgoing.path, prompt.outgoing.content, false, prompt.eol);
+		else this.onDiscard?.(prompt.outgoing.path);
 		const closing = this.deps.takePendingTabClose();
 		if (closing) tabs.close(closing);
 		const target = this.held?.target ?? null;
