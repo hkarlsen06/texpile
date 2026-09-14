@@ -7,7 +7,7 @@
 import type { Node } from 'prosemirror-model';
 import { createBlockAssembly, type DocSerializeResult } from '$lib/serializer/blockAssembly';
 import type { Ctx } from '$lib/serializer/types';
-import { escTypst, renderInline, mathTypstOf, typStr } from './typstInline';
+import { escTypst, renderInline, renderHeadingLine, renderBody, mathTypstOf, typStr } from './typstInline';
 import { tableBody } from './tableSerializer';
 export { escTypst, renderInline } from './typstInline';
 
@@ -23,17 +23,35 @@ const LINE_START_BLOCKS = new Set(['list', 'heading', 'code_block', 'term_item',
 // blocks whose last line ends them: anything may follow on the next line
 const LINE_END_BLOCKS = new Set(['heading', 'list', 'code_block', 'term_item', 'includedoc']);
 
-/** a declaration island ends at its line end; a lone call does not */
-function declarationRaw(node: Node): boolean {
-	return /^#(set|let|show|import|include)\b/.test(node.textContent);
+function declarationLine(line: string): boolean {
+	return /^#(set|let|show|import|include)\b/.test(line);
+}
+
+function islandEndsLine(node: Node): boolean {
+	const lines = node.textContent.split('\n');
+	const last = lines[lines.length - 1];
+	const head = lines.findLast((l) => !/^[\s)\]}]/.test(l)) ?? '';
+	return /^\/\//.test(last) || (/^\/\*/.test(head) && /\*\/\s*$/.test(last)) || declarationLine(head);
+}
+
+function headingLabel(node: Node): string {
+	return node.attrs.label ? ` <${String(node.attrs.label)}>` : '';
+}
+
+function headingLine(node: Node): string | null {
+	return node.attrs.numbered === false ? null : renderHeadingLine(node, headingLabel(node));
+}
+
+function lineBound(node: Node, blocks: Set<string>): boolean {
+	return blocks.has(node.type.name) && (node.type.name !== 'heading' || headingLine(node) != null);
 }
 
 /** may `next` follow `prev` after a single line end without merging into it on reparse? a
  *  comment island counts only as prev: after a paragraph it would join that paragraph */
 function glueSafe(prev: Node, next: Node): boolean {
-	if (LINE_START_BLOCKS.has(next.type.name) || LINE_END_BLOCKS.has(prev.type.name)) return true;
-	if (next.type.name === 'raw_latex' && declarationRaw(next)) return true;
-	return prev.type.name === 'raw_latex' && (declarationRaw(prev) || /^\/[/*]/.test(prev.textContent));
+	if (lineBound(next, LINE_START_BLOCKS) || lineBound(prev, LINE_END_BLOCKS)) return true;
+	if (next.type.name === 'raw_latex' && declarationLine(next.textContent)) return true;
+	return prev.type.name === 'raw_latex' && islandEndsLine(prev);
 }
 
 /**
@@ -88,11 +106,14 @@ const NODES: Record<string, NodeHandler> = {
 
 	heading(node) {
 		const level = Math.min(6, Math.max(1, Number(node.attrs.level ?? 1)));
-		const label = node.attrs.label ? ` <${String(node.attrs.label)}>` : '';
-		if (node.attrs.numbered === false) return `#heading(level: ${level}, numbering: none)[${renderInline(node, false)}]${label}\n\n`;
-		const inner = renderInline(node, false, '', true);
+		const label = headingLabel(node);
+		const line = headingLine(node);
+		if (line == null) {
+			const args = node.attrs.numbered === false ? `level: ${level}, numbering: none` : `depth: ${level}`;
+			return `#heading(${args})[${renderBody(node)}]${label}\n\n`;
+		}
 		// an empty heading is still a heading (it steps the counter); `=` alone is one
-		return `${'='.repeat(level)}${inner ? ' ' + inner : ''}${label}\n\n`;
+		return `${'='.repeat(level)}${line ? ' ' + line : ''}${label}\n\n`;
 	},
 
 	code_block(node) {
@@ -128,7 +149,7 @@ const NODES: Record<string, NodeHandler> = {
 		}
 		const opts = optsStr ? `, ${optsStr}` : '';
 		const img = `image(${typStr(String(node.attrs.src ?? ''))}${opts})`;
-		const caption = node.attrs.showCaption !== false ? renderInline(node, true).trim() : '';
+		const caption = node.attrs.showCaption !== false ? renderBody(node) : '';
 		const label = node.attrs.label ? ` <${String(node.attrs.label)}>` : '';
 		// a bare #image is one the source never wrapped in a figure; keep it bare
 		if (node.attrs.numbered === false && !caption && !label) return `#${img}\n\n`;
@@ -152,7 +173,7 @@ const NODES: Record<string, NodeHandler> = {
 		const body = tableBody(table, '  ', renderBlocks);
 		if (!body) return '';
 		const cap = captionNode as Node | null;
-		const caption = cap && cap.childCount > 0 ? renderInline(cap, true).trim() : '';
+		const caption = cap && cap.childCount > 0 ? renderBody(cap) : '';
 		const label = node.attrs.label ? ` <${String(node.attrs.label)}>` : '';
 		return `#figure(\n  ${body}${caption ? `,\n  caption: [${caption}]` : ''},\n)${label}\n\n`;
 	},

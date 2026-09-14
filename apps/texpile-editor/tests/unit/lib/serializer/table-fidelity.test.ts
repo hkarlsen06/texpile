@@ -77,4 +77,10 @@ describe('table floats', () => {
 		expect(out).toContain('{\\footnotesize Source: us.}');
 		expect(out).not.toContain('{\\small');
 	});
+
+	it('notes after a skip are still notes, so a second save keeps them', () => {
+		const once = rt('\\begin{table}\n\\begin{tabular}{l}\na \\\\\n\\end{tabular}\n\\medskip\n{\\small Source: us.}\n\\end{table}');
+		expect(once).toContain('Source: us.');
+		expect(rt(once)).toBe(once);
+	});
 });

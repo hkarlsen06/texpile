@@ -219,7 +219,8 @@ export function renderInline(parent: Node, opts: InlineOptions = {}): string {
 	}
 
 	let dropped: Mark[] = [];
-	for (const run of runs) {
+	for (let r = 0; r < runs.length; r++) {
+		const run = runs[r];
 		dropped = dropped.filter((m) => run.marks.some((x) => x.eq(m)));
 		let marks = alignMarks(
 			active,
@@ -230,9 +231,15 @@ export function renderInline(parent: Node, opts: InlineOptions = {}): string {
 		const closing = active.slice(keep).reverse();
 		let content = run.content;
 		const opensEmphasis = marks.slice(keep).filter((m) => markDelims(m, inTableCell)?.expel);
-		const intraword = expels(closing) && WORD_CHAR.test(out.charAt(out.length - 1)) && WORD_CHAR.test(content.charAt(0));
-		if (opensEmphasis.length && ((run.isText && !content.trim()) || intraword)) {
-			if (intraword) dropped.push(...opensEmphasis);
+		const afterWord = WORD_CHAR.test(out.charAt(out.length - 1));
+		const intraword = expels(closing) && afterWord && WORD_CHAR.test(content.charAt(0));
+		const punctuation = run.isText && afterWord && PUNCT_HEAD.exec(content)?.[0] === content;
+		if (opensEmphasis.length && ((run.isText && !content.trim()) || intraword || punctuation)) {
+			const word = intraword && run.isText ? /^[\p{L}\p{N}]+/u.exec(content)![0] : '';
+			if (word && word.length < content.length) {
+				runs.splice(r + 1, 0, { ...run, content: content.slice(word.length) });
+				content = word;
+			} else if (intraword) dropped.push(...opensEmphasis);
 			marks = marks.filter((m, i) => i < keep || !opensEmphasis.includes(m));
 		}
 		emitCloses(closing, content);

@@ -24,6 +24,13 @@ export const EXPRESSION_KINDS = new Set(['Conditional', 'ForLoop', 'WhileLoop', 
 
 export const STATEMENT_KINDS = new Set([...DECLARATION_KINDS, ...EXPRESSION_KINDS]);
 
+export function expressionEnd(nodes: SyntaxNode[], at: number, src: string): number {
+	const after = nodes[at + 1];
+	if (after?.name === 'Semicolon' || (after?.name === 'Error' && after.to > after.from)) return at + 1;
+	const spaced = after?.name === 'Space' && !/[\r\n]/.test(src.slice(after.from, after.to));
+	return spaced && DECLARATION_KINDS.has(nodes[at].name) && nodes[at + 2]?.name === 'Semicolon' ? at + 2 : at;
+}
+
 // shorthands become the character the reader sees; the reverse direction needs no mapping
 // because the character itself is valid Typst text
 export const SHORTHANDS: Record<string, string> = {
@@ -303,9 +310,9 @@ export function convertInline(nodes: SyntaxNode[], src: string, marks: PmMark[])
 					out.push(...textNodes(rawText, [...marks, { type: 'code' }]));
 				} else {
 					// a terminating semicolon belongs to the expression (`#a; text`)
-					const semi = nodes[i + 2]?.name === 'Semicolon' ? nodes[i + 2] : null;
-					out.push(...chip(src.slice(k.from, (semi ?? next).to), marks));
-					if (semi) i++;
+					const end = expressionEnd(nodes, i + 1, src);
+					out.push(...chip(src.slice(k.from, nodes[end].to), marks));
+					i = end - 1;
 				}
 				i++;
 				break;

@@ -1,6 +1,7 @@
 // the inline layer: text escaping, mark delimiters, and mark-aware run rendering
 import type { Node, Mark } from 'prosemirror-model';
 import { latexToTypst } from './latexToTypst';
+import { codeEndsBefore } from './codeExtent';
 
 /** a math node's typst: the stored source while its LaTeX is untouched, else MathLive's
  *  conversion, else the stored source again. never the LaTeX: a .typ cannot hold it */
@@ -256,10 +257,34 @@ function continuesCode(code: string, s: string): boolean {
 
 type ActiveMark = { mark: Mark; close: string; expel: boolean };
 
+const KEYWORD_CODE = /^#(if|for|while|context)\b/;
+
+type RenderedInline = {
+	out: string;
+	openComment: boolean;
+	endsHeading: boolean;
+};
+
 /** minimal open/close mark transitions over same-mark runs, expelling boundary whitespace out
  *  of emphasis delimiters (`* bold*` never parses back as strong). */
 export function renderInline(parent: Node, startOfLine = true, extra = '', singleLine = false): string {
+	return render(parent, startOfLine, extra, singleLine, '').out;
+}
+
+export function renderHeadingLine(parent: Node, after: string): string | null {
+	const r = render(parent, false, '', true, after);
+	return r.endsHeading ? null : r.out;
+}
+
+export function renderBody(parent: Node): string {
+	const r = render(parent, true, '', false, '');
+	const out = r.out.replace(/^[ \t]+|[ \t]+$/g, '');
+	return r.openComment ? out + '\n' : out;
+}
+
+function render(parent: Node, startOfLine: boolean, extra: string, singleLine: boolean, after: string): RenderedInline {
 	const runs = buildRuns(parent, startOfLine, extra, singleLine);
+	const keywordChips: { start: number; end: number }[] = [];
 	let out = '';
 	let active: ActiveMark[] = [];
 	// where the last @ref was written, while the next emission may still extend it
@@ -287,9 +312,11 @@ export function renderInline(parent: Node, startOfLine = true, extra = '', singl
 			}
 		}
 		urlEnd = -1;
-		if (escapable && codeEnd === out.length && continuesCode(code, piece)) piece = '\\' + piece;
+		if (escapable && codeEnd === out.length && !KEYWORD_CODE.test(code) && continuesCode(code, piece)) piece = '\\' + piece;
 		codeEnd = -1;
+		if (escapable && /^[\p{L}\p{N}\p{M}\p{Pc}-]/u.test(piece) && /(^|[^\\])(\\\\)*@$/.test(out)) piece = '\\' + piece;
 		if (/^[/*]/.test(piece) && /(^|[^\\])(\\\\)*\/$/.test(out)) out = out.slice(0, -1) + '\\/';
+		else if (piece.startsWith('/') && /(^|[^\\])(\\\\)*\*$/.test(out)) piece = (escapable ? '\\' : ' ') + piece;
 		out += piece;
 	}
 
@@ -371,6 +398,7 @@ export function renderInline(parent: Node, startOfLine = true, extra = '', singl
 		if (run.kind === 'other' && content.startsWith('#')) {
 			codeEnd = out.length;
 			code = content;
+			if (KEYWORD_CODE.test(content)) keywordChips.push({ start: out.length - content.length, end: out.length });
 		}
 		if (run.kind === 'ref') {
 			refAt = out.length - content.length;
@@ -378,7 +406,17 @@ export function renderInline(parent: Node, startOfLine = true, extra = '', singl
 		}
 		if (run.kind === 'comment') lineEnd = true;
 	}
-	if (lineEnd && active.some((a) => a.close)) emit('\n');
+	const closes = active.some((a) => a.close);
+	if (lineEnd && closes) emit('\n');
 	emitCloses([...active].reverse(), !lineEnd);
-	return out;
+	let endsHeading = runs.some((r) => r.kind === 'comment' || (r.kind === 'other' && /^<[^<>]*>$/.test(r.content)));
+	for (const { start, end } of keywordChips.reverse()) {
+		const eol = out.indexOf('\n', end);
+		const rest = eol < 0 ? out.slice(end) : out.slice(end, eol);
+		const line = eol < 0 ? rest + after : rest;
+		if (!line.trim() || codeEndsBefore(out.slice(start, end), line)) continue;
+		endsHeading = true;
+		if (!singleLine) out = out.slice(0, end) + '\n' + escLineStart(rest.replace(/^[ \t]+/, '')) + out.slice(end + rest.length);
+	}
+	return { out, openComment: lineEnd && !closes, endsHeading };
 }

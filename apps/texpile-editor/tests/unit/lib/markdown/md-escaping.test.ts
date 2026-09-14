@@ -58,6 +58,22 @@ describe('prose escaping', () => {
 		expect(first.marks.map((m) => m.type.name)).toEqual(['em']);
 	});
 
+	it('opens bold again past the word or the punctuation italics ended at', () => {
+		const back = (out: string) => {
+			const runs: string[] = [];
+			markdownToProseMirror(out)
+				.doc.child(0)
+				.forEach((n) => runs.push(`${n.text}:${n.marks.map((m) => m.type.name).join('+')}`));
+			return runs;
+		};
+		const inWord = serializeToMarkdown(docOf(para(marked('a ', 'em'), marked('b', 'em', 'strong'), marked('c d', 'strong'))));
+		expect(inWord).toBe('*a **b***c **d**');
+		expect(back(inWord)).toEqual(['a :em', 'b:em+strong', 'c :', 'd:strong']);
+		const onDot = serializeToMarkdown(docOf(para(marked('a', 'em'), marked('.', 'em', 'strong'), marked(' b', 'strong'))));
+		expect(onDot).toBe('*a.* **b**');
+		expect(back(onDot)).toEqual(['a.:em', ' :', 'b:strong']);
+	});
+
 	// M28
 	it('writes inline math the parser reads back', () => {
 		const math = (tex: string) => serializeToMarkdown(docOf(para(mdSchema.nodes.inline_math.create(null, mdSchema.text(tex)))));

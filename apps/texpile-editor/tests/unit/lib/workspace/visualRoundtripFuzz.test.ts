@@ -62,20 +62,53 @@ function visible(doc: PMNode, format: Format['name']): string[] {
 			}
 			out += ch;
 		}
-		out = out.replace(/\s+/g, ' ').replace(/ ?⏎ ?/g, '⏎').replace(/› /g, '›').replace(/ ‹/g, '‹').trim().replace(/^⏎+/, '');
+		out = out
+			.replace(/\s+/g, ' ')
+			.replace(/ ?⏎ ?/g, '⏎')
+			.replace(/›(«[^»]*»)? /g, '›$1')
+			.replace(/ («[^»]*»)?‹/g, '$1‹')
+			.trim()
+			.replace(/^⏎+/, '');
 		if (format === 'md') out = out.replace(/⏎+$/, '');
 		return out.replace(/^«»/, '');
 	}
-	function push(path: string, name: string, text: string) {
+	function push(path: string, name: string, line: string) {
+		let text = line;
 		if (!text) return;
+		const comments = format === 'typ' && name === 'paragraph' ? /^(‹inline_latex:\/[/*][^‹›]*›⏎?)+/.exec(text) : null;
+		if (comments && comments[0].length < text.length) {
+			push(path, name, comments[0]);
+			text = text.slice(comments[0].length);
+		}
 		if (name === 'paragraph' && /^(‹inline_latex:[^‹›]*›⏎?)+$/.test(text)) {
 			lines.push(`${path}raw_latex: ${text.replace(/‹inline_latex:|›|⏎|\s/g, '')}`);
 		} else if (name === 'raw_latex') lines.push(`${path}raw_latex: ${text.replace(/\s/g, '')}`);
 		else lines.push(`${path}${name}: ${text}`);
 	}
+	function typstDisplay(child: PMNode, path: string): boolean {
+		const equation = (tex: string, label: unknown) => `${path}block_math: ${tex.replace(/\s+/g, ' ').trim()}${label ? ` <${label}>` : ''}`;
+		if (child.type.name === 'block_math') {
+			lines.push(equation(child.textContent, child.attrs.label));
+			return true;
+		}
+		if (child.type.name !== 'paragraph') return false;
+		const kids: PMNode[] = [];
+		child.forEach((c) => {
+			if (!c.isText || c.text!.trim()) kids.push(c);
+		});
+		const lead = kids.findIndex((c) => !(c.type.name === 'inline_latex' && /^\/[/*]/.test(c.textContent)));
+		const [math, label, ...more] = lead < 0 ? [] : kids.slice(lead);
+		if (math?.type.name !== 'inline_math' || !/^\s/.test(String(math.attrs.typst ?? '')) || more.length) return false;
+		if (label && !(label.type.name === 'inline_latex' && /^<[^<>]*>$/.test(label.textContent))) return false;
+		const comments = kids.slice(0, lead).map((c) => c.textContent);
+		if (comments.length) push(path, 'raw_latex', comments.join(''));
+		lines.push(equation(math.textContent, label?.textContent.slice(1, -1)));
+		return true;
+	}
 	function walkBlocks(node: PMNode, path: string) {
 		node.forEach((child, _offset, index) => {
 			const name = child.type.name;
+			if (format === 'typ' && typstDisplay(child, path)) return;
 			if (node.type.name === 'list' && index > 0 && child.isTextblock) {
 				const cells = cellsOf(child).map((c) => ({ ...c, marks: c.marks.filter((m) => m !== 'item_label') }));
 				push(path, name, render(cells));
@@ -266,13 +299,16 @@ describe('visual editor round trip', () => {
 		it(`${f.name}: what is typed in the visual editor comes back when the file is opened again`, () => {
 			const failures: Failure[] = [];
 			const sources = f.files.map((p) => readFileSync(p, 'utf8').replace(/\r\n/g, '\n'));
-			for (let run = 1; run <= RUNS; run++) {
+			const only = Number(process.env.VISUAL_FUZZ_ONLY ?? 0);
+			for (let run = only || 1; run <= (only || RUNS); run++) {
 				const source = sources[run % sources.length];
+				const seen = failures.length;
 				try {
 					chain(f, source, run * 7919, failures);
 				} catch (e) {
 					failures.push({ kind: 'throws', detail: String((e as Error).stack ?? e).slice(0, 400) });
 				}
+				for (const x of failures.slice(seen)) x.detail = `  run ${run}: ${f.files[run % sources.length]}\n${x.detail}`;
 			}
 			const groups = new Map<string, Failure[]>();
 			for (const x of failures) {

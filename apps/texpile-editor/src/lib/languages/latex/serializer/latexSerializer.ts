@@ -427,8 +427,10 @@ const NODES: Record<string, NodeHandler> = {
 				const prevChild = i > 0 ? node.child(i - 1) : null;
 				const continues = prevChild?.type.name === 'list' && prevChild.attrs.kind === item.attrs.kind;
 				parts.push(continues ? `\n${inner}` : `\\item[] ${inner}`);
-			} else if (i === 0) parts.push(`${itemCmd} ${inner}`);
-			else parts.push('\n' + inner); // continuation block within the same item
+			} else if (i === 0) {
+				const alone = labelled && !inner.trim() && node.childCount > 1 && node.child(1).type.name !== 'list';
+				parts.push(alone ? `${itemCmd} \\par` : `${itemCmd} ${inner}`);
+			} else parts.push('\n' + inner); // continuation block within the same item
 		});
 
 		let out = '';

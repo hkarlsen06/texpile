@@ -24,8 +24,6 @@ export function headingSeg(k: SyntaxNode, src: string, labelNode: SyntaxNode | n
 	return { blocks: [buildNode('heading', { level, numbered: true, label }, content)], from: k.from, to: (labelNode ?? k).to };
 }
 
-/** `#heading(level: N, numbering: none)[..]` standing alone: the form the serializer writes for
- *  an unnumbered heading. Anything else about a heading call stays raw. */
 export function headingCallSeg(kids: SyntaxNode[], i: number, src: string): { seg: Seg; next: number } | null {
 	const hash = kids[i];
 	const call = kids[i + 1];
@@ -36,6 +34,7 @@ export function headingCallSeg(kids: SyntaxNode[], i: number, src: string): { se
 	if (!args || args.name !== 'Args') return null;
 	const real = children(args).filter((c) => !ARG_PUNCT.includes(c.name));
 	let level = 1;
+	let size = '';
 	let unnumbered = false;
 	let markup: SyntaxNode | null = null;
 	for (const a of real) {
@@ -48,16 +47,18 @@ export function headingCallSeg(kids: SyntaxNode[], i: number, src: string): { se
 		const key = a.firstChild && a.firstChild.name === 'Ident' ? src.slice(a.firstChild.from, a.firstChild.to) : '';
 		const value = children(a).find((c) => !['Ident', 'Colon', 'Space'].includes(c.name));
 		if (!value) return null;
-		if (key === 'level' && value.name === 'Int') level = Math.min(6, Math.max(1, parseInt(src.slice(value.from, value.to), 10) || 1));
-		else if (key === 'numbering' && value.name === 'None') unnumbered = true;
+		if ((key === 'level' || key === 'depth') && !size && value.name === 'Int') {
+			size = key;
+			level = Math.min(6, Math.max(1, parseInt(src.slice(value.from, value.to), 10) || 1));
+		} else if (key === 'numbering' && value.name === 'None') unnumbered = true;
 		else return null;
 	}
-	if (!unnumbered) return null;
+	if (unnumbered ? size === 'depth' : size !== 'depth') return null;
 	const alone = aloneWithLabel(kids, i + 2);
 	if (!alone) return null;
 	const label = alone.label ? src.slice(alone.label.from + 1, alone.label.to - 1) : null;
 	const content = markup ? convertInline(children(markup), src, []) : [];
-	const node = buildNode('heading', { level, numbered: false, label }, content);
+	const node = buildNode('heading', { level, numbered: !unnumbered, label }, content);
 	return { seg: { blocks: [node], from: hash.from, to: (alone.label ?? call).to }, next: alone.next };
 }
 

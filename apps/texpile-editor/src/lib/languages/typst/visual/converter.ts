@@ -25,6 +25,7 @@ import {
 	refCallTarget,
 	rawCallText,
 	unquote,
+	expressionEnd,
 	DECLARATION_KINDS,
 	EXPRESSION_KINDS
 } from './inlineConvert';
@@ -164,15 +165,16 @@ export function convertMarkup(kids: SyntaxNode[], src: string): Seg[] {
 			}
 			case 'Hash': {
 				const next = kids[i + 1];
-				const semi = next && kids[i + 2]?.name === 'Semicolon' ? kids[i + 2] : null;
-				const after = semi ? i + 3 : i + 2;
+				const end = next ? expressionEnd(kids, i + 1, src) : i;
+				const last = kids[end];
+				const after = end + 1;
 				if (
 					next &&
 					(DECLARATION_KINDS.has(next.name) || (EXPRESSION_KINDS.has(next.name) && buf.length === 0 && restOnlySpace(kids, after)))
 				) {
 					flushPara();
 					// the terminating semicolon is part of the statement, not of the prose after it
-					segs.push({ blocks: [includeOrRaw(k, next, semi, src)], from: k.from, to: (semi ?? next).to });
+					segs.push({ blocks: [includeOrRaw(k, next, last, src)], from: k.from, to: last.to });
 					i = after - 1;
 				} else if (next && buf.length === 0) {
 					const fig = figureSeg(kids, i, src) ?? tableSeg(kids, i, src) ?? quoteSeg(kids, i, src) ?? headingCallSeg(kids, i, src);
@@ -275,15 +277,15 @@ function inlineCall(call: SyntaxNode, src: string): boolean {
  * keeps its extension because Typst requires it — the chip's opener defaults to .typ only as a
  * fallback.
  */
-function includeOrRaw(hash: SyntaxNode, stmt: SyntaxNode, semi: SyntaxNode | null, src: string): PmNode {
-	if (stmt.name === 'ModuleInclude' && !semi) {
+function includeOrRaw(hash: SyntaxNode, stmt: SyntaxNode, last: SyntaxNode, src: string): PmNode {
+	if (stmt.name === 'ModuleInclude' && last === stmt) {
 		const real = children(stmt).filter((c) => !['Include', 'Space'].includes(c.name));
 		if (real.length === 1 && real[0].name === 'Str') {
 			const path = unquote(src.slice(real[0].from, real[0].to));
 			if (/\.typ$/i.test(path)) return buildNode('includedoc', { path, command: 'typst' });
 		}
 	}
-	return rawBlock(src.slice(hash.from, (semi ?? stmt).to));
+	return rawBlock(src.slice(hash.from, last.to));
 }
 
 /** Recreate `node` with an `orig` attr; types that don't declare it pass through unchanged. */

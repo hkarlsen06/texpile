@@ -114,6 +114,9 @@ export const MACRO_SIGNATURES: NonNullable<ParseOptions['macros']> = {
 	cmidrule: { signature: 'd() m' },
 	specialrule: { signature: 'm m m' },
 	hhline: { signature: 'm' },
+	smallskip: { signature: '' },
+	medskip: { signature: '' },
+	bigskip: { signature: '' },
 
 	// biblatex/natbib citations ([pre][post]{key}), missing from the default DB
 	citep: { signature: 'o o m' },

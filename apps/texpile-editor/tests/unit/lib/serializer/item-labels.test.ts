@@ -62,6 +62,13 @@ describe('description item labels', () => {
 		expect(out).toMatch(/\\item\s+something else entirely/);
 		expect(out).not.toContain('[Term]');
 	});
+
+	it('keeps a label on its own paragraph when the item goes on in another', () => {
+		const out = regenerate('\\begin{description}\n\\item[Term] \\par\nbody text\n\\end{description}');
+		const list = parse(out.slice(out.indexOf('\\begin'))).doc.child(0);
+		expect(list.childCount).toBe(2);
+		expect(list.child(0).textContent).toBe('Term');
+	});
 });
 
 // The label is ordinary bold text at the head of the item, so people edit it there. It used to be

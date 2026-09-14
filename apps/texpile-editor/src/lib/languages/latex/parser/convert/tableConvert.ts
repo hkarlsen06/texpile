@@ -79,7 +79,12 @@ function extractTableComponents(content: Node[], ctx: ConversionContext) {
 			}
 			if (node.type === 'macro' && (node.content === 'vspace' || node.content === 'raggedright')) continue;
 			// the notes wrapper emits its own \par\smallskip; a skip leading the notes would compound
-			if (sawTabular && noteNodes.every(isBlankCellNode) && node.type === 'macro' && /^(small|med|big)skip$/.test(String(node.content)))
+			if (
+				sawTabular &&
+				noteNodes.every(isBlankCellNode) &&
+				node.type === 'macro' &&
+				/^(par|(small|med|big)skip)$/.test(String(node.content))
+			)
 				continue;
 			// the notes serializer emits its own {\<size> ...}, so a size switch in the NOTES
 			// position is redundant and compounds each save: strip a bare one, unwrap a group led

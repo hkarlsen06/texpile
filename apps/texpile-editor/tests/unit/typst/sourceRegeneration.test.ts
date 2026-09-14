@@ -22,6 +22,10 @@ describe('paragraph content (T1, T5, T13)', () => {
 		expect(regen('Text start // note\nmore text on the next line.\n')).toBe('Text start // note\nmore text on the next line.');
 	});
 
+	it('a slash after a closing star stays text, since */ ends a comment', () => {
+		expect(regen('*a*\\/b\n')).toBe('*a*\\/b');
+	});
+
 	it('inline code-mode expressions stay inside their paragraph', () => {
 		for (const src of [
 			'It is #if true [yes] else [no] today.\n',
@@ -43,6 +47,12 @@ describe('paragraph content (T1, T5, T13)', () => {
 describe('code mode and comments (T4, T8)', () => {
 	it('a terminating semicolon belongs to the statement, not to the prose after it', () => {
 		expect(regen('#let a = 1; text after\n')).toBe('#let a = 1;\ntext after');
+		expect(regen('#let a = 1 ; text after\n')).toBe('#let a = 1 ;\ntext after');
+	});
+
+	it('an if keeps the line end that stops it reading on into the prose after it', () => {
+		expect(regen('#if true [a]\nelse b\n')).toBe('#if true [a]\nelse b');
+		expect(regen('Text #for\nx in y.\n')).toBe('Text #for\nx in y.');
 	});
 
 	it('a comment between or on list items does not split the list', () => {
@@ -106,6 +116,14 @@ describe('headings (T18, T20)', () => {
 		expect(regen('= Intro\n<sec:intro>\n\nBody.\n')).toBe('= Intro <sec:intro>\n\nBody.');
 		// and it no longer merges the heading's neighbour into one raw island
 		expect(shape('= Refs\n<sec:refs>\n\n#bibliography("refs.bib")\n')).toEqual(['heading', 'raw_latex']);
+	});
+
+	it('a heading holding a line comment or a label is written as a call, since either would end an = heading', () => {
+		for (const src of ['#heading(depth: 1)[A // note\n#x] <a>', '#heading(depth: 2)[A *B* <red> C]']) {
+			expect(shape(src)).toEqual(['heading']);
+			expect(regen(src)).toBe(src);
+		}
+		expect(regen('#heading(depth: 2)[Plain]\n')).toBe('== Plain');
 	});
 });
 
