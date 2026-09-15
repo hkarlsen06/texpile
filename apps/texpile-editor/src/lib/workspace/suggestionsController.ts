@@ -21,7 +21,7 @@ import {
 import { isOpenSuggestion, spotRanks, suggestionAuthor } from '$lib/comments/suggest';
 import { carryGestures, type TextSpan } from '$lib/comments/editGestures';
 import { commonEnds } from '$lib/comments/suggestHunks';
-import { activeSuggestions, takeTypedSides } from '$lib/comments/activeSuggestions.svelte';
+import { activeSuggestions, takeTypedSides, type SuggestionMark } from '$lib/comments/activeSuggestions.svelte';
 import type { CommentStore } from '$lib/comments/store.svelte';
 
 const SPACE_WAIT_MS = 1000;
@@ -40,6 +40,8 @@ type Deps = {
 	saveNow: () => void;
 	compares: () => boolean;
 	rewraps: () => boolean;
+	onLost?: (file: string, lost: Set<string>) => void;
+	dropped?: () => void;
 };
 
 type FileState = { text: string; placed: PlacedSuggestion[] };
@@ -62,6 +64,15 @@ export class SuggestionsController {
 		this.placedFile = file;
 		const against = reopened ? text : known.text;
 		const carried = new Map(reopened ? [] : known.placed.map((s, i) => [s.id, { ...s, i }]));
+		const { kept, lost } = this.fit(file, against, carried);
+		const same = !reopened && sameSuggestions(known.placed, kept);
+		this.states.set(file, { text: against, placed: kept });
+		if (!same && file === this.deps.activeFile()) this.show(against, kept);
+		if (this.me === null && kept.length) void this.learnAuthor();
+		return lost;
+	}
+
+	private fit(file: string, against: string, carried: Map<string, PlacedSuggestion & { i: number }>) {
 		const placed: PlacedSuggestion[] = [];
 		const order = new Map<string, number>();
 		const lost = new Set<string>();
@@ -81,11 +92,7 @@ export class SuggestionsController {
 			if (prev && s.from < prev.to) lost.add(s.id);
 			else kept.push(s);
 		}
-		const same = !reopened && sameSuggestions(known.placed, kept);
-		this.states.set(file, { text: against, placed: kept });
-		if (!same && file === this.deps.activeFile()) this.show(against, kept);
-		if (this.me === null && kept.length) void this.learnAuthor();
-		return lost;
+		return { kept, lost };
 	}
 
 	clear(): void {
@@ -123,6 +130,19 @@ export class SuggestionsController {
 
 	async beforeSave(file: string, content: string): Promise<void> {
 		await this.run(file, content, this.deps.mode());
+		await this.recordAnchors(file, content);
+		if (this.deps.store.hasStaged) await this.deps.store.append();
+	}
+
+	async adoptRemote(file: string, before: string, after: string): Promise<void> {
+		const state = this.states.get(file);
+		if (!state || state.text !== before) this.states.set(file, { text: before, placed: this.fit(file, before, new Map()).kept });
+		await this.run(file, after, 'editing', 'paragraphs');
+		await this.recordAnchors(file, after);
+		if (this.deps.store.hasStaged) await this.deps.store.append();
+	}
+
+	private async recordAnchors(file: string, content: string): Promise<void> {
 		const state = this.states.get(file);
 		if (state?.text === content && state.placed.length) {
 			const by = await this.deps.author();
@@ -139,7 +159,6 @@ export class SuggestionsController {
 			}
 			this.stage(moved);
 		}
-		if (this.deps.store.hasStaged) await this.deps.store.append();
 	}
 
 	async adoptDisk(file: string, text: string): Promise<void> {
@@ -152,7 +171,7 @@ export class SuggestionsController {
 	}
 
 	discardUnsaved(file: string): void {
-		this.deps.store.discardStaged(file);
+		if (this.deps.store.discardStaged(file)) this.deps.dropped?.();
 		this.states.delete(file);
 		if (this.seen?.file === file) this.gestures = [];
 	}
@@ -184,7 +203,12 @@ export class SuggestionsController {
 		const state = this.states.get(file);
 		const s = state?.text === text ? state.placed.find((x) => x.id === t.id) : undefined;
 		if (!state || !s) return false;
-		if (!(await this.deps.applyEdit({ from: s.from, to: s.to, insert: s.restore }))) return false;
+		const decided = await this.decision(t, 'rejected');
+		this.deps.publish(decided);
+		if (!(await this.deps.applyEdit({ from: s.from, to: s.to, insert: s.restore }))) {
+			this.deps.publish(await this.decision(t, undefined));
+			return false;
+		}
 		const delta = s.restore.length - (s.to - s.from);
 		const next = text.slice(0, s.from) + s.restore + text.slice(s.to);
 		const at = state.placed.indexOf(s);
@@ -194,7 +218,7 @@ export class SuggestionsController {
 				x.from > s.to || (x.from === s.to && state.placed.indexOf(x) > at) ? { ...x, from: x.from + delta, to: x.to + delta } : x
 			);
 		this.states.set(file, { text: next, placed: rest });
-		await this.decide(t, 'rejected');
+		await this.deps.store.append(decided);
 		await this.run(file, this.deps.activeText(), 'editing');
 		this.show(this.states.get(file)?.text ?? next, this.states.get(file)?.placed ?? rest);
 		this.deps.saveNow();
@@ -207,7 +231,6 @@ export class SuggestionsController {
 		mode: EditMode,
 		whitespace: WhitespaceChanges = this.deps.rewraps() ? 'paragraphs' : 'exact'
 	): Promise<void> {
-		if (!this.deps.compares()) return this.chain;
 		const active = file === this.deps.activeFile();
 		if (active && this.timer) {
 			clearTimeout(this.timer);
@@ -234,6 +257,7 @@ export class SuggestionsController {
 		if (!state || state.text === after) return;
 		if (mode === 'editing' && state.placed.length === 0) {
 			this.states.set(file, { text: after, placed: [] });
+			if (!this.deps.compares()) this.refit(file);
 			return;
 		}
 		const author = await this.deps.author();
@@ -252,8 +276,17 @@ export class SuggestionsController {
 			newId: () => crypto.randomUUID()
 		});
 		this.states.set(file, { text: after, placed: r.placed });
+		if (!this.deps.compares()) return this.refit(file);
 		this.stage(this.eventsFor(file, after, r, author));
 		if (file === this.deps.activeFile()) this.show(after, r.placed);
+	}
+
+	private refit(file: string): void {
+		const state = this.states.get(file)!;
+		const lost = this.place(file, state.text);
+		const now = this.states.get(file)!;
+		if (file === this.deps.activeFile()) this.show(now.text, now.placed);
+		this.deps.onLost?.(file, lost);
 	}
 
 	private eventsFor(file: string, text: string, r: ComparedSuggestions, by: string): CommentEvent[] {
@@ -286,9 +319,11 @@ export class SuggestionsController {
 	}
 
 	private async decide(t: CommentThread, decision: SuggestionDecision): Promise<void> {
-		await this.deps.commit(
-			resolveEvent({ thread: t.id, resolved: true, decision, by: await this.deps.author(), at: new Date().toISOString() })
-		);
+		await this.deps.commit(await this.decision(t, decision));
+	}
+
+	private async decision(t: CommentThread, decision: SuggestionDecision | undefined): Promise<CommentEvent> {
+		return resolveEvent({ thread: t.id, resolved: !!decision, decision, by: await this.deps.author(), at: new Date().toISOString() });
 	}
 
 	private drop(file: string, id: string): void {
@@ -320,9 +355,14 @@ export class SuggestionsController {
 				copy: () => copyIndex(text, withoutEdgeSpace(anchor))
 			};
 		});
-		if (marks.length === 0 && activeSuggestions.current.length === 0) return;
+		const shown = activeSuggestions.current;
+		if (marks.length === shown.length && marks.every((m, i) => sameMark(m, shown[i]))) return;
 		activeSuggestions.current = marks;
 	}
+}
+
+function sameMark(a: SuggestionMark, b: SuggestionMark): boolean {
+	return a.id === b.id && a.from === b.from && a.to === b.to && a.restore === b.restore && a.mine === b.mine;
 }
 
 function sameSuggestions(a: PlacedSuggestion[], b: PlacedSuggestion[]): boolean {

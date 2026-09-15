@@ -22,6 +22,7 @@ import type { ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
 import type { SourceEdit } from '$lib/workspace/suggestionsController';
 import { patchVisualFromSource } from '$lib/workspace/visualSourcePatch';
 import { editMode, suggesting } from '$lib/comments/activeSuggestions.svelte';
+import type { EditMode } from '$lib/comments/suggestCompare';
 
 type CommentsDeps = {
 	doc: DocumentBuffer;
@@ -37,7 +38,7 @@ export class WorkspaceComments {
 	readonly ctl: CommentsController;
 
 	constructor(private d: CommentsDeps) {
-		function mode() {
+		function mode(): EditMode {
 			return suggesting.current && !d.guest() && !collabHost.active && !fileMode.current ? 'suggesting' : 'editing';
 		}
 		this.ctl = new CommentsController({
@@ -72,17 +73,24 @@ export class WorkspaceComments {
 			compares: () => !d.guest(),
 			rewraps: () => d.modes.mode === 'visual' && hasVisualMode(d.kind()),
 			applyEdit: (edit) => this.applyEdit(edit),
-			saveNow: () => d.flushSave()
+			saveNow: () => d.flushSave(),
+			resync: () => collabHost.resendCommentLog()
 		});
 
+		let lastMode = mode();
 		$effect(() => {
-			editMode.current = mode();
+			const next = mode();
+			editMode.current = next;
+			if (next === lastMode) return;
+			const was = lastMode;
+			lastMode = next;
+			untrack(() => void this.ctl.suggestions.settle(was));
 		});
 
 		$effect(() => {
 			const text = this.activeText();
 			const path = d.doc.path;
-			if (!d.guest()) untrack(() => this.ctl.suggestions.textChanged(path, text));
+			untrack(() => this.ctl.suggestions.textChanged(path, text));
 		});
 
 		// "not in this view" is a statement about the VISUAL view; source draws everything it resolves,

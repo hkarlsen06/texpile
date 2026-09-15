@@ -34,3 +34,24 @@ it('writes back the lines it cannot read, in place, and drops merge leftovers', 
 	expect(lines[1]).toBe(newer);
 	expect(JSON.parse(lines[2]).t).toBe('reply');
 });
+
+it('serves staged events with the written ones, and says whether a discard dropped any', async () => {
+	disk = '';
+	const store = new CommentStore();
+	await store.load('/w');
+	const open = openEvent({
+		id: 't1',
+		file: 'main.tex',
+		by: 'ana',
+		body: '',
+		anchor: buildAnchor('some text', 0, 4),
+		at: 'now',
+		restore: 'old'
+	});
+	store.stage(open);
+	expect(store.serialize()).toBe(JSON.stringify(open) + '\n');
+	expect(disk).toBe('');
+	expect(store.discardStaged('other.tex')).toBe(false);
+	expect(store.discardStaged('main.tex')).toBe(true);
+	expect(store.serialize()).toBe('\n');
+});

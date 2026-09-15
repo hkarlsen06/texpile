@@ -5,7 +5,7 @@ import * as Y from 'yjs';
 import { generateShareCode } from './e2e/shareCode';
 import { deriveSessionKeys, sha256Hex } from './e2e/keys';
 import { CollabSession, manifestOf, locksOf, metaOf, textOf, type PeerInfo } from './session';
-import { isSafeRel, type ControlPayload, type PreviewPayload } from './protocol';
+import { BROADCAST, isSafeRel, isSafeCommentEvent, type ControlPayload, type PreviewPayload } from './protocol';
 import type { SharedCompileIntel } from './editSession';
 import type { CommentEvent } from '$lib/comments/log';
 import { HostMaterializer, isShared } from './materialize';
@@ -49,6 +49,7 @@ class HostCollabController {
 	onCommentEvent: ((event: CommentEvent) => void) | null = null;
 	/** the whole comment log, served to a guest joining mid-review. */
 	commentLog: (() => string) | null = null;
+	onGuestWrite: ((rel: string, before: string, after: string) => Promise<void>) | null = null;
 	/** one hop of the Typst preview relay from a guest; previewRelay wires this while hosting. */
 	onPreview: ((p: PreviewPayload, from: number) => void) | null = null;
 	/** a guest asked its preview to follow a source position; workspaceSession wires this. */
@@ -154,6 +155,7 @@ class HostCollabController {
 				},
 				joinPath
 			);
+			materializer.onWrite = (rel, before, after) => this.onGuestWrite?.(rel, before, after) ?? Promise.resolve();
 			this.oversizedText = (await materializer.seed()).oversizedText;
 
 			this.doc = doc;
@@ -304,8 +306,8 @@ class HostCollabController {
 	 * put '../..' in it any more than in a file-op.
 	 */
 	private applyGuestComment(event: CommentEvent): void {
-		if (!this.active) return;
-		if (event.t === 'open' && (!isSafeRel(event.file) || !isShared(event.file))) return;
+		if (!this.active || !isSafeCommentEvent(event)) return;
+		if (event.t === 'open' && !isShared(event.file)) return;
 		this.onCommentEvent?.(event);
 		// straight back out to everyone, the sender included: PeerInfo carries no client id to
 		// address them individually, and the echo costs that guest one duplicate line in memory
@@ -316,6 +318,11 @@ class HostCollabController {
 	/** the host's own comment event, out to every guest. */
 	broadcastComment(event: CommentEvent): void {
 		if (this.active) this.session?.sendControl({ kind: 'comment-event', event });
+	}
+
+	resendCommentLog(): void {
+		if (!this.active || !this.session) return;
+		this.session.sendBlob('comments', 0, new TextEncoder().encode(this.commentLog?.() ?? ''), BROADCAST);
 	}
 
 	/** host: reply to a specific guest (e.g. a resolved SyncTeX position). */

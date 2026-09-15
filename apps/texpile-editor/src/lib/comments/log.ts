@@ -32,7 +32,7 @@ export type CommentEvent =
 	| (Base & { t: 'edit'; message: string; body: string })
 	| (Base & { t: 'delete-message'; message: string })
 	// a file (or directory) was renamed/moved in the tree, and its threads went with it. Paths are
-	// workspace-relative like thread.file. Same version on purpose: an older build's isEvent skips
+	// workspace-relative like thread.file. Same version on purpose: an older build's isCommentEvent skips
 	// the unknown t, so it degrades to threads staying under the old path rather than breaking.
 	| (Base & { t: 'move'; from: string; to: string })
 	// the thread re-pinned to other text, after an edit rewrote the quote it sat on (an agent acting
@@ -96,7 +96,7 @@ export function parseLog(text: string): CommentEvent[] {
 		} catch {
 			continue;
 		}
-		if (isEvent(parsed)) out.push(parsed);
+		if (isCommentEvent(parsed)) out.push(parsed);
 	}
 	return out;
 }
@@ -284,7 +284,7 @@ export function anchorEvent(o: {
 	};
 }
 
-function isEvent(x: unknown): x is CommentEvent {
+export function isCommentEvent(x: unknown): x is CommentEvent {
 	if (typeof x !== 'object' || x === null) return false;
 	const e = x as Partial<CommentEvent> & { anchor?: unknown };
 	if (typeof e.v !== 'number' || e.v > LOG_VERSION) return false;

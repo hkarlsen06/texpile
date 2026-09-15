@@ -126,12 +126,13 @@ export class CommentStore {
 		return this.staged.some((e) => ids.has(threadOf(e)));
 	}
 
-	discardStaged(file: string): void {
+	discardStaged(file: string): boolean {
 		const ids = this.idsOn(file);
 		const kept = this.staged.filter((e) => !ids.has(threadOf(e)));
-		if (kept.length === this.staged.length) return;
+		if (kept.length === this.staged.length) return false;
 		this.staged = kept;
 		this.threads = foldLog([...this.events, ...this.staged]);
+		return true;
 	}
 
 	private idsOn(file: string): Set<string> {
@@ -152,9 +153,9 @@ export class CommentStore {
 		this.threads = foldLog([...this.events, ...this.staged]);
 	}
 
-	/** the log as it would be written, for the host to serve to a joining guest */
+	/** the log as this side sees it, staged events included, for the host to serve to a joining guest */
 	serialize(): string {
-		return this.lines.join('\n') + '\n';
+		return [...this.lines, ...collapseStaged(this.staged).map((e) => JSON.stringify(e))].join('\n') + '\n';
 	}
 
 	/** false when this workspace has nowhere to keep a log - a guest session, or no folder open */

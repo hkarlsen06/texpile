@@ -10,6 +10,7 @@ import { GhostDirs } from './guestGhostDirs';
 import { GuestFileCache } from './guestFileCache';
 import { presenceIdentity } from './identity';
 import { GuestSyncRequests } from './guestSyncRequests';
+import { GuestCommentOutbox } from './guestCommentOutbox';
 import { RelayTransport } from './transport';
 import { forgetJoinCode, rememberJoinCode } from './joinLink.svelte';
 import type { SharedCompileIntel } from './editSession';
@@ -75,6 +76,7 @@ class GuestCollabController {
 	selfName = $state('');
 	private previewPageAsked = false;
 	private fileCache = new GuestFileCache(() => this.imageRev++);
+	private outbox = new GuestCommentOutbox();
 	/** subscribers to host -> guest LSP traffic; a set because each open .typ editor has a transport */
 	private lspHandlers = new Set<(p: ControlPayload) => void>();
 	// intact master; `pdf` is always a copy, because pdf.js detaches the ArrayBuffer it renders and
@@ -147,8 +149,10 @@ class GuestCollabController {
 					},
 					onPreview: (p) => this.onPreviewFrame?.(p),
 					onControl: (payload) => {
-						if (payload.kind === 'comment-event') this.onCommentEvent?.(payload.event);
-						else if (payload.kind === 'synctex-inverse-result' || payload.kind === 'synctex-forward-result') {
+						if (payload.kind === 'comment-event') {
+							this.outbox.echoed(payload.event);
+							this.onCommentEvent?.(payload.event);
+						} else if (payload.kind === 'synctex-inverse-result' || payload.kind === 'synctex-forward-result') {
 							this.syncRequests.resolve(payload);
 						} else if (payload.kind === 'typst-jump') this.onTypstJump?.(payload);
 						else if (payload.kind === 'lsp-result' || payload.kind === 'lsp-notify') {
@@ -160,10 +164,14 @@ class GuestCollabController {
 							this.clearJoinTimer();
 							this.status = 'online';
 							this.hostOnline = true;
+							this.resendComments();
 						} else if (s === 'disconnected') {
 							if (this.status === 'online') this.status = 'reconnecting';
 						} else if (s === 'host-gone') this.hostOnline = false;
-						else if (s === 'host-back') this.hostOnline = true;
+						else if (s === 'host-back') {
+							this.hostOnline = true;
+							this.resendComments();
+						}
 					},
 					onSessionEnd: (reason, detail) => {
 						this.clearJoinTimer();
@@ -261,15 +269,13 @@ class GuestCollabController {
 		this.session?.sendControl({ kind: 'file-op', op, from, to });
 	}
 
-	/**
-	 * A review-comment event of ours, up to the host.
-	 *
-	 * Sent, not applied here first - the host owns the log and echoes it back to everyone, so a
-	 * guest's own comment reaches it the same way anyone else's does. It also means an event made
-	 * while the host is away is simply lost rather than silently local-only.
-	 */
 	sendComment(event: CommentEvent): void {
+		this.outbox.sent(event);
 		this.session?.sendControl({ kind: 'comment-event', event });
+	}
+
+	private resendComments(): void {
+		for (const event of this.outbox.unanswered()) this.session?.sendControl({ kind: 'comment-event', event });
 	}
 
 	/** ask for the whole log; the host answers on the blob channel. */
@@ -413,6 +419,7 @@ class GuestCollabController {
 		// next session render a previous host's image for a path that happens to match
 		this.fileCache.clear();
 		this.ghostState.clear();
+		this.outbox.clear();
 		const session = this.session;
 		this.session = null;
 		this.transport = null;

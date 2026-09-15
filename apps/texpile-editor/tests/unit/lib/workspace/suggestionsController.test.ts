@@ -171,6 +171,32 @@ describe('a suggestion in the file', () => {
 		expect(reopened.text()).toBe(TEXT);
 	});
 
+	it('hands peers the whole log again when staged events they saw are thrown away', async () => {
+		let resyncs = 0;
+		let text = TEXT;
+		const ctl = new CommentsController({
+			root: () => ROOT,
+			preferredAuthor: () => 'louis',
+			openFileAt: () => {},
+			activeText: () => text,
+			mode: () => 'suggesting',
+			applyEdit: async () => false,
+			saveNow: () => {},
+			resync: () => resyncs++
+		});
+		await ctl.load(ROOT);
+		ctl.reanchor(FILE, text);
+		ctl.suggestions.textChanged(FILE, text);
+		text = TEXT.replace('sharp', 'tight');
+		ctl.suggestions.textChanged(FILE, text);
+		await ctl.suggestions.settle();
+		expect(ctl.store.serialize()).toContain('"restore":"sharp"');
+		ctl.suggestions.discardUnsaved('main.tex');
+		ctl.suggestions.discardUnsaved('main.tex');
+		expect(resyncs).toBe(1);
+		expect(ctl.store.serialize()).toBe('\n');
+	});
+
 	it('writes what was typed while suggesting to the log before the file is saved', async () => {
 		const { ctl, open, type } = make(TEXT, 'suggesting');
 		await open();

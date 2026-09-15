@@ -33,9 +33,10 @@ export async function createRelaySession(wsUrl: string, body: { room: string; pr
 	if (res.status !== 201) throw new Error(`relay refused the session (${res.status})`);
 }
 
-// close codes after which reconnecting is pointless (mirrors the relay's limits.js):
-// 4001 session-end, 4003 bad proof / no session, 4006 full, 4010 quota
-const FATAL_CLOSES = new Set([4001, 4003, 4006, 4010]);
+// 4000 to 4999 are the relay refusing on purpose; anything else is the network
+function fatalClose(code: number): boolean {
+	return code >= 4000 && code <= 4999;
+}
 const MAX_BACKOFF_MS = 15_000;
 
 export class RelayTransport implements Transport {
@@ -89,7 +90,7 @@ export class RelayTransport implements Transport {
 			if (this.ws !== ws) return;
 			this.ws = null;
 			if (this.closed) return;
-			if (FATAL_CLOSES.has(ev.code)) {
+			if (fatalClose(ev.code)) {
 				this.closed = true;
 				this.onStatus?.('closed', String(ev.code));
 				return;

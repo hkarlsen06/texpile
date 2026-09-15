@@ -104,6 +104,7 @@ export function spliceDiff(oldStr: string, newStr: string): { index: number; rem
 }
 
 export class HostMaterializer {
+	onWrite: ((rel: string, before: string, after: string) => Promise<void>) | null = null;
 	private readonly writeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	private readonly lastWritten = new Map<string, string>(); // rel -> LF content last synced with disk
 	private readonly observers = new Map<string, () => void>();
@@ -195,7 +196,15 @@ export class HostMaterializer {
 		const entry = manifestOf(this.doc).get(rel);
 		if (!entry || entry.kind !== 'text' || entry.gone) return;
 		const content = textOf(this.doc, rel).toString();
-		if (this.lastWritten.get(rel) === content) return;
+		const before = this.lastWritten.get(rel);
+		if (before === content) return;
+		if (before !== undefined) {
+			try {
+				await this.onWrite?.(rel, before, content);
+			} catch (e) {
+				this.onError?.(rel, e);
+			}
+		}
 		try {
 			await this.fs.writeText(this.joinPath(this.root, rel), fromLf(content, entry.eol ?? '\n'));
 			this.lastWritten.set(rel, content);

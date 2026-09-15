@@ -27,6 +27,7 @@ import {
 	placeEvent,
 	replyEvent,
 	resolveEvent,
+	isCommentEvent,
 	type CommentEvent,
 	type CommentMessage,
 	type CommentThread
@@ -71,6 +72,7 @@ type Deps = {
 	saveNow?: () => void;
 	compares?: () => boolean;
 	rewraps?: () => boolean;
+	resync?: () => void;
 };
 
 export class CommentsController {
@@ -148,7 +150,9 @@ export class CommentsController {
 			applyEdit: (edit) => deps.applyEdit?.(edit) ?? Promise.resolve(false),
 			saveNow: () => deps.saveNow?.(),
 			compares: () => deps.compares?.() ?? true,
-			rewraps: () => deps.rewraps?.() ?? false
+			rewraps: () => deps.rewraps?.() ?? false,
+			onLost: (file, lost) => this.suggestionsLost(file, lost),
+			dropped: () => deps.resync?.()
 		});
 	}
 
@@ -369,6 +373,20 @@ export class CommentsController {
 			this.selected = target;
 			this.scrollTo(target);
 		}
+	}
+
+	private suggestionsLost(file: string, lost: Set<string>): void {
+		if (file !== this.file) return;
+		const ids = new Set(
+			this.store
+				.forFile(file)
+				.filter(isSuggestion)
+				.map((t) => t.id)
+		);
+		const next = new Set([...this.activeLost].filter((id) => !ids.has(id)));
+		for (const id of lost) next.add(id);
+		this.activeLost = next;
+		this.applyOrphans();
 	}
 
 	private lastWords = new Map<string, CommentAnchor>();
@@ -638,12 +656,18 @@ export class CommentsController {
 	 * the exact mapping CodeMirror has been keeping. Only the range this event is about is touched.
 	 */
 	async ingest(event: CommentEvent): Promise<void> {
+		if (!isCommentEvent(event)) return;
 		// The host echoes a guest's own event back (it broadcasts to everyone, the sender
 		// included). A thread we already hold is that echo: appending is harmless (foldLog
 		// dedupes by id) but re-resolving is NOT - a miss here badged the author's own fresh
 		// comment as detached on their own screen.
 		if (event.t === 'open' && this.store.threads.some((t) => t.id === event.id)) return;
-		await this.store.append(event);
+		const appended = this.store.append(event);
+		this.applyIngested(event);
+		await appended;
+	}
+
+	private applyIngested(event: CommentEvent): void {
 		const about = this.store.threads.find((t) => t.id === (event.t === 'open' ? event.id : 'thread' in event ? event.thread : ''));
 		if (about && isSuggestion(about)) {
 			if (about.file === this.file) this.resolve();
@@ -682,6 +706,11 @@ export class CommentsController {
 		if (!affected) return;
 		await this.commit(moveEvent({ from, to, by: await this.author(), at: new Date().toISOString() }));
 		this.resolve();
+	}
+
+	async adoptRemoteWrite(file: string, before: string, after: string): Promise<void> {
+		if (file === this.file || !this.store.writable) return;
+		await this.suggestions.adoptRemote(file, before, after);
 	}
 
 	/** a guest's catch-up: the host's whole log, served over the blob channel on join */

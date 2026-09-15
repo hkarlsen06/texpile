@@ -156,6 +156,7 @@ export class WorkspaceIntegrations {
 				expectedPdfPath: () => d.compiler().expectedPdfPath(),
 				applyCommentEvent: (event) => void d.commentsCtl.ingest(event),
 				commentLog: () => d.commentsCtl.store.serialize(),
+				adoptGuestWrite: (rel, before, after) => d.commentsCtl.adoptRemoteWrite(rel, before, after),
 				typstScrollForGuest: (rel, line, character) => d.typstPreview().scrollForGuest(rel, line, character)
 			})
 		);

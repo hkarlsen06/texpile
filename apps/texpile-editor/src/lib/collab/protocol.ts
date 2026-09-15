@@ -4,7 +4,7 @@
 
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
-import type { CommentEvent } from '$lib/comments/log';
+import { isCommentEvent, type CommentEvent } from '$lib/comments/log';
 
 export const BROADCAST = 0;
 
@@ -116,6 +116,12 @@ const PREVIEW_EVS = ['open', 'data', 'text', 'close'] as const;
 export function isSafeRel(rel: string): boolean {
 	if (!rel || rel.includes('\\') || rel.startsWith('/') || /^[a-z]:/i.test(rel)) return false;
 	return rel.split('/').every((seg) => seg !== '' && seg !== '.' && seg !== '..');
+}
+
+export function isSafeCommentEvent(event: unknown): event is CommentEvent {
+	if (!isCommentEvent(event)) return false;
+	const paths = event.t === 'open' ? [event.file] : event.t === 'move' ? [event.from, event.to] : event.t === 'anchor' ? [event.file] : [];
+	return paths.every((p) => p === undefined || isSafeRel(p));
 }
 
 export type Frame =

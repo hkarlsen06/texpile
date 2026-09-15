@@ -10,6 +10,7 @@ import {
 	PreviewStream,
 	parseRelayNotice,
 	isSafeRel,
+	isSafeCommentEvent,
 	BROADCAST,
 	type Frame,
 	type PreviewPayload
@@ -37,6 +38,16 @@ describe('collab protocol', () => {
 		for (const bad of ['', '/etc/passwd', 'C:/x', 'c:\\x', '..', '../x', 'a/../../x', 'a\\b', 'a//b', 'a/./b', 'a/']) {
 			expect(isSafeRel(bad), bad).toBe(false);
 		}
+	});
+
+	it('isSafeCommentEvent takes a well formed event and refuses a malformed or escaping one', () => {
+		const anchor = { quote: 'text', prefix: '', suffix: '', start: 0, end: 4 };
+		const open = { v: 1, t: 'open', id: 't1', file: 'main.tex', body: 'hi', anchor, at: 'now', by: 'mei' };
+		expect(isSafeCommentEvent(open)).toBe(true);
+		expect(isSafeCommentEvent({ ...open, file: '../main.tex' })).toBe(false);
+		expect(isSafeCommentEvent({ ...open, anchor: null })).toBe(false);
+		expect(isSafeCommentEvent({ v: 1, t: 'move', from: 'a.tex', to: '/etc/b.tex', at: 'now', by: 'mei' })).toBe(false);
+		expect(isSafeCommentEvent({ v: 1, t: 'anchor', thread: 't1', anchor, at: 'now', by: 'mei' })).toBe(true);
 	});
 
 	// megabytes of real chunking, not a mock: ~1.5s alone but past vitest's 5s default when the
