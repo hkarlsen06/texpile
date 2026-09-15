@@ -91,10 +91,19 @@ function runEnvName(node: Node, ctx: Ctx): string | null {
 	return null;
 }
 
-// letters and digits only: the same label written as source and re-serialized from the editor
-// differs by ties, dash ligatures and quote curling, so compare what survives all of those
+// the same label written as source and re-serialized from the editor differs by markup, ties,
+// dash ligatures and quote curling; those are folded, and any other character typed in counts
 function labelKey(s: string): string {
-	return s.replace(/\\[a-zA-Z@]+\s*/g, '').replace(/[^\p{L}\p{N}]/gu, '');
+	return s
+		.replace(/\\[a-zA-Z@]+\s*/g, '')
+		.replace(/[{}]/g, '')
+		.replace(/~|\u00A0/g, ' ')
+		.replace(/---|—/g, '-')
+		.replace(/--|–/g, '-')
+		.replace(/``|''|[“”"]/g, '"')
+		.replace(/[`‘’]/g, "'")
+		.replace(/\s+/g, ' ')
+		.trim();
 }
 
 /**

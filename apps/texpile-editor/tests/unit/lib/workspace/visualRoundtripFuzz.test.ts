@@ -299,6 +299,7 @@ describe('visual editor round trip', () => {
 		it(`${f.name}: what is typed in the visual editor comes back when the file is opened again`, () => {
 			const failures: Failure[] = [];
 			const sources = f.files.map((p) => readFileSync(p, 'utf8').replace(/\r\n/g, '\n'));
+			if (!sources.length) return;
 			const only = Number(process.env.VISUAL_FUZZ_ONLY ?? 0);
 			for (let run = only || 1; run <= (only || RUNS); run++) {
 				const source = sources[run % sources.length];

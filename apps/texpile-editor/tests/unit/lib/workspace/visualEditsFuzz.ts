@@ -20,7 +20,7 @@ const DOCS = join(__dirname, '../../../../../../docs');
 
 export function walk(dir: string, ext: RegExp, max = 400_000): string[] {
 	const out: string[] = [];
-	for (const name of readdirSync(dir)) {
+	for (const name of readdirSync(dir).sort()) {
 		if (name === '_draft') continue;
 		const p = join(dir, name);
 		const st = statSync(p);
@@ -53,6 +53,8 @@ export const FORMATS: Format[] = [
 for (const dir of (process.env.VISUAL_FUZZ_CORPUS ?? '').split(';').filter(Boolean)) {
 	for (const f of FORMATS) f.files.push(...walk(dir, new RegExp(`\\.${f.name}$`), 120_000));
 }
+const only = process.env.VISUAL_FUZZ_FILE;
+if (only) for (const f of FORMATS) f.files = f.files.filter((p) => p.replace(/\\/g, '/').includes(only));
 
 const PIECES = [
 	'a',

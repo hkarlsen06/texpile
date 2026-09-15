@@ -1,5 +1,5 @@
 import { it, expect } from 'vitest';
-import { renderedWords } from '$lib/comments/renderedWords';
+import { renderSource, renderedWords } from '$lib/comments/renderedWords';
 
 it('reads links in every dialect as tagged text', () => {
 	expect(renderedWords('see \\href{https://x.y/a%b}{the \\textit{docs}} or \\url{https://a.b}', 'tex')).toEqual([
@@ -62,4 +62,25 @@ it('keeps words that close or open formatting the words around them hold', () =>
 		]
 	]);
 	expect(renderedWords('a *b _c* d_', 'md')).toBeNull();
+});
+
+it('ends the block at the brace that closes the heading the words started in', () => {
+	const prose = { text: 'Prose here.', tags: [] };
+	expect(renderSource('Prose here.}', 'tex', { blockOpen: true })).toEqual({ words: [[prose], []], closed: [], open: [] });
+	expect(renderSource('} Prose here.', 'tex', { blockOpen: true })).toEqual({ words: [[], [prose]], closed: [], open: [] });
+	expect(renderSource('Prose here.', 'tex', { blockOpen: true })).toEqual({ words: [[prose]], closed: [], open: ['{'] });
+	expect(renderSource('Prose here.}', 'tex')).toEqual({ words: [[prose]], closed: ['}'], open: [] });
+});
+
+it('ends the block at the line end of the heading the words started on', () => {
+	const head = { text: 'P arsing', tags: [] };
+	const rest = { text: 'The syntax', tags: [] };
+	expect(renderSource('P arsing\nThe syntax', 'md', { blockOpen: true })).toEqual({ words: [[head], [rest]], closed: [], open: [] });
+	expect(renderSource('P arsing\nThe syntax', 'typ', { blockOpen: true })).toEqual({ words: [[head], [rest]], closed: [], open: [] });
+	expect(renderSource('P arsing\nThe syntax', 'md')).toEqual({
+		words: [[{ text: 'P arsing The syntax', tags: [] }]],
+		closed: [],
+		open: []
+	});
+	expect(renderedWords('bullet.\n/ Another term', 'typ')).toEqual([[{ text: 'bullet.', tags: [] }], [{ text: 'Another term', tags: [] }]]);
 });

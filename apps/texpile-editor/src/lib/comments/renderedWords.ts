@@ -165,6 +165,7 @@ function texWords(s: string, edges: RenderEdges): RenderedSource | null {
 		if (block) words.paragraphBreak();
 	}
 	if (edges.breakBefore) words.paragraphBreak();
+	if (edges.blockOpen) groups.push({ tag: false, block: true });
 	for (let i = 0; i < s.length;) {
 		const c = s[i];
 		if (/\s/.test(c)) {
@@ -298,9 +299,9 @@ function isMarkup(s: string, i: number, md: boolean): boolean {
 
 function delimitedWords(s: string, dialect: 'md' | 'typ', edges: RenderEdges): RenderedSource | null {
 	const md = dialect === 'md';
-	// a heading, list item or quote marker at the start of a line: the block it opens is its own
-	// paragraph in the editor; a term list entry is not (its term is drawn as a label)
-	const structure = md ? /^[ \t]*(?:[-+*>]|\d+[.)]|#{1,6})[ \t]+/ : /^[ \t]*(?:[-+]|=+|\d+\.)[ \t]+/;
+	// a heading, list item, term or quote marker at the start of a line: the block it opens is its
+	// own paragraph in the editor
+	const structure = md ? /^[ \t]*(?:[-+*>]|\d+[.)]|#{1,6})[ \t]+/ : /^[ \t]*(?:[-+/]|=+|\d+\.)[ \t]+/;
 	// delimiters on their own are markup, whatever they end up pairing with
 	if (/^[\s`*_~]*[`*_~][\s`*_~]*$/.test(s)) return null;
 	const words = new Words();
@@ -308,6 +309,7 @@ function delimitedWords(s: string, dialect: 'md' | 'typ', edges: RenderEdges): R
 	const groups: string[] = [];
 	let link: { end: number; skip: number } | null = null;
 	const firstText = s.search(/\S/);
+	let heading = !!edges.blockOpen;
 	if (edges.breakBefore) words.paragraphBreak();
 	function code(from: number): number {
 		const close = s.indexOf('`', from);
@@ -341,6 +343,13 @@ function delimitedWords(s: string, dialect: 'md' | 'typ', edges: RenderEdges): R
 			let j = i;
 			while (j < s.length && /\s/.test(s[j])) j++;
 			const line = s.lastIndexOf('\n', j - 1);
+			if (heading && line >= i) {
+				if (open.length || groups.length || link) return null;
+				words.paragraphBreak();
+				heading = false;
+				i = j;
+				continue;
+			}
 			const next = whitespace(line >= i && structure.test(s.slice(line + 1)) ? s.slice(0, line + 1) : s, i, words, open);
 			if (next === null) return null;
 			i = next;
@@ -438,9 +447,16 @@ function delimitedWords(s: string, dialect: 'md' | 'typ', edges: RenderEdges): R
  * How the words meet the text around them: whether they begin a line (where md and typ read a
  * list or heading marker; true unless said otherwise), whether a block edge sits on either side,
  * whether a code span opened before them (their first backtick then closes it), and whether one
- * they leave open closes after them
+ * they leave open closes after them, and whether they start inside a heading's braces
  */
-export type RenderEdges = { lineStart?: boolean; breakBefore?: boolean; breakAfter?: boolean; inCode?: boolean; codeAfter?: boolean };
+export type RenderEdges = {
+	lineStart?: boolean;
+	breakBefore?: boolean;
+	breakAfter?: boolean;
+	inCode?: boolean;
+	codeAfter?: boolean;
+	blockOpen?: boolean;
+};
 
 export function renderSource(source: string, dialect: AnchorDialect, edges: RenderEdges = {}): RenderedSource | null {
 	return dialect === 'tex' ? texWords(source, edges) : delimitedWords(source, dialect, edges);

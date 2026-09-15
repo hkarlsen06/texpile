@@ -33,6 +33,7 @@ const { CommentsController } = await import('$lib/workspace/commentsController.s
 
 const ROOT = '/w';
 const RUNS = Number(process.env.SUGGEST_VISUAL_RUNS ?? 12);
+const ONLY = Number(process.env.VISUAL_FUZZ_ONLY ?? 0);
 
 const paragraphs = (s: string) =>
 	s
@@ -234,8 +235,9 @@ describe('suggestions made in the visual editor', () => {
 	for (const f of FORMATS) {
 		it(`${f.name}: draws old and new words exactly as rejecting them reads`, async () => {
 			const files = f.files.filter((p) => statSync(p).size < 20_000);
+			if (!files.length) return;
 			const failures: string[] = [];
-			for (let run = 1; run <= RUNS * 4 && failures.length < 2; run++) {
+			for (let run = ONLY || 1; run <= (ONLY || RUNS * 4) && failures.length < 2; run++) {
 				const rnd = prng(run * 7919);
 				const original = readFileSync(files[run % files.length], 'utf8').replace(/\r\n/g, '\n');
 				const steps = Array.from({ length: 1 + Math.floor(rnd() * 4) }, () => (s: EditorState) => {
@@ -254,6 +256,21 @@ describe('suggestions made in the visual editor', () => {
 					drawn.map((r) => ({ from: r.from, to: r.to, words: r.old.map((x) => x.text).join('') }))
 				);
 				if (want !== got) {
+					if (ONLY)
+						console.log(
+							'PLACED ' +
+								JSON.stringify({
+									marks: marks.map((m) => ({
+										from: m.from,
+										to: m.to,
+										quote: m.anchor.quote,
+										restore: m.restore,
+										prefix: m.anchor.prefix,
+										suffix: m.anchor.suffix
+									})),
+									drawn: drawn.map((r) => ({ from: r.from, to: r.to, old: r.old, text: shown.textBetween(r.from, r.to, '|') }))
+								})
+						);
 					let s = 0;
 					while (want[s] === got[s]) s++;
 					failures.push(
@@ -268,8 +285,9 @@ describe('suggestions made in the visual editor', () => {
 	for (const f of FORMATS) {
 		it(`${f.name}: gives back every word and paragraph once all are rejected`, async () => {
 			const files = f.files.filter((p) => statSync(p).size < 20_000);
+			if (!files.length) return;
 			const failures: string[] = [];
-			for (let run = 1; run <= RUNS && failures.length < 2; run++) {
+			for (let run = ONLY || 1; run <= (ONLY || RUNS) && failures.length < 2; run++) {
 				const file = files[run % files.length];
 				const original = readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
 				const r = await session(f, original, run);

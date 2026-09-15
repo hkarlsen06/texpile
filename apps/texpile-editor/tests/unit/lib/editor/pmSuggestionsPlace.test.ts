@@ -138,6 +138,18 @@ it('marks the same words with other formatting as a format change', () => {
 	expect(range.old).toEqual([{ text: 'driven', tags: [] }]);
 });
 
+it('outlines a paragraph pulled into the heading before it, since the words change blocks', () => {
+	const source = '\\begin{document}\n\\paragraph{Runin Prose follows the heading here.}\n\nNext paragraph stays.\n\\end{document}\n';
+	const doc = parseLatexFile(source).doc;
+	const words = 'Prose follows the heading here.}';
+	const from = source.indexOf(words);
+	const to = from + words.length;
+	const mark = { id: 'merged', from, to, restore: '} Prose follows the heading here.', mine: true, anchor: buildAnchor(source, from, to) };
+	const { ranges, partial } = placePmSuggestions(doc, [mark], 'tex');
+	expect([...partial]).toEqual(['merged']);
+	expect(doc.textBetween(ranges[0].from, ranges[0].to, '|')).toBe('Runin Prose follows the heading here.');
+});
+
 it('tints the copy the suggestion is in when the text around it repeats', () => {
 	const source = '\\begin{document}\nThe cat sat on the mat today.\n\nThe cat sat on the mat today.\n\\end{document}\n';
 	const doc = parseLatexFile(source).doc;

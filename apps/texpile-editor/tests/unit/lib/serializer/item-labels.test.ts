@@ -86,4 +86,9 @@ describe('editing a description label', () => {
 		const out = retypeLabel('\\begin{description}\n\\item[Case~1] body text\n\\end{description}', 'Case\u00a01');
 		expect(out).toContain('\\item[Case~1]');
 	});
+
+	it('keeps a character typed at the start of the label', () => {
+		const out = retypeLabel('\\begin{description}\n\\item[Term] body text\n\\end{description}', ',Term');
+		expect(out).toContain('\\item[,Term]');
+	});
 });

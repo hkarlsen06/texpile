@@ -47,6 +47,12 @@ const RUN_EDGE: Record<AnchorDialect, [RegExp, RegExp]> = {
 
 const RUN_MARKUP: Record<AnchorDialect, RegExp> = { tex: /[{}]/, md: /[*_~`]/, typ: /[*_`[\]]/ };
 
+const HEADING_OPEN: Record<AnchorDialect, RegExp> = {
+	tex: /\\(?:part|chapter|section|subsection|subsubsection|paragraph|subparagraph)\*?(?:\[[^\]]*\])?\{[^{}]*$/,
+	md: /(?:^|\n)[ \t]*#{1,6}[ \t]+[^\n]*$/,
+	typ: /(?:^|\n)[ \t]*=+[ \t]+[^\n]*$/
+};
+
 const MARK_TAGS = new Map([
 	['em', 'em'],
 	['strong', 'strong'],
@@ -128,12 +134,14 @@ function paragraphsFit(doc: PMNode, drawn: Span, quote: RenderedWords, restore: 
 	}
 	const added = quote.length - restore.length;
 	if (added <= 0) return true;
-	function whole(i: number) {
-		return shows(quote[i]) && (i !== fresh[0] || (old === undefined && atStart)) && (i !== fresh[fresh.length - 1] || atEnd);
-	}
-	let visible = 0;
-	for (let i = 0; i + 1 < quote.length; i++) if (whole(i) || whole(i + 1)) visible++;
-	return visible >= added;
+	let blocks = 0;
+	doc.nodesBetween(drawn.from, drawn.to, (node) => {
+		if (node.isTextblock) blocks++;
+		return !node.isTextblock;
+	});
+	const headWhole = old === undefined && atStart;
+	if (blocks <= 1) return (headWhole && atEnd ? 1 : 0) >= added;
+	return blocks - 1 + (headWhole ? 1 : 0) + (atEnd ? 1 : 0) >= added;
 }
 
 function tagsOf(node: PMNode): string[] {
@@ -208,16 +216,13 @@ export function placeWords(doc: PMNode, flat: FlatDoc, s: SuggestionMark, hit: S
 		const node = at < flat.index.length && at >= 0 ? doc.nodeAt(flat.index[at]) : null;
 		return !!node?.isText && node.marks.some((m) => m.type.name === 'code');
 	}
-	const inCode = dialect !== 'tex' && codeAt(hit.from) && (hit.to > hit.from || codeAt(hit.from - 1));
+	const inCode = dialect !== 'tex' && codeAt(hit.from) && (hit.to > hit.from || codeAt(hit.from - 1)) && !/^\s*`/.test(s.anchor.quote);
 	const codeAfter = dialect !== 'tex' && suffix.includes('`');
+	const $at = hit.from < flat.index.length ? doc.resolve(flat.index[hit.from]) : null;
+	const blockOpen = !!$at && $at.parent.type.name === 'heading' && ($at.pos !== $at.start() || HEADING_OPEN[dialect].test(prefix));
+	const alone = { lineStart, inCode, codeAfter, blockOpen };
 	function inContext(words: string) {
-		return renderSource(before.exec(prefix)![0] + words + after.exec(suffix)![0], dialect, {
-			lineStart,
-			breakBefore,
-			breakAfter,
-			inCode,
-			codeAfter
-		});
+		return renderSource(before.exec(prefix)![0] + words + after.exec(suffix)![0], dialect, { ...alone, breakBefore, breakAfter });
 	}
 	const termLine = dialect === 'typ' && /(?:^|\n)[ \t]*\/ [^\n]*$/.test(prefix);
 	const lineBefore = prefix.slice(prefix.lastIndexOf('\n') + 1);
@@ -248,7 +253,7 @@ export function placeWords(doc: PMNode, flat: FlatDoc, s: SuggestionMark, hit: S
 	if (old[0]?.some((run) => run.text.includes(ATOM))) return null;
 	const fit = fitWords(flat.text, hit, quote);
 	if (!fit) return null;
-	const typed = (renderedWords(s.anchor.quote, dialect, { lineStart, inCode, codeAfter }) ?? []).map(paragraphText).join('\n');
+	const typed = (renderedWords(s.anchor.quote, dialect, alone) ?? []).map(paragraphText).join('\n');
 	function spaceAt(at: number) {
 		return /[ \u00A0]/.test(flat.text[at] ?? '');
 	}
@@ -258,7 +263,7 @@ export function placeWords(doc: PMNode, flat: FlatDoc, s: SuggestionMark, hit: S
 	if (fit.to === fit.from && /^[^\S\n]+$/.test(typed) && !/\s$/.test(prefix) && spaceAt(fit.from - 1)) fit.from--;
 	const drawn = pmSpan(doc, flat.text, flat.index, fit.from, fit.to);
 	if (!drawn || !drawsAsText(doc, drawn.from, drawn.to) || !paragraphsFit(doc, drawn, quote, restore)) return null;
-	const taken = (renderedWords(s.restore, dialect, { lineStart, inCode, codeAfter }) ?? []).map(paragraphText).join('\n');
+	const taken = (renderedWords(s.restore, dialect, alone) ?? []).map(paragraphText).join('\n');
 	const context = drawn.to > drawn.from ? contextTags(doc, drawn, quote) : edgeTags(doc, drawn.from, s.anchor, dialect);
 	const inside: WordRun[] = [];
 	for (const run of old[0] ?? (/[^\S\n]/.test(taken) ? [{ text: ' ', tags: [] }] : [])) {
