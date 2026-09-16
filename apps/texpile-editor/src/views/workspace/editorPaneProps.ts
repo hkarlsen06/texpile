@@ -21,6 +21,7 @@ export type EditorPaneProps = {
 	onActivateTab: (tab: Tab) => void;
 	onCloseTab: (tab: Tab) => void;
 	onKeepTab: (tab: Tab) => void;
+	onTabMenu?: (tab: Tab, event: MouseEvent) => void;
 	kind: FileKind;
 	/** a shared session serves this file by name only (no body): show a note, not an empty editor */
 	nameOnly?: boolean;

@@ -5,20 +5,14 @@ Release notes for Texpile Desktop. Add notes under `## [Unreleased]` as you work
 
 ## [Unreleased]
 
-- feat: a Suggesting mode, where edits go into the file as suggestions that someone accepts or rejects
-- fix: editing a paragraph in the visual editor no longer adds or removes `\par` in the file
-- feat: a Collaboration tab in Preferences sets the name and color other people see in a shared session
-- feat: review comments are signed with that display name, and fall back to the git user name
-- feat: review comments show beside the text they are about
-- fix: comments keep their exact place across saves after edits made in Texpile, in both editors
-- fix: the Comments panel closes a thread with Resolve; the separate Delete is gone
-- fix: deleting the text a comment is about deletes the comment with it, and undo brings both back
-- fix: the file tree's hover button keeps the tree's width and covers the name it sits over
-- fix: the terminal dock can no longer be dragged over the editor
-- fix: the browser's built-in spell check is off, so only Texpile's own runs
-- fix: the hover card over commented text in the source editor is gone; the thread is beside the text
-- fix: in a narrow editor a comment card sits after the text instead of pushing a short line out of view
-- fix: undoing a rename in the file tree keeps the open file and its comments
+- feat: suggestion mode
+- feat: side by side comments
+- feat: collaboration tab in perferences
+- feat: allow switching between distrbutions
+- feat: right click an open tab to show right-click menu
+- feat: control/command-shift-t reopens closed tab
+- fix: version check before collaborations
+- fix: various visual editor accuracy improvements
 
 ## [1.1.0] - 2026-09-10
 

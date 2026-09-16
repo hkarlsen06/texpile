@@ -25,8 +25,9 @@
 		onClose: (tab: Tab) => void;
 		/** double-click keeps a preview tab (the only way to hold one you never edit, e.g. a PDF). */
 		onKeep?: (tab: Tab) => void;
+		onContextMenu?: (tab: Tab, event: MouseEvent) => void;
 	};
-	let { tabs, activeKey, dirty, previewKey = null, onActivate, onClose, onKeep }: Props = $props();
+	let { tabs, activeKey, dirty, previewKey = null, onActivate, onClose, onKeep, onContextMenu }: Props = $props();
 
 	function isActive(t: Tab) {
 		return !!activeKey && tabKey(t) === activeKey;
@@ -96,6 +97,7 @@
 				use:tip={tabTitle(tab)}
 				onclick={() => onActivate(tab)}
 				ondblclick={() => onKeep?.(tab)}
+				oncontextmenu={(e) => onContextMenu?.(tab, e)}
 				onkeydown={(e) => {
 					if (e.key === 'Enter' || e.key === ' ') {
 						e.preventDefault();

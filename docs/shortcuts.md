@@ -19,6 +19,7 @@ The combinations below are for Windows and Linux. On macOS, use Cmd wherever a t
 | Ctrl K         | Command palette                  |
 | Ctrl T         | Go to file                       |
 | Ctrl W         | Close the tab                    |
+| Ctrl Shift T   | Reopen the last closed tab       |
 | Ctrl F         | Find in this document            |
 | Ctrl Shift F   | Find in every file in the folder |
 | Ctrl Shift N   | New window                       |

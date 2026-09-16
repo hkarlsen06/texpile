@@ -5,6 +5,7 @@
 // waiting on a blank pane (startupStats.ts caught it). helperProcess.ts is the other end.
 import * as gitService from '../gitService';
 import { startWorkspaceWatch, stopWorkspaceWatch } from '../fs/fsWatch';
+import { pathKey } from '../shell/toolDirs';
 
 type Call = { id: number; op: string; args: unknown[] };
 
@@ -18,6 +19,10 @@ function run(op: string, args: unknown[]): unknown {
 	}
 	if (op === 'watch.stop') {
 		stopWorkspaceWatch(args[0] as string);
+		return true;
+	}
+	if (op === 'env.path') {
+		process.env[pathKey()] = args[0] as string;
 		return true;
 	}
 	if (op.startsWith('git.')) {

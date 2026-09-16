@@ -61,7 +61,7 @@ How other people see you in a [shared session](collaboration.md). The name and t
 
 ## Toolchain
 
-Every external program Texpile runs, for LaTeX, Typst, and version control, and whether each one was found. Nothing is bundled; these are found on your PATH. Check again runs the check once more after you install something.
+Every external program Texpile runs, for LaTeX, Typst, and version control, and whether each one was found. Nothing is bundled; these are found on your PATH and in the folders you add here. Folders are searched first, by every program Texpile starts and by the compile command, so a TeX distribution installed somewhere that is not on your PATH works once its bin folder is added. Type a folder into the path field, or use Browse to pick one; Locate next to a missing program picks the program and fills in its folder. A relative path counts from the folder Texpile runs from. Browse fills in a relative path for a folder on the same drive as a portable Texpile, so it still works after the drive letter changes, and an absolute path otherwise; either can be edited before Add. Distribution lists the installs found on this machine, TeX Live and MiKTeX under LaTeX and each tinymist with the Typst it carries under Typst, and names the one your PATH reaches. Choosing one puts its bin folder first in Folders, so every program of that kind comes from that install; From PATH takes it out again. Check again runs the check once more after you install something.
 
 [Installation](installation/README.md)
 

@@ -3,17 +3,11 @@
 // rooted at one workspace. Keyed by webContents id so closing one window can't kill another's.
 import { app, ipcMain } from 'electron';
 import * as typstService from '../typstService';
-import * as toolchain from '../toolchain';
 
 const typstLsps = new Map<number, typstService.LspHandle>();
 
 export function registerTypstIpc(): void {
 	ipcMain.handle('typst:resolve', () => typstService.resolveTinymist(app.getPath('userData')));
-
-	// "which of the programs we shell out to are actually here" - see toolchain.ts. tinymist is not in
-	// that list because typst:resolve already answers for it, and with more detail (it reports the
-	// embedded Typst version and which location won).
-	ipcMain.handle('toolchain:probe', () => toolchain.probeToolchain());
 
 	ipcMain.handle('typst:lsp:start', async (e, root: string | null) => {
 		const wcId = e.sender.id;

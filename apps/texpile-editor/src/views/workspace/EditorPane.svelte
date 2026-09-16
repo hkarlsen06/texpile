@@ -43,6 +43,7 @@
 		onActivateTab,
 		onCloseTab,
 		onKeepTab,
+		onTabMenu,
 		kind,
 		nameOnly = false,
 		viewMode: requestedViewMode,
@@ -207,6 +208,7 @@
 			onActivate={onActivateTab}
 			onClose={onCloseTab}
 			onKeep={onKeepTab}
+			onContextMenu={onTabMenu}
 		/>
 	{/if}
 	{#if loadedPath && structured && !comparing && (viewMode === 'source' || visualDoc)}

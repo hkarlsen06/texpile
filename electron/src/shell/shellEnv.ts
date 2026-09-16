@@ -9,6 +9,7 @@
 // rather than passed per-spawn, because simple-git cannot take a spread environment (gitService.ts)
 // and git inherits ours.
 import { probeLoginShell } from './probeLoginShell';
+import { applyToolDirs } from './toolDirs';
 
 const TIMEOUT_MS = 10_000;
 
@@ -26,7 +27,7 @@ export function shellEnvError(): string | null {
 
 /** resolves once process.env.PATH is the user's. Await before spawning any external program. */
 export function shellEnvReady(): Promise<void> {
-	return (pending ??= resolveShellEnv());
+	return (pending ??= resolveShellEnv().then(applyToolDirs));
 }
 
 function appendMacDirs(): void {

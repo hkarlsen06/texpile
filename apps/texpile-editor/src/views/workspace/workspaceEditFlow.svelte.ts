@@ -6,7 +6,8 @@ import { SavePipeline } from '$lib/workspace/savePipeline.svelte';
 import { ExternalChangeWatcher } from '$lib/workspace/externalChange.svelte';
 import { UnsavedGuard } from '$lib/workspace/unsavedGuard.svelte';
 import { diskChangedSince, recordDiskStamp } from '$lib/workspace/diskStamp';
-import { activeFilePath, activeCompare, isDirty } from '$lib/workspace/workspaceStore';
+import { activeFilePath, activeCompare, isDirty, fileTree } from '$lib/workspace/workspaceStore';
+import { flatFiles } from '$lib/workspace/treeRefresh';
 import { tabs, tabKey, type Tab } from '$lib/workspace/tabs.svelte';
 import { visualDocCache } from '$lib/workspace/visualDocCache';
 import { saveVisualPosition } from '$lib/workspace/visualPositions';
@@ -222,6 +223,12 @@ export class WorkspaceEditFlow {
 		tabs.close(key);
 		// a comparison shares the file's tab; only the last real tab for a path ends its history
 		if (!tabs.list.some((t) => samePath(t.path, tab.path))) this.d.wsdoc.modes.history.forget(tab.path);
+	}
+
+	reopenTab(): void {
+		const live = flatFiles(fileTree.current);
+		const tab = tabs.reopen((p) => live.some((f) => samePath(f, p)));
+		if (tab) this.activateTab(tab);
 	}
 
 	/** is this exact tab the focused one: same file AND the same version, or the lack of one */

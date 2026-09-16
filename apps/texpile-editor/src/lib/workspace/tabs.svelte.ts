@@ -8,6 +8,7 @@ import { samePath, joinPath } from './fileSystem';
 import { getFolder, updateFolder } from '$lib/storage/workspaces';
 
 const MAX_TABS = 50;
+const REOPEN_DEPTH = 20;
 
 /** the saved version a comparison tab is against */
 export type CompareRef = { hash: string; subject: string };
@@ -31,6 +32,7 @@ class TabsStore {
 	/** VS Code style: opening another takes its slot rather than adding a tab, so browsing a tree
 	 *  does not bury the strip. A KEY, so a comparison can hold the slot as a file does. */
 	preview = $state<string | null>(null);
+	private closed: Tab[] = [];
 	private root: string | null = null;
 	private persistable = false;
 
@@ -40,6 +42,7 @@ class TabsStore {
 		this.persistable = persist && !!root && typeof localStorage !== 'undefined';
 		this.list = [];
 		this.preview = null;
+		this.closed = [];
 		if (!this.persistable || !root) return;
 		const rels = getFolder(root).tabs;
 		if (Array.isArray(rels)) this.list = rels.slice(0, MAX_TABS).map((r) => ({ path: joinPath(root, String(r)) }));
@@ -120,9 +123,24 @@ class TabsStore {
 	}
 
 	close(key: string): void {
+		const tab = this.find(key);
+		if (tab) this.closed = [...this.closed.filter((t) => tabKey(t) !== key).slice(-(REOPEN_DEPTH - 1)), tab];
 		this.list = this.list.filter((t) => tabKey(t) !== key);
 		this.keep(key); // the slot goes with the tab
 		this.persist();
+	}
+
+	/** the most recently closed tab that is not open again and still has its file, back on the strip */
+	reopen(exists: (path: string) => boolean): Tab | null {
+		while (this.closed.length) {
+			const tab = this.closed[this.closed.length - 1];
+			this.closed = this.closed.slice(0, -1);
+			if (this.has(tabKey(tab)) || !exists(tab.path)) continue;
+			this.list = [...this.list.slice(-(MAX_TABS - 1)), tab];
+			this.persist();
+			return tab;
+		}
+		return null;
 	}
 
 	/** its comparisons go too: nothing left to sit beside */

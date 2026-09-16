@@ -15,6 +15,8 @@ export type ToolProbe = {
 	found: boolean;
 	/** first informative line of the tool's own version output, when it gave one */
 	detail?: string;
+	/** there, but its version check failed: a script missing perl modules, a hang */
+	broken?: boolean;
 	/** the command probed, as spawned (a bare name means it came from PATH) */
 	command: string;
 };
@@ -56,7 +58,7 @@ function probeOne(id: string, command: string, args: string[]): Promise<ToolProb
 			execFile(command, args, { timeout: 10000, windowsHide: true }, (err, stdout, stderr) => {
 				const code = (err as NodeJS.ErrnoException | null)?.code;
 				if (code === 'ENOENT') return resolve({ id, found: false, command });
-				resolve({ id, found: true, detail: firstInformativeLine(`${stdout}\n${stderr}`), command });
+				resolve({ id, found: true, detail: firstInformativeLine(`${stdout}\n${stderr}`), command, ...(err ? { broken: true } : {}) });
 			})
 		);
 	});
@@ -82,49 +84,13 @@ const TOOLS: { id: string; command: string; args: string[] }[] = [
  * In parallel because latexindent is a Perl script that can take a second on its own, and nine
  * sequential probes would make the panel feel broken.
  */
-export async function probeToolchain(): Promise<ToolProbe[]> {
+export async function probeToolchain(onEach?: (p: ToolProbe) => void): Promise<ToolProbe[]> {
 	await shellEnvReady();
-	return Promise.all(TOOLS.map((t) => probeOne(t.id, t.command, t.args)));
-}
-
-/**
- * `base` with `dirs` prepended to PATH, for handing to a child process.
- *
- * WHY THIS EXISTS. The terminal spawns with the app's own environment, so it only ever sees the
- * PATH Texpile itself was launched with. A binary the user pointed at in Preferences is therefore
- * invisible to it: the language server would happily use the configured tinymist (the main process
- * spawns it by absolute path), the Toolchain tab would report it as found, and then pressing
- * Compile would fail with "'tinymist' is not recognized" - the app telling you a tool is installed
- * and then failing to use it.
- *
- * Prepended rather than appended: a path the user configured explicitly should beat a stale copy
- * that happens to be on the system PATH, which is the same order tinymist's own editor plugins use
- * when they resolve a server (configured first, PATH last).
- *
- * Two details that are easy to get wrong on Windows:
- *
- *  - the variable is conventionally `Path` there, not `PATH`, and env lookup is case-INSENSITIVE
- *    while a plain JS object is not. Writing `env.PATH` next to an existing `Path` produces two
- *    keys, and the one the child actually uses is not the one we set. So reuse whichever key is
- *    already present.
- *  - the separator is `;`, not `:`.
- */
-export function withPathDirs(base: NodeJS.ProcessEnv, dirs: (string | null | undefined)[]): NodeJS.ProcessEnv {
-	const clean = dirs.filter((d): d is string => !!d && d.trim().length > 0);
-	if (!clean.length) return { ...base };
-
-	const sep = process.platform === 'win32' ? ';' : ':';
-	const env = { ...base };
-	// find the existing key whatever its casing, so we extend it rather than shadow it
-	const key = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
-	const current = env[key] ?? '';
-	const existing = current.split(sep).filter(Boolean);
-
-	// don't grow PATH on every spawn: a directory already on it keeps its position
-	const seen = new Set(existing.map((p) => (process.platform === 'win32' ? p.toLowerCase() : p)));
-	const added = clean.filter((d) => !seen.has(process.platform === 'win32' ? d.toLowerCase() : d));
-	if (!added.length) return env;
-
-	env[key] = [...added, ...existing].join(sep);
-	return env;
+	return Promise.all(
+		TOOLS.map(async (t) => {
+			const p = await probeOne(t.id, t.command, t.args);
+			onEach?.(p);
+			return p;
+		})
+	);
 }

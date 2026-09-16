@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as typstService from '../typstService';
-import * as toolchain from '../toolchain';
+import { withPathDirs } from '../shell/pathDirs';
 import { shellEnvReady } from '../shell/shellEnv';
 import { timeSync } from '../startupStats';
 
@@ -86,7 +86,7 @@ function terminalEnv(): NodeJS.ProcessEnv {
 	} catch {
 		// an unreadable userData dir must never stop a terminal from opening
 	}
-	return toolchain.withPathDirs(process.env, dirs);
+	return withPathDirs(process.env, dirs);
 }
 
 type TerminalSpawnOpts = {

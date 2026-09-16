@@ -5,9 +5,9 @@
 // Skips itself when git is not on PATH, like the tinymist fixtures do.
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { gitLog, gitChangesSince } from '../../../../../../electron/src/gitService';
 
 function hasGit(): boolean {
@@ -245,6 +245,27 @@ describe.skipIf(!AVAILABLE)('gitChangesSince against a real repo', () => {
 			expect(res.entries).toEqual([{ path: join(root, 'chapters', 'results.tex'), status: 'D' }]);
 		} finally {
 			rmSync(root, { recursive: true, force: true });
+		}
+	});
+});
+
+// macOS temp dirs sit behind a symlink (/var -> /private/var) and git names the top level by the physical path
+describe.skipIf(!AVAILABLE)('a folder opened through a symlink', () => {
+	it('reads its history, with paths spelled the way the folder was opened', async () => {
+		const real = makeRepo();
+		const link = join(mkdtempSync(join(tmpdir(), 'texpile-gitlink-')), 'work');
+		symlinkSync(real, link, 'junction');
+		try {
+			const log = await gitLog(join(link, 'chapters'));
+			expect(log.ok).toBe(true);
+			expect(log.entries?.map((e) => e.subject)).toEqual(['Rewrote the methods']);
+			const first = (await gitLog(link)).entries?.at(-1)?.hash ?? '';
+			const changes = await gitChangesSince(link, first);
+			expect(changes.entries?.map((e) => e.path)).toEqual([join(link, 'chapters', 'methods.tex')]);
+		} finally {
+			rmSync(link);
+			rmSync(dirname(link), { recursive: true, force: true });
+			rmSync(real, { recursive: true, force: true });
 		}
 	});
 });

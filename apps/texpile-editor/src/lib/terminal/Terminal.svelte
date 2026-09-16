@@ -4,6 +4,7 @@
 	import { FitAddon } from '@xterm/addon-fit';
 	import '@xterm/xterm/css/xterm.css';
 	import { compileConfig } from '$lib/workspace/projectConfigSync.svelte';
+	import { settings } from '$lib/settings';
 	import { m } from '$lib/paraglide/messages';
 	import { terminalTheme } from './terminalTheme';
 	import { attachTerminalClipboard } from './terminalClipboard';
@@ -17,7 +18,13 @@
 	let term: Terminal | null = null;
 	let fit: FitAddon | null = null;
 	let unsubs: Array<() => void> = [];
-	const id = `term-${Math.random().toString(36).slice(2)}`;
+	let id = newId();
+	// a shell keeps the PATH it was spawned with, so a change to the folders in Preferences makes it stale
+	let stale = false;
+
+	function newId(): string {
+		return `term-${Math.random().toString(36).slice(2)}`;
+	}
 
 	let status = $state<'loading' | 'ready' | 'unavailable' | 'exited'>('loading');
 	let errorMsg = $state('');
@@ -89,6 +96,34 @@
 		const b = bridge();
 		if (b && status === 'ready') b.write(id, (onDone ? withSentinel(command, onDone) : command) + '\r');
 		else pending = { command, onDone };
+	}
+	async function spawnShell(b: NonNullable<ReturnType<typeof bridge>>, t: Terminal): Promise<boolean> {
+		const res = await b.spawn({ id, cwd, cols: t.cols, rows: t.rows });
+		if (!res.ok) {
+			status = 'unavailable';
+			errorMsg = res.error ?? m.terminal_error_failed_start();
+			return false;
+		}
+		shellName = res.shell ?? '';
+		status = 'ready';
+		return true;
+	}
+	function flushPending(b: NonNullable<ReturnType<typeof bridge>>): void {
+		if (!pending) return;
+		const { command, onDone } = pending;
+		pending = null;
+		b.write(id, (onDone ? withSentinel(command, onDone) : command) + '\r');
+	}
+	// a fresh shell for the folders as they are now; a tracked run finishes first
+	async function respawnIfStale(): Promise<void> {
+		const b = bridge();
+		if (!stale || tracked || status !== 'ready' || !term || !b) return;
+		stale = false;
+		b.kill(id);
+		id = newId();
+		status = 'loading';
+		term.reset();
+		if (await spawnShell(b, term)) flushPending(b);
 	}
 	/** ends the shell's foreground job; Ctrl+C on a bridge that predates terminal:interrupt */
 	export function interrupt(): void {
@@ -166,15 +201,8 @@
 			// nobody is looking at - and the ResizeObserver refits it if the tab is ever shown.
 			if (el.offsetParent !== null) fit.fit();
 
-			const res = await b.spawn({ id, cwd, cols: term.cols, rows: term.rows });
-			if (disposed) return;
-			if (!res.ok) {
-				status = 'unavailable';
-				errorMsg = res.error ?? m.terminal_error_failed_start();
-				return;
-			}
-			shellName = res.shell ?? '';
-			status = 'ready';
+			const spawned = await spawnShell(b, term);
+			if (disposed || !spawned) return;
 
 			term.onData((d) => b.write(id, d));
 			term.onResize(({ cols, rows }) => b.resize(id, cols, rows));
@@ -200,6 +228,7 @@
 							// trim from the sentinel's own echo (the last "__texpile" is the token line)
 							const end = out.lastIndexOf('__texpile');
 							done(end > 0 ? out.slice(0, end) : out);
+							void respawnIfStale();
 						}
 					}
 				})
@@ -219,15 +248,22 @@
 					}
 				})
 			);
+			let seenDirs = settings.current.toolDirs;
+			unsubs.push(
+				observe(
+					() => settings.current.toolDirs,
+					(dirs) => {
+						if (dirs === seenDirs) return;
+						seenDirs = dirs;
+						stale = true;
+						void respawnIfStale();
+					}
+				)
+			);
 			ro = new ResizeObserver(() => refit());
 			ro.observe(el);
 			term.focus();
-			if (pending) {
-				// flush a command queued before the shell was ready
-				const { command, onDone } = pending;
-				pending = null;
-				b.write(id, (onDone ? withSentinel(command, onDone) : command) + '\r');
-			}
+			flushPending(b);
 		})();
 
 		return () => {

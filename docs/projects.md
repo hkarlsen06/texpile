@@ -29,7 +29,7 @@ Every file in the folder, with multi-select using Ctrl and Shift and drag and dr
 
 ## Tabs
 
-Open files appear as tabs above the editor, and your open tabs come back when you reopen the folder.
+Open files appear as tabs above the editor, and your open tabs come back when you reopen the folder. Right-click a tab to close the other tabs, the ones to its right, or the saved ones, to copy the path, or to show the file in its folder or in the file tree.
 
 ## Multi-file documents
 

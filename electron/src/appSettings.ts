@@ -8,6 +8,7 @@
 import { app, ipcMain } from 'electron';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { setToolDirs } from './shell/toolDirs';
 
 const DEFAULT_SETTINGS = {
 	v: 1,
@@ -35,7 +36,8 @@ const DEFAULT_SETTINGS = {
 	// 0 = use the channel default (mcp.PORT_DEFAULT / PORT_DEFAULT_DEV). Fixed rather than
 	// ephemeral so a client config keeps working across restarts; overridable for a port clash.
 	mcpPort: 0,
-	openFolders: [] as string[] // folders open across windows; maintained here for session restore
+	openFolders: [] as string[], // folders open across windows; maintained here for session restore
+	toolDirs: [] as string[] // searched before PATH by every program Texpile starts; see shell/toolDirs.ts
 };
 
 // The UI languages we ship. Anything else, or a failed probe, falls back to English.
@@ -119,11 +121,16 @@ function replaceSettings(full: Record<string, unknown>): void {
 
 export function registerSettingsIpc(): void {
 	ipcMain.handle('settings:get', () => readSettings());
-	ipcMain.handle('settings:set', (_e, partial: Record<string, unknown>) => writeSettings(partial));
+	ipcMain.handle('settings:set', (_e, partial: Record<string, unknown>) => {
+		const next = writeSettings(partial);
+		if (partial && 'toolDirs' in partial) setToolDirs(next.toolDirs);
+		return next;
+	});
 	// replace the file WHOLE - the migration's write. Merge-writes cannot delete keys, and deleting
 	// keys is most of what a migration does.
 	ipcMain.handle('settings:replace', (_e, full: Record<string, unknown>) => {
 		if (typeof full !== 'object' || full === null || Array.isArray(full)) return;
 		replaceSettings(full);
+		setToolDirs(full.toolDirs);
 	});
 }

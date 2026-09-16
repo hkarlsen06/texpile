@@ -275,6 +275,7 @@
 	// shortcut table + UI zoom live in lib/workspace/shortcuts.ts
 	const onKeydown = createKeydownHandler({
 		closeTab: (t) => editFlow.closeTab(t),
+		reopenTab: () => editFlow.reopenTab(),
 		isGuest: () => guest,
 		save: () => wsdoc.save(),
 		toggleGlobalSearch: () => void toggleSearchPanel(searchDeps),

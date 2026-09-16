@@ -42,8 +42,23 @@ declare global {
 		found: boolean;
 		/** first informative line of the tool's own version output, when it gave one */
 		detail?: string;
+		broken?: boolean;
 		/** the command probed, as spawned (a bare name means it came from PATH) */
 		command: string;
+	};
+
+	type ToolDistro = {
+		family: 'latex' | 'typst';
+		/** how the install names itself: "TeX Live 2025", "MiKTeX 24.1", "Typst 0.13.1, tinymist 0.13.24" */
+		name: string;
+		/** the bin folder, the one that goes in front of PATH */
+		dir: string;
+		/** every folder the install was reached through: the PATH entry, a folder of symlinks the list names */
+		dirs: string[];
+		/** pdflatex's version line */
+		detail: string;
+		/** the copy the shell PATH reaches on its own */
+		onPath: boolean;
 	};
 
 	type TexpileTypstBridge = {
@@ -51,6 +66,12 @@ declare global {
 		resolve(): Promise<TinymistInfo | null>;
 		/** Probe every external program the app shells out to. */
 		probeToolchain(): Promise<ToolProbe[]>;
+		/** each result as it lands, ahead of probeToolchain resolving; returns an unsubscribe fn */
+		onProbeResult?(cb: (p: ToolProbe) => void): () => void;
+		/** The TeX and Typst installs on this machine, the one PATH reaches marked. */
+		distros?(): Promise<ToolDistro[]>;
+		/** a tool folder as absolute, relative (portable app, same drive) and real path, plus whether it exists */
+		dirForms(entry: string): Promise<{ absolute: string; relative: string | null; exists: boolean; real: string }>;
 		/** Fetch tinymist's preview page, theme it, re-serve it from typstpreview://. */
 		preparePreview(host: string, background: string, foreground: string): Promise<{ ok: boolean; url?: string; error?: string }>;
 		releasePreview(): void;

@@ -48,6 +48,9 @@ contextBridge.exposeInMainWorld('texpileNative', {
 	bootstrap,
 	/** native folder picker; resolves to the chosen absolute path or null. */
 	openFolder: () => ipcRenderer.invoke('dialog:openFolder'),
+	/** native pickers with a title of the caller's choosing; the chosen absolute path or null. */
+	pickFolder: (title: string) => ipcRenderer.invoke('dialog:pickFolder', title),
+	pickFile: (title: string) => ipcRenderer.invoke('dialog:pickFile', title),
 	getSettings: () => ipcRenderer.invoke('settings:get'),
 	/** merges a partial update into settings; resolves to the updated settings. */
 	setSettings: (partial: Record<string, unknown>) => ipcRenderer.invoke('settings:set', partial),
@@ -292,6 +295,18 @@ contextBridge.exposeInMainWorld('texpileTypst', {
 	resolve: () => ipcRenderer.invoke('typst:resolve'),
 	/** probe every external program the app shells out to (latexmk, git, synctex, ...). */
 	probeToolchain: () => ipcRenderer.invoke('toolchain:probe'),
+	/** each probe result as it lands, ahead of probeToolchain resolving; returns an unsubscribe fn */
+	onProbeResult: (cb: (p: unknown) => void) => {
+		function h(_e: unknown, p: unknown) {
+			cb(p);
+		}
+		ipcRenderer.on('toolchain:probe:result', h);
+		return () => ipcRenderer.removeListener('toolchain:probe:result', h);
+	},
+	/** the TeX and Typst installs on this machine, the one PATH reaches marked. */
+	distros: () => ipcRenderer.invoke('toolchain:distros'),
+	/** a tool folder as absolute, relative (portable app, same drive) and real path, plus whether it exists */
+	dirForms: (entry: string) => ipcRenderer.invoke('toolchain:dirForms', entry),
 	/** fetch tinymist's preview page, theme it, and re-serve it; resolves to a typstpreview:// URL. */
 	preparePreview: (host: string, background: string, foreground: string) =>
 		ipcRenderer.invoke('typst:preview:prepare', { host, background, foreground }),

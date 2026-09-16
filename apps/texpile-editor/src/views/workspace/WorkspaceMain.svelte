@@ -132,6 +132,7 @@
 			onActivateTab={actions.activateTab}
 			onCloseTab={actions.closeTab}
 			onKeepTab={actions.keepTab}
+			onTabMenu={actions.tabMenu}
 			loadedPath={doc.path}
 			{kind}
 			{nameOnly}

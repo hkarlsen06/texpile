@@ -131,8 +131,10 @@ describe.skipIf(!AVAILABLE)('uploading to a remote', () => {
 		try {
 			// `git push` alone refuses this under the default push.default=simple, so the refspec
 			// has to be explicit or the case fails with a message about nothing to do with uploading
+			// the upstream carries whatever name init.defaultBranch gave the clone (Xcode's git says main)
+			const upstream = execFileSync('git', ['branch', '--show-current'], { cwd: root }).toString().trim();
 			run(root, 'branch', '-m', 'local-name');
-			run(root, 'branch', '--set-upstream-to', 'origin/master', 'local-name');
+			run(root, 'branch', '--set-upstream-to', `origin/${upstream}`, 'local-name');
 			commit(root, 'main.tex', 'Renamed branch.\n', 'Third draft');
 
 			const res = await gitPush(root);

@@ -36,6 +36,18 @@ export function registerFsIpc(): void {
 		});
 		return res.canceled || res.filePaths.length === 0 ? null : res.filePaths[0];
 	});
+	for (const [channel, properties] of [
+		['dialog:pickFolder', ['openDirectory']],
+		['dialog:pickFile', ['openFile']]
+	] as const) {
+		ipcMain.handle(channel, async (e, title: unknown) => {
+			const res = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender) ?? undefined!, {
+				title: typeof title === 'string' ? title : undefined,
+				properties: [...properties]
+			});
+			return res.canceled || res.filePaths.length === 0 ? null : res.filePaths[0];
+		});
+	}
 
 	handleFs('fs:scan', scan);
 	handleFs('fs:read', fsService.read);

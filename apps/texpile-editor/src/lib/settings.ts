@@ -75,6 +75,8 @@ export type AppSettings = {
 	openFolders: string[];
 	/** MCP port override (0 = channel default); a hand-edit escape hatch for port clashes. */
 	mcpPort: number;
+	/** folders searched before PATH; per machine, so never in a project's config */
+	toolDirs: string[];
 };
 
 /** default compile command. -cd runs the compile in the main file's own directory, so a main file in
@@ -111,7 +113,8 @@ const DEFAULTS: AppSettings = {
 	uiLocale: 'en',
 	collabRelayUrl: DEFAULT_COLLAB_RELAY_URL,
 	openFolders: [],
-	mcpPort: 0
+	mcpPort: 0,
+	toolDirs: []
 };
 
 const LS_KEY = 'texpile:settings';
@@ -216,6 +219,14 @@ function persist(patch: Partial<AppSettings>): void {
 export function updateSettings(partial: Partial<AppSettings>): void {
 	settings.current = { ...settings.current, ...partial };
 	persist(partial);
+}
+
+/** updateSettings, resolved once main has taken the change, for a setting main itself acts on */
+export async function updateSettingsSettled(partial: Partial<AppSettings>): Promise<void> {
+	settings.current = { ...settings.current, ...partial };
+	const n = nativeBridge();
+	if (n?.setSettings) await n.setSettings(partial).catch(() => {});
+	else persist(partial);
 }
 
 // A dragged slider emits a value per pointer move. The STORE has to take every one of them - that

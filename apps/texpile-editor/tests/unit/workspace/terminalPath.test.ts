@@ -1,7 +1,7 @@
 // The terminal's PATH must include whatever Preferences points at, or a configured tinymist works
 // everywhere EXCEPT the compile command - see withPathDirs' own comment.
 import { describe, it, expect } from 'vitest';
-import { withPathDirs } from '../../../../../electron/src/toolchain';
+import { withPathDirs } from '../../../../../electron/src/shell/pathDirs';
 
 const win = process.platform === 'win32';
 const SEP = win ? ';' : ':';

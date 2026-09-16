@@ -33,6 +33,7 @@ export function uiZoomReset() {
 
 export type ShortcutDeps = {
 	closeTab(tab: Tab): void;
+	reopenTab(): void;
 	/** a guest has nothing to save: its edits are already live in the shared doc */
 	isGuest(): boolean;
 	save(): void;
@@ -54,6 +55,9 @@ export function createKeydownHandler(deps: ShortcutDeps): (e: KeyboardEvent) => 
 			// (deleted on disk) still has its tab focused while the document buffer holds no path
 			const path = activeFilePath.current;
 			if (path) deps.closeTab({ path, compare: activeCompare.current ?? undefined });
+		} else if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === 't') {
+			e.preventDefault();
+			deps.reopenTab();
 		} else if (mod && !e.shiftKey && !e.altKey && e.key === ',') {
 			// the desktop convention; macOS also has it as a native accelerator (windowChrome.ts)
 			e.preventDefault();

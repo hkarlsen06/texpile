@@ -13,6 +13,7 @@
 			items: [
 				{ keys: combo('K'), label: m.palette_open() },
 				{ keys: combo('T'), label: m.palette_group_go() },
+				{ keys: combo('T', { shift: true }), label: m.menubar_shortcut_reopen_tab() },
 				{ keys: combo('N', { shift: true }), label: m.menubar_new_window() },
 				{ keys: combo('S'), label: m.menubar_save() },
 				{ keys: combo('F'), label: m.menubar_shortcut_find_in_document() },

@@ -6,7 +6,9 @@ import { collabGuest } from '$lib/collab/guestStore.svelte';
 import { normSyncPath } from '$lib/workspace/syncTexNav';
 import { projectConfigSync as projectConfig } from '$lib/workspace/projectConfigSync.svelte';
 import { uiZoomIn, uiZoomOut, uiZoomReset } from '$lib/workspace/shortcuts';
-import { workspaceRoot, isDirty } from '$lib/workspace/workspaceStore';
+import { workspaceRoot, isDirty, activeFilePath, activeCompare } from '$lib/workspace/workspaceStore';
+import { revealInTree } from '$lib/filetree/treeReveal.svelte';
+import { openTabContextMenu } from './tabContextMenu';
 import { refreshGitStatus, refreshGitHistory } from '$lib/workspace/gitStore';
 import { preferencesOpen } from '$lib/stores/dialogStore';
 import { isDesktop, revealItem, type TreeEntry } from '$lib/workspace/fileSystem';
@@ -143,6 +145,24 @@ export function makeMainActions(d: ActionSurfaceDeps) {
 		activateTab: (t: Tab) => d.editFlow().activateTab(t),
 		closeTab: (t: Tab) => d.editFlow().closeTab(t),
 		keepTab: (t: Tab) => tabs.keep(tabKey(t)),
+		tabMenu: (t: Tab, e: MouseEvent) => {
+			const path = activeFilePath.current;
+			openTabContextMenu(e, t, {
+				tabs: tabs.list,
+				active: path ? { path, compare: activeCompare.current ?? undefined } : null,
+				dirty: isDirty.current && !d.guest(),
+				preview: tabs.preview,
+				root: workspaceRoot.current,
+				close: (x) => d.editFlow().closeTab(x),
+				keep: (x) => tabs.keep(tabKey(x)),
+				reveal: isDesktop() && !d.guest() ? (p) => void revealItem(p) : undefined,
+				showInTree: (p) => {
+					d.layout().setSidebarOpen(true);
+					d.layout().sidebarView = 'explorer';
+					revealInTree(p);
+				}
+			});
+		},
 		useSource: () => d.wsdoc.modes.set('source'),
 		openAsText: (path: string) => d.wsdoc.openAsText(path),
 		pickStarter: (s: Starter) => d.files().starters.pick(s),

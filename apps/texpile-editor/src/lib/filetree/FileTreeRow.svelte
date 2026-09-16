@@ -41,6 +41,7 @@
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div
 		bind:this={row}
+		data-path={entry.path}
 		class="group flex rounded-base text-sm transition-colors {editor.renaming === entry.path
 			? 'flex-col items-stretch'
 			: 'items-center'} {isActive(entry)

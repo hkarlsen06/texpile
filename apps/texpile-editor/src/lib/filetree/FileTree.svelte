@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { FileSymlink } from '@lucide/svelte';
-	import { untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import FileIcon from './FileIcon.svelte';
 	import FileTreeRow from './FileTreeRow.svelte';
 	import { openFileTreeContextMenu, type TreeTarget } from './fileTreeContextMenu';
@@ -9,6 +9,7 @@
 	import type { FileHistory } from '$lib/workspace/fileHistory.svelte';
 	import type { GitBadge } from '$lib/workspace/git';
 	import { FileTreeState } from './treeState.svelte';
+	import { treeRevealRequest } from './treeReveal.svelte';
 	import { FileTreeDnd, ROOT } from './treeDnd.svelte';
 	import { TreeNameEditor } from './treeNameEditor.svelte';
 	import { namePastedFiles, type ImportItem } from './treeImport';
@@ -116,6 +117,19 @@
 		untrack(() => {
 			if (!sel.selected.some((p) => samePath(p, a))) sel.selected = [];
 			if (revealed !== a && sel.reveal(a)) revealed = a;
+		});
+	});
+
+	// a request can land before a fresh tree holds the file
+	$effect(() => {
+		const req = treeRevealRequest.current;
+		void tree;
+		if (!req) return;
+		untrack(() => {
+			if (!sel.reveal(req.path)) return;
+			sel.selected = [req.path];
+			treeRevealRequest.current = null;
+			void tick().then(() => treeEl?.querySelector(`[data-path="${CSS.escape(req.path)}"]`)?.scrollIntoView({ block: 'nearest' }));
 		});
 	});
 

@@ -41,7 +41,7 @@ export function managedTinymistPath(userData: string): string {
  * Both numbers matter: the Typst one is what a document is actually compiled by, and is the one
  * to show a user asking "which Typst built this?".
  */
-function parseVersion(out: string): { version: string; typstVersion: string } {
+export function parseTinymistVersion(out: string): { version: string; typstVersion: string } {
 	const v = out.match(/Build Git Describe:\s*v?([^\s]+)/i);
 	const t = out.match(/Typst Version:\s*([^\s]+)/i);
 	return { version: v?.[1] ?? 'unknown', typstVersion: t?.[1] ?? 'unknown' };
@@ -52,7 +52,7 @@ async function probe(command: string): Promise<{ version: string; typstVersion: 
 	return new Promise((resolve) => {
 		execFile(command, ['--version'], { timeout: 8000, windowsHide: true }, (err, stdout) => {
 			if (err) return resolve(null);
-			const parsed = parseVersion(stdout);
+			const parsed = parseTinymistVersion(stdout);
 			// a binary that answers --version but names no Typst is not tinymist
 			resolve(parsed.typstVersion === 'unknown' ? null : parsed);
 		});
@@ -62,12 +62,7 @@ async function probe(command: string): Promise<{ version: string; typstVersion: 
 /**
  * Find tinymist, or null when it isn't installed.
  *
- * PATH, and nothing the user configures in Texpile. There used to be a path box in Preferences,
- * removed because where a program lives is the operating system's answer to give: every installer
- * (winget, scoop, brew, cargo) puts tinymist on PATH, shellEnvReady already recovers the real
- * login-shell PATH that a GUI launch would otherwise miss, and none of the eight LaTeX tools
- * beside it has an override either. A per-app copy of $PATH is a second place for the answer to be
- * wrong.
+ * PATH, which by now holds the folders from Preferences (shell/toolDirs.ts); no path of its own.
  *
  * PATH is tried BEFORE the managed copy on purpose: someone who installed tinymist themselves means
  * for that one to be used, and silently preferring our own would compile their documents with a

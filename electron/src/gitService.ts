@@ -92,7 +92,11 @@ async function resolveRepoRoot(dir: string): Promise<{ root: string | null; reas
 			repoRootCache.set(key, { root: null, at: Date.now() });
 			return { root: null, reason: 'not-a-repo' };
 		}
-		const root = (await g.revparse(['--show-toplevel'])).trim();
+		// git names the top level by its physical path; opened through a symlink (macOS /var, a linked
+		// home) the folder would relativize to ../.. and every pathspec miss, so walk up by the prefix depth
+		const prefix = (await g.revparse(['--show-prefix'])).trim();
+		const depth = prefix.split('/').filter(Boolean).length;
+		const root = resolve(abs, ...Array<string>(depth).fill('..'));
 		repoRootCache.set(key, { root, at: Date.now() });
 		return { root };
 	} catch (e) {

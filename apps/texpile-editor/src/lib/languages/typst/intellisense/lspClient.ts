@@ -11,6 +11,8 @@ import type { Transport } from '@codemirror/lsp-client';
 import type { Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { box } from '$lib/runes/box.svelte';
+import { observe } from '$lib/runes/observe.svelte';
+import { settings } from '$lib/settings';
 import { applyTextEdits, type LspTextEdit } from './textEdits';
 import { normalizeCompletionJson } from './completionNormalize';
 
@@ -114,24 +116,43 @@ let session: Session | null = null;
 export const typstServerGen = box(0);
 
 let exitHooked = false;
+function dropSession(): void {
+	cancelIdleStop();
+	holders = 0;
+	const dead = session;
+	session = null;
+	try {
+		dead?.client.disconnect();
+	} catch {
+		/* transport already gone */
+	}
+}
+
 function hookExit(): void {
 	if (exitHooked) return;
 	const b = bridge();
 	if (!b?.onExit) return;
 	exitHooked = true;
 	b.onExit(() => {
-		cancelIdleStop();
-		holders = 0;
-		const dead = session;
-		session = null;
-		try {
-			dead?.client.disconnect();
-		} catch {
-			/* transport already gone */
-		}
+		dropSession();
 		typstServerGen.current += 1;
 	});
 }
+
+// the folders in Preferences moved PATH: the running server is the old pick, the next start is the new one.
+// at module level on purpose: created inside an editor effect it went away with that effect
+let seenDirs = settings.current.toolDirs;
+observe(
+	() => settings.current.toolDirs,
+	(dirs) => {
+		if (dirs === seenDirs) return;
+		seenDirs = dirs;
+		if (!session) return;
+		dropSession();
+		bridge()?.stopLsp();
+		typstServerGen.current += 1;
+	}
+);
 
 /**
  * How many open editors are using the server.

@@ -160,3 +160,19 @@ describe('comparison tabs', () => {
 		expect(tabs.isPreview(tabKey(moved))).toBe(true);
 	});
 });
+
+describe('reopening closed tabs', () => {
+	beforeEach(() => tabs.bind(null, false));
+
+	it('brings back the last closed tab first, skipping one that is open again or gone', () => {
+		for (const f of ['a.tex', 'b.tex', 'c.tex']) openAndEdit(`C:\\p\\${f}`);
+		tabs.close('C:\\p\\a.tex');
+		tabs.close('C:\\p\\c.tex');
+		tabs.close('C:\\p\\b.tex');
+		openAndEdit('C:\\p\\b.tex');
+		expect(tabs.reopen((p) => !p.endsWith('c.tex'))?.path).toBe('C:\\p\\a.tex');
+		expect(paths()).toEqual(['C:\\p\\b.tex', 'C:\\p\\a.tex']);
+		expect(tabs.isPreview('C:\\p\\a.tex')).toBe(false);
+		expect(tabs.reopen(() => true)).toBeNull();
+	});
+});
