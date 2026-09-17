@@ -60,6 +60,7 @@ import { createBlockHandlePlugin } from '$lib/editor/visual/extensions/block-han
 import { createNodeFlashPlugin } from '$lib/editor/visual/extensions/flash-plugin';
 import { createLinkPlugin } from '$lib/editor/visual/extensions/link';
 import { pmComments } from '$lib/editor/visual/extensions/pmComments';
+import { listRuleWithoutIndent } from './listItemIndent';
 import type { CommentAnchor } from '$lib/comments/anchor';
 
 export type LatexEditorSetup = {
@@ -91,7 +92,14 @@ export function latexEditorPlugins(setup: LatexEditorSetup): Plugin[] {
 		...createSuggestPlugin(),
 		keymap(listKeymap),
 		inputRules({
-			rules: [...listInputRules, ...smartQuotes, emDashRule, enDashRule, emDashUpgradeRule, ellipsis] as readonly InputRule[]
+			rules: [
+				...listInputRules.map(listRuleWithoutIndent),
+				...smartQuotes,
+				emDashRule,
+				enDashRule,
+				emDashUpgradeRule,
+				ellipsis
+			] as readonly InputRule[]
 		}),
 		keymap({
 			// PM history first, then the workspace snapshot history (survives mode switches).

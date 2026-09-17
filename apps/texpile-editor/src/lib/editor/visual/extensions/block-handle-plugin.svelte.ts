@@ -16,7 +16,9 @@ const GUTTER_OFFSET_RIGHT = 8;
 // (app.css). Drop the gutter clear of it rather than have the two draw over each other.
 const NOINDENT_LABEL_DROP = 22;
 function dropsForLabel(dom: HTMLElement) {
-	return dom.tagName === 'P' && dom.dataset.indent === 'noindent';
+	if (dom.tagName === 'P') return dom.dataset.indent === 'noindent';
+	// a list item's first paragraph prints its label out past the bullet, which is this margin too
+	return dom.querySelector(":scope > .list-content > p:first-child[data-indent='noindent']") !== null;
 }
 
 // skipped when resolving the hovered block: dragging a row/cell out would tear the schema,

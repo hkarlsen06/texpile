@@ -341,6 +341,12 @@ select.input {
 	pointer-events: none;
 }
 
+/* in a list the space just left of the paragraph holds the bullet or the number, so the label goes
+   out past the item's own marker column (32px, prosemirror-flat-list's margin) */
+.ProseMirror .prosemirror-flat-list p[data-indent='noindent']::before {
+	margin-right: calc(0.4em + 32px);
+}
+
 /* lines ended where lineBreakPlugin chose: the paragraph cannot wrap, only the marked spaces, dashes
    and hyphenation points can. The space that ends a line hangs past the edge (pre-wrap), so a line
    that ends in a hyphen stops where the others do. */

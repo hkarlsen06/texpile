@@ -8,7 +8,7 @@
 	import { tip } from '$lib/components/tooltip.svelte';
 	import { Bold, Underline, Italic, Code, List, ListOrdered, Link as LinkIcon, Quote, Minus, BoxSelect, Eye } from '@lucide/svelte';
 	import { selectParentNode, toggleMark } from 'prosemirror-commands';
-	import { createWrapInListCommand } from 'prosemirror-flat-list';
+	import { wrapInListItems } from './listItemIndent';
 	import type { EditorState, Transaction } from 'prosemirror-state';
 	import ToolbarTable from '$lib/editor/visual/toolbar/ToolbarTable.svelte';
 	import TextColorDropdown from '$lib/editor/visual/toolbar/TextColorDropdown.svelte';
@@ -111,8 +111,8 @@
 		editorViewStore.current!.focus();
 	}
 
-	const bulletList = createWrapInListCommand({ kind: 'bullet' });
-	const orderedList = createWrapInListCommand({ kind: 'ordered' });
+	const bulletList = wrapInListItems({ kind: 'bullet' });
+	const orderedList = wrapInListItems({ kind: 'ordered' });
 
 	function insertHr(state: EditorState, dispatch?: (tr: Transaction) => void): boolean {
 		dispatch?.(state.tr.replaceSelectionWith(schema.nodes.horizontal_rule.create()).scrollIntoView());
