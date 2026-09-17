@@ -22,6 +22,7 @@ import { buildAnchor, type CommentAnchor } from '$lib/comments/anchor';
 import { settings, updateSettings } from '$lib/settings';
 import { observe } from '$lib/runes/observe.svelte';
 import { m } from '$lib/paraglide/messages';
+import { visibleBox } from '../visibleBox';
 
 import { flattenDoc } from './pmCommentsResolve';
 import { focusPmSuggestionMeta, pmSuggestionAt, pmSuggestions, pmSuggestionsKey } from './pmSuggestions';
@@ -343,22 +344,25 @@ function addPill(onAdd: (anchor: CommentAnchor | null) => void, label: string): 
 					return;
 				}
 				const head = sel.head === sel.from ? a : b;
-				// scrolled out of the window: hide rather than park the tooltip at the edge
-				if (head.bottom < 0 || head.top > window.innerHeight) {
-					hide();
-					return;
-				}
 				const oneLine = Math.abs(a.top - b.top) < 2;
 				const cx = oneLine ? (a.left + b.right) / 2 : (head.left + head.right) / 2;
 				const anchor = oneLine ? a : head;
-				// above the line, else below it when the selection starts at the top of the window
-				const top = anchor.top - 26 - 6 >= 4 ? anchor.top - 26 - 6 : anchor.bottom + 6;
+				// the PANE, not the window: the row is fixed, so nothing clips it, and a selection that
+				// scrolled under the toolbar or glided aside for a comment card took it over the sidebar.
+				// hide rather than park the tooltip at the edge
+				const pane = visibleBox(view.dom);
+				if (head.bottom < pane.top || head.top > pane.bottom || cx < pane.left || cx > pane.right) {
+					hide();
+					return;
+				}
+				// above the line, else below it when the selection starts at the top of the pane
+				const top = anchor.top - 26 - 6 >= pane.top + 4 ? anchor.top - 26 - 6 : anchor.bottom + 6;
 				// display before measuring: offsetWidth is 0 while the row is hidden, and the row is
 				// wider than the old lone button
 				dom.style.display = 'flex';
 				const half = (dom.offsetWidth || 48) / 2;
 				dom.style.top = `${top}px`;
-				dom.style.left = `${Math.min(Math.max(cx - half, 4), window.innerWidth - half * 2 - 4)}px`;
+				dom.style.left = `${Math.min(Math.max(cx - half, pane.left + 4), pane.right - half * 2 - 4)}px`;
 				if (!shown && !timer) {
 					timer = setTimeout(() => {
 						timer = null;
