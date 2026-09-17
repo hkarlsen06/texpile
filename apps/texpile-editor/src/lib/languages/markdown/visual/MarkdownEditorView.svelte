@@ -35,6 +35,7 @@
 	import { createMarkdownImageSettings } from './imageSettings.svelte';
 	import { menuUpdatePlugin } from '$lib/editor/visual/extensions/toolbarlistenerplugin';
 	import { createCursorPlugin } from '$lib/editor/visual/extensions/cursor-plugin';
+	import { lineBreakPlugins } from '$lib/editor/visual/linebreak/lineBreakPlugin';
 	import { createLinkPlugin } from '$lib/editor/visual/extensions/link';
 	import { pasteUuidFixPlugin } from '$lib/editor/visual/extensions/paste-uuid-fix';
 	import { placeholderPlugin } from '$lib/editor/visual/extensions/placeholderplugin';
@@ -178,6 +179,7 @@
 			imagePlugin(createMarkdownImageSettings(imageDir === undefined ? undefined : () => imageDir ?? '')),
 			menuUpdatePlugin(),
 			createCursorPlugin(),
+			...lineBreakPlugins(),
 			createLinkPlugin({ onOpen: onOpenLink }),
 			pasteUuidFixPlugin,
 			search(),

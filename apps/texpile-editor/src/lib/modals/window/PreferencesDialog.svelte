@@ -282,6 +282,18 @@
 							/>
 						</div>
 					</div>
+					{@render toggleRow(m.prefs_visual_justify(), m.prefs_visual_justify_note(), settings.current.visualJustify !== false, (v) =>
+						updateSettings({ visualJustify: v })
+					)}
+					<!-- only justified text is hyphenated, so the row goes when that is off -->
+					{#if settings.current.visualJustify !== false}
+						{@render toggleRow(
+							m.prefs_visual_hyphenate(),
+							m.prefs_visual_hyphenate_note(),
+							settings.current.visualHyphenate !== false,
+							(v) => updateSettings({ visualHyphenate: v })
+						)}
+					{/if}
 					{@render selectRow(
 						m.prefs_image_resize_step(),
 						m.prefs_image_resize_step_note(),

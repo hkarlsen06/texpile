@@ -20,6 +20,7 @@ import { tableEditing, goToNextCell } from 'prosemirror-tables';
 import { tableViewOnly } from '$lib/editor/visual/extensions/table/tableViewOnly';
 import { imagePlugin } from '$lib/editor/visual/extensions/image';
 import { createCursorPlugin } from '$lib/editor/visual/extensions/cursor-plugin';
+import { lineBreakPlugins } from '$lib/editor/visual/linebreak/lineBreakPlugin';
 import { remoteCursorsPlugin } from '$lib/editor/visual/extensions/remoteCursors';
 import { pasteUuidFixPlugin } from '$lib/editor/visual/extensions/paste-uuid-fix';
 import { latexClipboardPlugin } from '$lib/editor/visual/extensions/latexClipboard';
@@ -144,6 +145,7 @@ export function latexEditorPlugins(setup: LatexEditorSetup): Plugin[] {
 		imagePlugin(imageDir ? createLocalImageSettings(imageDir) : createTemplateEditorSettings()),
 		menuUpdatePlugin(),
 		createCursorPlugin(),
+		...lineBreakPlugins(),
 		remoteCursorsPlugin,
 		createLinkPlugin(),
 		latexClipboardPlugin,

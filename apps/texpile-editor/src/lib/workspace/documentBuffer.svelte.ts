@@ -12,6 +12,7 @@ import { replacePreambleFrontmatter } from '$lib/editor/visual/extensions/raw-la
 import { basename, relativeTo, type Eol } from '$lib/workspace/fileSystem';
 import { citationVariantsFor } from '$lib/languages/latex/visual/extensions/citation/citationVariantsFor';
 import { templateFeaturesStore } from '$lib/stores/editorStore';
+import { documentHyphenationLanguage } from '$lib/editor/visual/linebreak/documentHyphenationLanguage';
 import type { Node as PMNode } from 'prosemirror-model';
 
 export type FileKind = 'tex' | 'md' | 'typ' | 'bib' | 'pdf' | 'image' | 'binary' | 'text' | null;
@@ -189,7 +190,8 @@ export class DocumentBuffer {
 		// undefined command in the source. Merged, not replaced: the other features have owners.
 		templateFeaturesStore.current = {
 			...templateFeaturesStore.current,
-			citationVariants: citationVariantsFor(parsed.preamble)
+			citationVariants: citationVariantsFor(parsed.preamble),
+			hyphenationLanguage: documentHyphenationLanguage(source)
 		};
 	}
 

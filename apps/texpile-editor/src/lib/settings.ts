@@ -53,6 +53,10 @@ export type AppSettings = {
 	/** widest the visual editor's text column may grow, in px. Past this the window pads with
 	 *  empty space rather than stretching the measure, which is why it is adjustable. */
 	visualMaxWidth: number;
+	/** paragraphs in the visual editor fill the column edge to edge, with words split where that helps. */
+	visualJustify: boolean;
+	/** long words may split at line ends in justified text. The hyphens are drawn, never written to the file. */
+	visualHyphenate: boolean;
 	/** the Typst preview scrolls to follow the caret. Off by default, as in tinymist. A pane
 	 *  behavior about YOUR caret, which is why it stays here and not in the project's config. */
 	typstPreviewFollow: boolean;
@@ -106,6 +110,8 @@ const DEFAULTS: AppSettings = {
 	sourceLineWrap: true,
 	// 768px = the max-w-3xl the editor column was pinned to before this became adjustable
 	visualMaxWidth: 768,
+	visualJustify: true,
+	visualHyphenate: true,
 	typstPreviewFollow: false,
 	openDockOnCompile: true,
 	zoteroEnabled: true,

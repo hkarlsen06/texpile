@@ -1,3 +1,4 @@
+import type { DocumentHyphenation } from '$lib/editor/visual/linebreak/documentHyphenationLanguage';
 import { box } from '$lib/runes/box.svelte';
 import type { EditorView } from 'prosemirror-view';
 import type { EditorView as CodeMirrorView } from '@codemirror/view';
@@ -38,6 +39,8 @@ export type TemplateFeatures = {
 	// Names only: the form owns the wording, so a language change is picked up without a reparse.
 	// undefined = no preamble seen (an included chapter), so the form narrows nothing.
 	citationVariants?: string[];
+	// the patterns the visual editor splits words by, from the document's own source. undefined = none named
+	hyphenationLanguage?: DocumentHyphenation;
 	highlight?: boolean; // false: highlight won't appear in the final document (user sees warning)
 	textColor?: boolean; // false: text color won't appear in the final document (user sees warning)
 };

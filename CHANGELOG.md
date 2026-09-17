@@ -11,6 +11,7 @@ Release notes for Texpile Desktop. Add notes under `## [Unreleased]` as you work
 - feat: allow switching between distrbutions
 - feat: right click an open tab to show right-click menu
 - feat: control/command-shift-t reopens closed tab
+- feat: justified text in the visual editor, with Knuth-Plass line breaks and hyphenation
 - fix: version check before collaborations
 - fix: various visual editor accuracy improvements
 - fix: up and down arrows keep their column in the visual editor

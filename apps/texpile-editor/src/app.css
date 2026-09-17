@@ -341,6 +341,37 @@ select.input {
 	pointer-events: none;
 }
 
+/* lines ended where lineBreakPlugin chose: the paragraph cannot wrap, only the marked spaces, dashes
+   and hyphenation points can. The space that ends a line hangs past the edge (pre-wrap), so a line
+   that ends in a hyphen stops where the others do. */
+.ProseMirror .pm-line-par {
+	text-wrap-mode: nowrap;
+}
+.ProseMirror .pm-line-justified {
+	text-align: justify;
+}
+/* a document too large to break line by line carries no decorations, so one rule justifies its body text */
+.ProseMirror.pm-lines-plain > p,
+.ProseMirror.pm-lines-plain > .prosemirror-flat-list p {
+	text-align: justify;
+}
+/* while the column's width is changing the browser wraps on its own, and the marks stay in place for when it rests */
+.ProseMirror.pm-lines-native .pm-line-par {
+	text-wrap-mode: wrap;
+}
+.ProseMirror .pm-line-par .pm-line-break {
+	white-space: pre-wrap;
+}
+.ProseMirror .pm-line-par .pm-line-hyphen {
+	text-wrap-mode: wrap;
+	hyphens: manual;
+	hyphenate-character: '-';
+}
+/* a soft hyphen as generated content: drawn only if the line does end there, and never in the text */
+.ProseMirror .pm-line-par .pm-line-hyphen::after {
+	content: '\00AD';
+}
+
 /* scrollbars for the app's own scrollers, a share of the text colour so they sit on any ground;
    the PDF viewer (shadow DOM) and terminal style their own */
 ::-webkit-scrollbar {

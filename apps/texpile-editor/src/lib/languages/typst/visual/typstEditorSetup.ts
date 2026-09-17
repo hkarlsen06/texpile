@@ -41,6 +41,7 @@ import { createCodeBlock } from '$lib/editor/visual/extensions/codemirrorbridge/
 import { cmarrowHandlers } from '$lib/editor/visual/extensions/codemirrorbridge/cmarrowhandler';
 import { menuUpdatePlugin } from '$lib/editor/visual/extensions/toolbarlistenerplugin';
 import { createCursorPlugin } from '$lib/editor/visual/extensions/cursor-plugin';
+import { lineBreakPlugins } from '$lib/editor/visual/linebreak/lineBreakPlugin';
 import { createLinkPlugin } from '$lib/editor/visual/extensions/link';
 import { pasteUuidFixPlugin } from '$lib/editor/visual/extensions/paste-uuid-fix';
 import { placeholderPlugin } from '$lib/editor/visual/extensions/placeholderplugin';
@@ -190,6 +191,7 @@ export function typstEditorPlugins(setup: TypstEditorSetup): Plugin[] {
 		imagePlugin(createTypstImageSettings(docDir)),
 		menuUpdatePlugin(),
 		createCursorPlugin(),
+		...lineBreakPlugins(),
 		createLinkPlugin({ onOpen: onOpenLink }),
 		pasteUuidFixPlugin,
 		search(),
