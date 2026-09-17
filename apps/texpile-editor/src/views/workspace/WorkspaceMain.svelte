@@ -318,12 +318,15 @@
 		     dragging it back up reopens it. Outside the `mounted` gate above on purpose: the rail is
 		     the way in, and it has to be there before the dock has ever been built.
 
+		     It draws no line: a rule along the foot of the window, where no other edge has one, read
+		     as a stray border. The grab zone still lights up under the pointer.
+
 		     No lozenge, unlike the side rails. Those carry a collapse toggle because their panes lost
 		     the toolbar buttons that used to open them; the dock kept both its toolbar button and its
 		     menu item, so a control here would only be a third copy. -->
 		<!-- eslint-disable-next-line svelte/valid-compile -->
-		<div class="bg-surface-200-800 relative z-20 h-px shrink-0" style="grid-row: 4; grid-column: {dockShrunk ? '1' : '1 / -1'}">
-			<!-- the grab zone overhangs the rule by 3px, upwards only: below it is the window's edge,
+		<div class="relative z-20 h-px shrink-0" style="grid-row: 4; grid-column: {dockShrunk ? '1' : '1 / -1'}">
+			<!-- the grab zone overhangs its row by 3px, upwards only: below it is the window's edge,
 			     and 3px past that was scrollable overflow the editors' focus scroll could take up,
 			     shifting the whole workspace by that much -->
 			<div
