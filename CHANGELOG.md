@@ -13,6 +13,8 @@ Release notes for Texpile Desktop. Add notes under `## [Unreleased]` as you work
 - feat: control/command-shift-t reopens closed tab
 - fix: version check before collaborations
 - fix: various visual editor accuracy improvements
+- fix: up and down arrows keep their column in the visual editor
+- fix: selection highlight fills the line over inline math, code and deleted words
 
 ## [1.1.0] - 2026-09-10
 

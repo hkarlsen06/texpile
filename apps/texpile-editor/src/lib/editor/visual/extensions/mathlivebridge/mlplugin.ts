@@ -1,6 +1,6 @@
 import { Plugin, PluginKey, type PluginSpec } from 'prosemirror-state';
 import { EditorView, type NodeViewConstructor } from 'prosemirror-view';
-import type { Node, ResolvedPos } from 'prosemirror-model';
+import type { Node } from 'prosemirror-model';
 import { MathLiveView } from './mlview.svelte';
 
 export type MathLivePluginState = {
@@ -58,72 +58,9 @@ export function createMathView(displayMode: boolean): NodeViewConstructor {
 	};
 }
 
-import { keymap } from 'prosemirror-keymap';
-import { NodeSelection, TextSelection, Selection, EditorState, Transaction } from 'prosemirror-state';
-// Up and Down around inline math. The browser's own vertical move loses its way next to the
-// math widgets (it slides sideways or sticks), and a row holding nothing but a math node has no
-// caret position of its own, so both the line-to-line move inside such a paragraph and the step
-// into or out of it are placed by hand.
-function mlVerticalArrowHandler(dir: 'up' | 'down') {
-	return (state: EditorState, dispatch?: (tr: Transaction) => void, view?: EditorView): boolean => {
-		const { $from, empty, head } = state.selection;
-		if (!empty || !view) return false;
-		const bias = dir === 'up' ? -1 : 1;
-		const rowMath = containsMathField($from.parent);
-		const neighbour = dir === 'up' ? getPreviousRow($from) : getNextRow($from);
-		if (!rowMath && !(neighbour && containsMathField(neighbour))) return false;
-
-		if (rowMath && !view.endOfTextblock(dir)) {
-			// one visual line, found by geometry. side 1 reads a wrap point as the start of the
-			// lower line, which is where the caret sits after a move or a keystroke
-			const c = view.coordsAtPos(head, 1);
-			const h = Math.max(4, c.bottom - c.top);
-			const found = view.posAtCoords({ left: c.left, top: dir === 'up' ? c.top - h / 2 : c.bottom + h / 2 });
-			if (found && found.pos !== head && state.doc.resolve(found.pos).sameParent($from)) {
-				const t = view.coordsAtPos(found.pos, 1);
-				if (Math.abs(t.top - c.top) > h / 2) {
-					dispatch?.(state.tr.setSelection(Selection.near(state.doc.resolve(found.pos), bias)));
-					return true;
-				}
-			}
-			// no further line that way: this IS the edge (endOfTextblock misjudges a line a tall
-			// math widget stretches), so fall through to the step out of the paragraph
-		} else if (!view.endOfTextblock(dir)) return false;
-
-		try {
-			// near, not a text selection at a raw offset: the neighbour may be block math or a
-			// table, where the offset is not a caret position
-			const $edge = state.doc.resolve(dir === 'up' ? $from.before() : $from.after());
-			dispatch?.(state.tr.setSelection(Selection.near($edge, bias)));
-			return true;
-		} catch (e) {
-			if (e instanceof RangeError) return false;
-			throw e;
-		}
-	};
-}
-
-function getPreviousRow($from: ResolvedPos): Node | null {
-	const beforePos = $from.before(1);
-	const $before = $from.doc.resolve(beforePos);
-	return $before.nodeBefore;
-}
-
-function getNextRow($from: ResolvedPos): Node | null {
-	const afterPos = $from.after(1);
-	const $after = $from.doc.resolve(afterPos);
-	return $after.nodeAfter;
-}
-
-function containsMathField(node: Node): boolean {
-	let found = false;
-	node.content.forEach((child) => {
-		if (child.type.name === 'inline_math') {
-			found = true;
-		}
-	});
-	return found;
-}
+import { keydownHandler } from 'prosemirror-keymap';
+import { NodeSelection, TextSelection, EditorState, Transaction } from 'prosemirror-state';
+import { verticalArrowKeyDown, verticalArrowsAfterUpdate, verticalArrowsMouseDown } from './mlVerticalArrows';
 
 // selects an adjacent mathfield on left/right when there is no text node between it and the cursor.
 function mlHorizontalArrowHandler(dir: 'left' | 'right') {
@@ -176,10 +113,18 @@ function mlHorizontalArrowHandler(dir: 'left' | 'right') {
 	};
 }
 
-/** must come before the regular keymap in plugin order. */
-export const mlarrowHandlers = keymap({
-	ArrowUp: mlVerticalArrowHandler('up'),
-	ArrowDown: mlVerticalArrowHandler('down'),
+const horizontalArrowKeyDown = keydownHandler({
 	ArrowRight: mlHorizontalArrowHandler('right'),
 	ArrowLeft: mlHorizontalArrowHandler('left')
+});
+
+/** must come before the regular keymap in plugin order. */
+export const mlarrowHandlers = new Plugin({
+	props: {
+		handleKeyDown: (view, event) => verticalArrowKeyDown(view, event) || horizontalArrowKeyDown(view, event),
+		handleDOMEvents: { mousedown: verticalArrowsMouseDown }
+	},
+	view: () => ({
+		update: (view, before) => verticalArrowsAfterUpdate(view, !view.state.selection.eq(before.selection))
+	})
 });

@@ -111,6 +111,15 @@ math-field {
 .ProseMirror code.inline-latex.pm-selected-node {
 	background-color: var(--editor-selection);
 }
+/* the browser paints selected text over its whole line box, so a crossed inline element reaches as
+   far: selectionBands.ts measures the line. The padding paints and the margin hands the height back,
+   so the line does not move */
+.ProseMirror .pm-selected-node[data-band] {
+	padding-block: var(--band-up, 0px) var(--band-down, 0px);
+	margin-block: calc(-1 * var(--band-up, 0px)) calc(-1 * var(--band-down, 0px));
+	-webkit-box-decoration-break: clone;
+	box-decoration-break: clone;
+}
 /* an <hr> is a border line over a zero-height content box, so the background above paints
    nothing visible: a crossed divider wears its selection as a band around the line instead
    (box-shadow, so no layout shift) */
@@ -452,6 +461,18 @@ select.input {
 	background-color: color-mix(in srgb, var(--diff-delete-tint) 16%, transparent);
 	text-decoration: line-through;
 	user-select: none;
+}
+/* selected old words: the tint stays text high under the selection color, as it does where the
+   browser paints over new words, and the selection color alone fills the rest of the band */
+.TexpileEditor .pm-suggest-old.pm-selected-node {
+	--old-words-tint: color-mix(in srgb, var(--diff-delete-tint) 16%, transparent);
+	background-color: transparent;
+	background-image:
+		linear-gradient(var(--editor-selection), var(--editor-selection)), linear-gradient(var(--old-words-tint), var(--old-words-tint));
+	background-clip: border-box, content-box;
+}
+.TexpileEditor .pm-suggest-old.pm-suggest-focused.pm-selected-node {
+	--old-words-tint: color-mix(in srgb, var(--diff-delete-tint) 30%, transparent);
 }
 .TexpileEditor .pm-suggest-new.pm-suggest-focused {
 	background-color: color-mix(in srgb, var(--diff-insert-tint) 34%, transparent);

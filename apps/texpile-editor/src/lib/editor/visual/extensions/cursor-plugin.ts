@@ -1,9 +1,12 @@
-// selection-driven UI: shades CM-backed leaves crossed by a range selection (browsers won't),
-// and syncs the cursorInCm store the menu bar uses to disable commands that would eat raw blocks.
+// selection-driven UI: shades what a range selection crosses and the browser won't paint (CM-backed
+// leaves, a suggestion's old words), and syncs the cursorInCm store the menu bar uses to disable
+// commands that would eat raw blocks.
 import { NodeSelection, Plugin, PluginKey } from 'prosemirror-state';
 import type { EditorState } from 'prosemirror-state';
-import { Decoration, DecorationSet } from 'prosemirror-view';
+import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import { cursorInCm } from '$lib/stores/editorStore';
+import { oldWordsInSelection } from './pmSuggestionsState';
+import { selectionBandPainter } from './selectionBands';
 
 const CM_NODE_TYPES = new Set(['raw_latex', 'code_block', 'block_math']);
 
@@ -25,7 +28,7 @@ function isCursorInCm(state: EditorState): boolean {
 	return false;
 }
 
-function buildDecorations(state: EditorState): DecorationSet {
+function buildDecorations(state: EditorState, bands: string): DecorationSet {
 	if (state.selection.empty) return DecorationSet.empty;
 
 	const decorations: Decoration[] = [];
@@ -43,21 +46,40 @@ function buildDecorations(state: EditorState): DecorationSet {
 		// pm-selected-node wears the SAME --editor-selection colour as native ::selection (app.css):
 		// this shade exists to look like the selection continuing across the node, and the old
 		// opaque Tailwind blue read as patchwork against the translucent native highlight
-		decorations.push(Decoration.node(start, end, { class: 'pm-selected-node' }));
+		// data-band names an inline one for selectionBands.ts, which stretches its shade to the line box
+		const band = node.isInline ? { 'data-band': `${bands}-${start}` } : {};
+		decorations.push(Decoration.node(start, end, { class: 'pm-selected-node', ...band }));
 	});
 
 	return decorations.length ? DecorationSet.create(state.doc, decorations) : DecorationSet.empty;
 }
 
+// a suggestion's old words are a widget, which no decoration reaches: the class goes on the element
+function shadeOldWords(view: EditorView, bands: string, shadedBefore: boolean): boolean {
+	const crossed = oldWordsInSelection(view.state);
+	if (crossed.size === 0 && !shadedBefore) return false;
+	for (const el of view.dom.querySelectorAll<HTMLElement>('.pm-suggest-old')) {
+		const id = el.dataset.comment ?? '';
+		el.classList.toggle('pm-selected-node', crossed.has(id));
+		if (crossed.has(id)) el.dataset.band = `${bands}-old-${id}`;
+		else delete el.dataset.band;
+	}
+	return crossed.size > 0;
+}
+
 export const cursorPluginKey = new PluginKey('cursor');
 
+let cursorPlugins = 0;
+
 export function createCursorPlugin() {
+	// band names stay apart when two editors are open side by side
+	const bands = `band${++cursorPlugins}`;
 	return new Plugin({
 		key: cursorPluginKey,
 		props: {
 			decorations(state) {
 				try {
-					return buildDecorations(state);
+					return buildDecorations(state, bands);
 				} catch {
 					return DecorationSet.empty;
 				}
@@ -67,8 +89,12 @@ export function createCursorPlugin() {
 		view(view) {
 			let last = isCursorInCm(view.state);
 			cursorInCm.current = last;
+			let oldWordsShaded = false;
+			const painter = selectionBandPainter(view);
 			return {
 				update(v) {
+					oldWordsShaded = shadeOldWords(v, bands, oldWordsShaded);
+					painter.repaint();
 					const cur = isCursorInCm(v.state);
 					if (cur !== last) {
 						last = cur;
@@ -76,6 +102,7 @@ export function createCursorPlugin() {
 					}
 				},
 				destroy() {
+					painter.destroy();
 					// reset so a stale true doesn't keep the menus disabled
 					cursorInCm.current = false;
 				}

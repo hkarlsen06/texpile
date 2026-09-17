@@ -1,24 +1,15 @@
 // suggestions drawn in the visual editor
-import { Plugin, PluginKey, TextSelection, type EditorState, type Transaction } from 'prosemirror-state';
+import { Plugin, type EditorState } from 'prosemirror-state';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import type { PmSuggestionRange } from './pmSuggestionsPlace';
 import type { WordRun } from '$lib/comments/renderedWords';
 import { editMode, mapSuggestionEdges, noteTypedSide, typingSide } from '$lib/comments/activeSuggestions.svelte';
-import { clickedSide, sideAtOldWords, type CaretSide } from '$lib/comments/oldWordsCaret';
-import type { EditMode, TypingSide } from '$lib/comments/suggestCompare';
+import type { CaretSide } from '$lib/comments/oldWordsCaret';
+import { caretSideWhereItLanded, oldWordsClick, oldWordsKeyDown } from './pmOldWordsCaret';
+import { hasOldWords, pmSuggestionsKey, type PmSuggestionsMeta, type PmSuggestionsState } from './pmSuggestionsState';
 
-type PmSuggestionsState = {
-	ranges: PmSuggestionRange[];
-	focused: string | null;
-	caret: CaretSide | null;
-	deco: DecorationSet;
-	mode: EditMode;
-};
-type PmSuggestionsMeta =
-	{ type: 'set'; ranges: PmSuggestionRange[] } | { type: 'focus'; id: string | null } | { type: 'caret'; caret: CaretSide | null };
-
-export const pmSuggestionsKey = new PluginKey<PmSuggestionsState>('texpile-suggestions');
+export { pmSuggestionsKey };
 
 export function setPmSuggestions(view: EditorView, ranges: PmSuggestionRange[]): void {
 	view.dispatch(
@@ -45,10 +36,6 @@ function oldWords(runs: WordRun[], id: string, focused: boolean): HTMLElement {
 		span.appendChild(node);
 	}
 	return span;
-}
-
-function hasOldWords(r: PmSuggestionRange): boolean {
-	return !!r.restore && !r.partial && !r.format && r.old.length > 0;
 }
 
 function build(doc: PMNode, ranges: PmSuggestionRange[], focused: string | null, caret: CaretSide | null): DecorationSet {
@@ -93,39 +80,8 @@ export function pmSuggestionAt(state: EditorState, pos: number): PmSuggestionRan
 	return (pmSuggestionsKey.getState(state)?.ranges ?? []).find((r) => pos >= r.from && pos <= r.to) ?? null;
 }
 
-function struckAt(state: EditorState, at: number): PmSuggestionRange[] {
-	return (pmSuggestionsKey.getState(state)?.ranges ?? []).filter((r) => hasOldWords(r) && r.from === at);
-}
-
-function setCaret(view: EditorView, caret: CaretSide, tr: Transaction = view.state.tr): void {
-	view.dispatch(tr.setMeta(pmSuggestionsKey, { type: 'caret', caret } satisfies PmSuggestionsMeta));
-}
-
-function stepAtOldWords(view: EditorView, forward: boolean): boolean {
-	const { state } = view;
-	const sel = state.selection;
-	if (!(sel instanceof TextSelection) || !sel.empty) return false;
-	const here = sel.head;
-	const want: TypingSide = forward ? 'after' : 'before';
-	const struck = struckAt(state, here);
-	if (struck.length && sideAtOldWords(pmSuggestionsKey.getState(state)?.caret ?? null, here, struck.map(typingSide)) !== want) {
-		setCaret(view, { at: here, side: want });
-		return true;
-	}
-	const next = here + (forward ? 1 : -1);
-	const $here = sel.$head;
-	if (next < $here.start() || next > $here.end() || struckAt(state, next).length === 0) return false;
-	const between = state.doc.textBetween(Math.min(here, next), Math.max(here, next), '', '￼');
-	if (/[\uD800-\uDFFF]/.test(between)) return false;
-	setCaret(
-		view,
-		{ at: next, side: forward ? 'before' : 'after' },
-		state.tr.setSelection(TextSelection.create(state.doc, next)).scrollIntoView()
-	);
-	return true;
-}
-
 export function pmSuggestions(): Plugin<PmSuggestionsState> {
+	let mounted: EditorView | null = null;
 	return new Plugin<PmSuggestionsState>({
 		key: pmSuggestionsKey,
 		state: {
@@ -157,22 +113,15 @@ export function pmSuggestions(): Plugin<PmSuggestionsState> {
 				return { ...value, ranges, caret, deco: build(tr.doc, ranges, value.focused, caret), mode };
 			}
 		},
+		appendTransaction: (trs, _before, state) => (mounted ? caretSideWhereItLanded(mounted, trs, state) : null),
+		view(view) {
+			mounted = view;
+			return { destroy: () => (mounted = null) };
+		},
 		props: {
 			decorations: (state) => pmSuggestionsKey.getState(state)?.deco ?? DecorationSet.empty,
-			handleKeyDown(view, event) {
-				if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return false;
-				if (event.key === 'ArrowLeft') return stepAtOldWords(view, false);
-				if (event.key === 'ArrowRight') return stepAtOldWords(view, true);
-				return false;
-			},
-			handleClick(view, pos, event) {
-				const ids = new Set(struckAt(view.state, pos).map((r) => r.id));
-				if (ids.size === 0) return false;
-				const words = [...view.dom.querySelectorAll<HTMLElement>('.pm-suggest-old')].filter((el) => ids.has(el.dataset.comment ?? ''));
-				const side = clickedSide(words, event.clientX, event.clientY);
-				if (side) setCaret(view, { at: pos, side }, view.state.tr.setSelection(TextSelection.create(view.state.doc, pos)));
-				return false;
-			}
+			handleKeyDown: oldWordsKeyDown,
+			handleClick: oldWordsClick
 		}
 	});
 }
