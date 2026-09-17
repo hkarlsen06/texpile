@@ -36,6 +36,7 @@
 	"prefs_theme_light": "浅色",
 	"prefs_theme_dark": "深色",
 	"prefs_appearance_hint": "“跟随系统”会跟随操作系统的浅色或深色设置。",
+	"prefs_window_transparency": "透明窗口",
 	"prefs_mode": "模式",
 	"prefs_autosave": "自动保存",
 	"prefs_autosave_hint_live": "实时模式需要开启自动保存",

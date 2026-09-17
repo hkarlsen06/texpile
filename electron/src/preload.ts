@@ -58,6 +58,10 @@ contextBridge.exposeInMainWorld('texpileNative', {
 	replaceSettings: (full: Record<string, unknown>) => ipcRenderer.invoke('settings:replace', full),
 	/** set the whole-window zoom factor (clamped 0.5..2.5); resolves to the applied factor. */
 	setZoomFactor: (factor: number) => ipcRenderer.invoke('window:setZoom', factor),
+	/** whether this system can blur what lies behind a window (Windows 11 22H2 on, macOS). */
+	windowGlassWorks: () => ipcRenderer.invoke('window:glassWorks'),
+	/** the blurred, see-through window material on or off, for every window; resolves to what was applied. */
+	setWindowGlass: (on: boolean) => ipcRenderer.invoke('window:setGlass', on),
 	/** a native message box, modal to this window; resolves to the index of the pressed button
 	 *  in the array as sent (primary first, cancel last), or null. */
 	showMessageBox: (req: Record<string, unknown>) => ipcRenderer.invoke('dialog:messageBox', req),

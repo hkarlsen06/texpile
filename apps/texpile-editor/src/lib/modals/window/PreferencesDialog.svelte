@@ -19,6 +19,7 @@
 	import logoOnDark from '$branding/Logo-light.svg';
 	import { LogoSpin } from './logoSpin.svelte';
 	import { m } from '$lib/paraglide/messages';
+	import { windowGlass } from '$lib/chrome/windowGlass.svelte';
 
 	// autosave is forced on (shown disabled) while live mode or a hosted session is active
 	const autosaveForced = $derived(compileConfig.current.latex.liveMode || collabHost.active);
@@ -199,6 +200,11 @@
 					<AppearanceMode />
 				</div>
 				<ThemePicker />
+				{#if windowGlass.works}
+					{@render toggleRow(m.prefs_window_transparency(), '', settings.current.transparentWindow === true, (v) =>
+						updateSettings({ transparentWindow: v })
+					)}
+				{/if}
 				<div class={ROW}>
 					<!-- the one setting a user may need to find while the UI is in a language they
 							     cannot read, so it carries an icon the others do not -->

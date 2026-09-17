@@ -8,13 +8,15 @@ import { stopWorkspaceWatch } from '../fs/workspaceWatch';
 import { orderForPlatform } from '../ipc/messageBoxOrder';
 import { forgetWindow } from '../mcp/windowState';
 import { forgetWindowChrome, watchWindowState } from '../windowChrome';
+import { applySavedGlass } from '../windowGlass';
 import { releaseDraftOwnerFor } from '../ipc/draftIpc';
 import { windowRoots, pendingOpens, pendingCloses, isQuitting, cancelQuit, persistOpenFolders, type PendingOpen } from './windowRegistry';
 
 export function chromeColors(): { height: number; color: string; symbolColor: string; background: string } {
 	const s = readSettings();
+	// eight digits too: a transparent window saves its button strip as #00000000
 	function hex(v: unknown, fallback: string): string {
-		return typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v : fallback;
+		return typeof v === 'string' && /^#(?:[0-9a-f]{6}|[0-9a-f]{8})$/i.test(v) ? v : fallback;
 	}
 	const h = Number(s.chromeHeight);
 	return {
@@ -96,6 +98,7 @@ export function createWindow(url: string, pending?: PendingOpen): BrowserWindow 
 	// capture now: webContents is gone by the time 'closed' fires
 	const wcId = win.webContents.id;
 	watchWindowState(win); // feeds the title bar's maximise / restore state
+	applySavedGlass(win, chromeColors().background);
 	windowRoots.set(wcId, null);
 	if (pending) pendingOpens.set(wcId, pending);
 	win.loadURL(url);
@@ -143,6 +146,7 @@ export function createWindow(url: string, pending?: PendingOpen): BrowserWindow 
 	win.webContents.on('did-create-window', (child) => {
 		const z = Number(readSettings().uiZoom);
 		if (Number.isFinite(z) && z > 0) child.webContents.setZoomFactor(z);
+		applySavedGlass(child, chromeColors().background);
 		child.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 		child.webContents.on('will-navigate', (e) => e.preventDefault());
 		child.webContents.on('will-frame-navigate', (event) => {

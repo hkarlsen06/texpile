@@ -1,0 +1,39 @@
+// a see-through window: the system blurs what lies behind it (acrylic on Windows 11, vibrancy on macOS) and the page
+// paints its grounds thin enough to let that show. Text and content stay solid, which a window opacity cannot do
+import * as os from 'node:os';
+import { BrowserWindow, ipcMain } from 'electron';
+import { readSettings } from './appSettings';
+
+let glassOn = false;
+
+// acrylic came with Windows 11 22H2, and Electron has nothing like it on Linux
+function glassWorks(): boolean {
+	if (process.platform === 'darwin') return true;
+	return process.platform === 'win32' && Number(os.release().split('.')[2]) >= 22621;
+}
+
+/** a window fill set while this is true would cover the material, so whoever sets one asks first */
+export function isGlassOn(): boolean {
+	return glassOn;
+}
+
+function setGlass(win: BrowserWindow, on: boolean, solidFill: string): void {
+	if (process.platform === 'darwin') win.setVibrancy(on ? 'under-window' : null);
+	else win.setBackgroundMaterial(on ? 'acrylic' : 'none');
+	win.setBackgroundColor(on ? '#00000000' : solidFill);
+}
+
+export function applySavedGlass(win: BrowserWindow, solidFill: string): void {
+	glassOn = glassWorks() && readSettings().transparentWindow === true;
+	if (glassOn) setGlass(win, true, solidFill);
+}
+
+export function registerWindowGlassIpc(solidFill: () => string): void {
+	ipcMain.handle('window:glassWorks', () => glassWorks());
+	ipcMain.handle('window:setGlass', (_e, on: boolean) => {
+		if (!glassWorks()) return false;
+		glassOn = !!on;
+		for (const win of BrowserWindow.getAllWindows()) setGlass(win, glassOn, solidFill());
+		return glassOn;
+	});
+}

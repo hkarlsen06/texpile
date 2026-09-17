@@ -42,6 +42,8 @@ export type AppSettings = {
 	mcpAllowCompileCommand: boolean;
 	/** whole-window zoom factor (1 = 100%), applied via webContents.setZoomFactor. */
 	uiZoom: number;
+	/** the window's grounds let the blurred desktop through. Text and content stay solid. */
+	transparentWindow: boolean;
 	/** newest changelog version the What's New modal was dismissed for. */
 	whatsNewSeen: string;
 	/** live math preview tooltip in source mode. */
@@ -104,6 +106,7 @@ const DEFAULTS: AppSettings = {
 	mcpEnabled: false,
 	mcpAllowCompileCommand: false,
 	uiZoom: 1,
+	transparentWindow: false,
 	whatsNewSeen: '',
 	mathPreview: true,
 	commentPill: true,

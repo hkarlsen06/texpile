@@ -57,8 +57,10 @@
 </script>
 
 <!-- the 1px of paint is the container itself, so it costs exactly what the pane border it replaced
-     did - and every horizontal rule that meets it still reaches it, which is the whole point -->
-<div class="bg-surface-200-800 relative w-px shrink-0 {extra}" {style}>
+     did - and every horizontal rule that meets it still reaches it, which is the whole point.
+     A BORDER, not a fill: at 125% or 150% a border is snapped to whole screen pixels and a 1px
+     fill lands on one or two of them, so the divider came out thicker than the rules it meets -->
+<div class="border-surface-200-800 relative w-px shrink-0 border-l {extra}" {style}>
 	<!-- the WAI-ARIA window-splitter pattern (role=separator + tabindex); svelte's a11y rule doesn't special-case it -->
 	<!-- eslint-disable-next-line svelte/valid-compile -->
 	<div

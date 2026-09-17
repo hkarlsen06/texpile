@@ -17,6 +17,7 @@ const DEFAULT_SETTINGS = {
 	spellcheck: false,
 	checkForUpdates: true,
 	uiZoom: 1, // whole-window zoom factor (webContents.setZoomFactor); the View menu adjusts it
+	transparentWindow: false, // the window's grounds let the blurred desktop through (windowGlass.ts)
 	mathPreview: true, // live math preview tooltip in source mode
 	sourceLineWrap: true, // soft-wrap long lines in Source mode
 	visualMaxWidth: 768, // widest the visual editor's text column may grow, in px

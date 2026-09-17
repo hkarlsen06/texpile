@@ -28,6 +28,214 @@ html[data-mode='dark'] {
 	color-scheme: dark;
 }
 
+/* The see-through window (windowGlass.svelte.ts). The system paints the blurred desktop behind the page and the grounds
+   clear to show it; text and content stay solid, and whatever floats is a frosted sheet. It is all built from Skeleton's surface scale, so
+   every theme gets it without a line of its own. How it is arranged:
+   - ONE veil, on body, and nothing over it: the window is see-through by the same amount everywhere, and the lines
+     between panes are what sets them apart. Layers of differing strength (a tint on the title bar, a more solid writing
+     area) were tried, and read as patches: some parts see-through, some not
+   - so the two steps a mode paints grounds with (50 and 100 light, 950 and 900 dark) go fully clear, as do the app's own
+     ground tokens. The third step stays as a faint mark, because it is what a hovered row or a chip is drawn with
+   - text comes from the other end of the scale, so it is never touched
+   - html keeps the theme's grounds under --solid-* names, because body replaces the real ones and floating things take
+     them back
+   - Tailwind's colour utilities are inlined light-dark() pairs of the base steps; Skeleton's own classes (input,
+     preset-*, card) read the PAIRING variables, so body declares those again to pick the cleared steps up */
+html.window-glass {
+	--solid-surface-50: var(--color-surface-50);
+	--solid-surface-100: var(--color-surface-100);
+	--solid-surface-200: var(--color-surface-200);
+	--solid-surface-800: var(--color-surface-800);
+	--solid-surface-900: var(--color-surface-900);
+	--solid-surface-950: var(--color-surface-950);
+	--solid-terminal-bg: var(--terminal-bg);
+	--solid-pdf-viewer-bg: var(--pdf-viewer-bg);
+	--solid-pdf-page-area-bg: var(--pdf-page-area-bg);
+	--solid-pdf-toolbar-bg: var(--pdf-toolbar-bg);
+	/* how much of the veil's colour stays. A light ground over a dark desktop mixes to grey long before a dark one over a
+	   bright desktop stops reading, and dark text on grey is the worst case there is, so a light window clears far less */
+	--glass-veil-light: 72%;
+	--glass-veil-dark: 20%;
+	--glass-mark-light: 45%;
+	--glass-mark-dark: 30%;
+	/* a sheet is whatever floats. It lies over the document, not over a desktop someone chose, so it keeps far more of
+	   its color than the veil: a dark menu over a white PDF page still has to read */
+	--glass-sheet-light: 88%;
+	--glass-sheet-dark: 80%;
+	--glass-sheet-blur: 64px;
+	background-color: transparent;
+}
+/* the veil: the theme's own ground, pushed a little further the way the mode already leans. It lightens what shows through
+   in light mode and darkens it in dark mode, so text keeps its contrast */
+html.window-glass body {
+	background-color: light-dark(
+		color-mix(in oklab, color-mix(in oklab, var(--solid-surface-50) 70%, white) var(--glass-veil-light), transparent),
+		color-mix(in oklab, color-mix(in oklab, var(--solid-surface-950) 70%, black) var(--glass-veil-dark), transparent)
+	);
+	/* a line between panes or around a field. Made to stand out by CONTRAST, never by thickness: a step of the ground's
+	   own scale all but vanishes over glass, a share of the text colour reads over any backdrop */
+	--glass-line: color-mix(in oklab, var(--color-surface-950-50) 30%, transparent);
+	--color-surface-300-700: var(--glass-line);
+	--pdf-toolbar-border: var(--glass-line);
+	--pdf-toolbar-divider: var(--glass-line);
+}
+html.window-glass:not([data-mode='dark']) body {
+	--color-surface-50: transparent;
+	--color-surface-100: transparent;
+	--color-surface-200: color-mix(in oklab, var(--solid-surface-200) var(--glass-mark-light), transparent);
+	--terminal-bg: transparent;
+	--pdf-viewer-bg: transparent;
+	--pdf-page-area-bg: transparent;
+	--pdf-toolbar-bg: transparent;
+	--color-surface-50-950: light-dark(var(--color-surface-50), var(--color-surface-950));
+	--color-surface-100-900: light-dark(var(--color-surface-100), var(--color-surface-900));
+	--color-surface-200-800: light-dark(var(--color-surface-200), var(--color-surface-800));
+}
+html.window-glass[data-mode='dark'] body {
+	--color-surface-950: transparent;
+	--color-surface-900: transparent;
+	--color-surface-800: color-mix(in oklab, var(--solid-surface-800) var(--glass-mark-dark), transparent);
+	--terminal-bg: transparent;
+	--pdf-viewer-bg: transparent;
+	--pdf-page-area-bg: transparent;
+	--pdf-toolbar-bg: transparent;
+	--color-surface-50-950: light-dark(var(--color-surface-50), var(--color-surface-950));
+	--color-surface-100-900: light-dark(var(--color-surface-100), var(--color-surface-900));
+	--color-surface-200-800: light-dark(var(--color-surface-200), var(--color-surface-800));
+}
+html.window-glass
+	:is(
+		.border-surface-100-900,
+		.border-surface-200-800,
+		.border-surface-300-700,
+		.border-surface-400-600,
+		.preset-outlined-surface-200-800,
+		.preset-outlined-surface-400-600,
+		.fieldset
+	),
+html.window-glass .TexpileEditor hr {
+	border-color: var(--glass-line);
+}
+/* scroll-inset-r is a 3px TRANSPARENT border, a spacer that keeps a scrollbar off the divider's handle. The rule above
+   colours every side of whatever carries a border utility, and the spacer sits on the same elements */
+html.window-glass .scroll-inset-r {
+	border-right-color: transparent;
+}
+/* unwrapped lines pass under the line numbers, so their strip has to cover; wrapped ones never do, and it can be glass */
+html.window-glass .cm-gutters {
+	background-color: light-dark(var(--solid-surface-50), var(--solid-surface-950));
+}
+html.window-glass .cm-editor:has(.cm-lineWrapping) .cm-gutters {
+	background-color: transparent;
+}
+/* xterm fills its own viewport from a colour read off the page's root, which stays solid */
+html.window-glass .xterm .xterm-viewport {
+	background-color: transparent !important;
+}
+/* everything that floats carries a step of the z-index scale below, sits in a Zag positioner, or names its role.
+   Solid is the safe side for these: see-through without a blur is text over text */
+html.window-glass
+	:is(
+		.app-scrim,
+		[data-part='positioner'],
+		[data-scope='toast'],
+		[role='menu'],
+		[role='dialog'],
+		[role='listbox'],
+		[role='tooltip'],
+		.z-floating-ui,
+		.z-search,
+		.z-dropdown,
+		.z-dialog,
+		.z-modal,
+		.z-banner,
+		.z-overlay-critical,
+		.z-special-modal,
+		.z-template-picker,
+		.z-fullscreen-modal,
+		.z-pdf-viewer,
+		.z-tooltip,
+		.cm-tooltip,
+		.cm-panels,
+		.block-handle-menu
+	) {
+	--color-surface-50: var(--solid-surface-50);
+	--color-surface-100: var(--solid-surface-100);
+	--color-surface-200: var(--solid-surface-200);
+	--color-surface-800: var(--solid-surface-800);
+	--color-surface-900: var(--solid-surface-900);
+	--color-surface-950: var(--solid-surface-950);
+	--terminal-bg: var(--solid-terminal-bg);
+	--pdf-viewer-bg: var(--solid-pdf-viewer-bg);
+	--pdf-page-area-bg: var(--solid-pdf-page-area-bg);
+	--pdf-toolbar-bg: var(--solid-pdf-toolbar-bg);
+	--color-surface-50-950: light-dark(var(--color-surface-50), var(--color-surface-950));
+	--color-surface-100-900: light-dark(var(--color-surface-100), var(--color-surface-900));
+	--color-surface-200-800: light-dark(var(--color-surface-200), var(--color-surface-800));
+	--color-surface-300-700: light-dark(var(--color-surface-300), var(--color-surface-700));
+}
+
+/* the sheet itself: whatever casts a shadow AND paints the ground is a floating card in this app's markup (a shadow
+   alone can be a paper page). The rest are the floating things that paint their ground by hand: toasts, the comment
+   pill, the settings button on an image, and the two libraries' own popups. What lies under a sheet is blurred until
+   nothing of it can be made out, then the sheet's own color goes over that. The next two steps stay marks, the same
+   way they do on the window.
+   The blur ends in url(#glass-opaque) (windowGlassFilter.ts), which makes the blurred copy opaque. Chromium draws that
+   copy OVER what it blurred, so over a see-through page the sharp text stayed readable under its own blur, and no
+   amount of blur changed that. The cost is that the desktop does not show through a sheet, only the frosted page */
+html.window-glass :is(.shadow-lg, .shadow-xl, .shadow-2xl):is(.bg-surface-50-950, .bg-surface-100-900),
+html.window-glass [data-scope='toast'][data-part='root'],
+html.window-glass .cm-tooltip,
+html.window-glass .cm-comment-add,
+html.window-glass .settings-button,
+html.window-glass #mathlive-suggestion-popover {
+	--color-surface-300-700: var(--glass-line);
+	backdrop-filter: blur(var(--glass-sheet-blur)) url(#glass-opaque);
+}
+/* only the mode's own end of the scale, as on body: the other end is what text is drawn with */
+html.window-glass:not([data-mode='dark']) :is(.shadow-lg, .shadow-xl, .shadow-2xl):is(.bg-surface-50-950, .bg-surface-100-900),
+html.window-glass:not([data-mode='dark']) [data-scope='toast'][data-part='root'],
+html.window-glass:not([data-mode='dark']) .cm-tooltip,
+html.window-glass:not([data-mode='dark']) .cm-comment-add,
+html.window-glass:not([data-mode='dark']) .settings-button,
+html.window-glass:not([data-mode='dark']) #mathlive-suggestion-popover {
+	--color-surface-50: color-mix(in oklab, var(--solid-surface-50) var(--glass-sheet-light), transparent);
+	--color-surface-100: color-mix(in oklab, var(--solid-surface-100) var(--glass-mark-light), transparent);
+	--color-surface-200: color-mix(in oklab, var(--solid-surface-200) var(--glass-mark-light), transparent);
+	--color-surface-50-950: light-dark(var(--color-surface-50), var(--color-surface-950));
+	--color-surface-100-900: light-dark(var(--color-surface-100), var(--color-surface-900));
+	--color-surface-200-800: light-dark(var(--color-surface-200), var(--color-surface-800));
+}
+html.window-glass[data-mode='dark'] :is(.shadow-lg, .shadow-xl, .shadow-2xl):is(.bg-surface-50-950, .bg-surface-100-900),
+html.window-glass[data-mode='dark'] [data-scope='toast'][data-part='root'],
+html.window-glass[data-mode='dark'] .cm-tooltip,
+html.window-glass[data-mode='dark'] .cm-comment-add,
+html.window-glass[data-mode='dark'] .settings-button,
+html.window-glass[data-mode='dark'] #mathlive-suggestion-popover {
+	--color-surface-950: color-mix(in oklab, var(--solid-surface-950) var(--glass-sheet-dark), transparent);
+	--color-surface-900: color-mix(in oklab, var(--solid-surface-900) var(--glass-mark-dark), transparent);
+	--color-surface-800: color-mix(in oklab, var(--solid-surface-800) var(--glass-mark-dark), transparent);
+	--color-surface-50-950: light-dark(var(--color-surface-50), var(--color-surface-950));
+	--color-surface-100-900: light-dark(var(--color-surface-100), var(--color-surface-900));
+	--color-surface-200-800: light-dark(var(--color-surface-200), var(--color-surface-800));
+}
+/* these take the second dark step as their ground, which is a mark on a sheet. The pill keeps the ground when hovered
+   too: a mark there would make it clearer under the pointer */
+html.window-glass .cm-tooltip.cm-tooltip,
+html.window-glass .cm-tooltip.cm-tooltip-autocomplete,
+html.window-glass .cm-tooltip.cm-math-preview,
+html.window-glass .cm-comment-add,
+html.window-glass .cm-comment-add:hover,
+html.window-glass .settings-button.settings-button,
+html.window-glass .settings-button.settings-button:hover {
+	background-color: var(--color-surface-50-950);
+}
+/* the completion's info box hangs OUTSIDE its tooltip, and a blur inside a blurred element only sees what that element
+   painted, which out there is nothing. So it stays a solid card */
+html.window-glass .cm-tooltip .cm-completionInfo {
+	background-color: light-dark(var(--solid-surface-50), var(--solid-surface-900));
+}
+
 /* mathlive's caret defaults to its blue accent in both schemes; follow the page text color
    instead (the var pierces the shadow root, and an explicit value beats both of its
    prefers-color-scheme fallbacks, which track the OS rather than the app toggle) */

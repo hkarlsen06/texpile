@@ -13,6 +13,7 @@
 // list) and this module turns that into a native template. Clicking a native item sends the same
 // value string the in-app menu would have produced, so both paths land in one handler.
 import { app, BrowserWindow, Menu, MenuItemConstructorOptions, ipcMain } from 'electron';
+import { isGlassOn } from './windowGlass';
 
 /** what the renderer tells us about its menus. Everything optional: a window on the start screen
  *  has no file open and reports almost nothing. */
@@ -439,7 +440,7 @@ export function registerWindowChrome(onChrome?: (c: ChromeColors) => void, home?
 	ipcMain.on('window:overlay', (e, o: { height?: number; color?: string; symbolColor?: string; background?: string }) => {
 		const win = BrowserWindow.fromWebContents(e.sender);
 		if (!win) return;
-		if (o.background) win.setBackgroundColor(o.background);
+		if (o.background && !isGlassOn()) win.setBackgroundColor(o.background);
 		if (!isMac) {
 			try {
 				win.setTitleBarOverlay({ height: o.height, color: o.color, symbolColor: o.symbolColor });

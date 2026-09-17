@@ -121,6 +121,8 @@ type TexpileNative = {
 	onWorkspaceFsChanged?: (cb: () => void) => () => void;
 	closeDecision?: (proceed: boolean) => void;
 	setZoomFactor?: (factor: number) => Promise<number>;
+	windowGlassWorks?: () => Promise<boolean>;
+	setWindowGlass?: (on: boolean) => Promise<boolean>;
 	// optional: an older preload predates the native surfaces, and the renderer draws its own
 	showMessageBox?: (req: {
 		kind: 'question' | 'warning';

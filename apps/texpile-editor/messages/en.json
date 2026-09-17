@@ -36,6 +36,7 @@
 	"prefs_theme_light": "Light",
 	"prefs_theme_dark": "Dark",
 	"prefs_appearance_hint": "System follows your operating system's light or dark setting.",
+	"prefs_window_transparency": "Transparent window",
 	"prefs_mode": "Mode",
 	"prefs_autosave": "Autosave",
 	"prefs_autosave_hint_live": "Live mode requires autosave",

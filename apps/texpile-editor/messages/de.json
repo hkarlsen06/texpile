@@ -36,6 +36,7 @@
 	"prefs_theme_light": "Hell",
 	"prefs_theme_dark": "Dunkel",
 	"prefs_appearance_hint": "„System“ folgt der Hell- oder Dunkel-Einstellung Ihres Betriebssystems.",
+	"prefs_window_transparency": "Transparentes Fenster",
 	"prefs_mode": "Modus",
 	"prefs_autosave": "Automatisches Speichern",
 	"prefs_autosave_hint_live": "Der Live-Modus erfordert automatisches Speichern",

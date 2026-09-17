@@ -285,7 +285,8 @@
 	{/if}
 	{#if TerminalComp}
 		{#each shells.terminals as t (t.id)}
-			<div class="absolute inset-0" style={t.id === shells.activeTermId ? '' : 'display: none'}>
+			<!-- a panel above covers the shell with the ground color, which a transparent window clears -->
+			<div class="absolute inset-0" class:invisible={view !== 'terminal'} style={t.id === shells.activeTermId ? '' : 'display: none'}>
 				<TerminalComp bind:this={shells.refs[t.id]} {cwd} />
 			</div>
 		{/each}

@@ -18,12 +18,13 @@ Settings apply to every folder you open. The compile command and its options are
 
 ## Appearance
 
-| Setting                     | What it does                                                                                                                                   |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| Mode                        | Light, System, or Dark. System follows the operating system's light or dark setting.                                                           |
-| Theme                       | The color theme, as tiles. See [Themes](themes.md).                                                                                            |
-| Language                    | English, Simplified Chinese, Traditional Chinese, German, or Brazilian Portuguese. English is the default; the window reloads when you switch. |
-| Dark PDF pages in dark mode | Darkens the pages in the PDF preview when the mode is dark. Off, the pages keep their original colors.                                         |
+| Setting                     | What it does                                                                                                                                                                       |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mode                        | Light, System, or Dark. System follows the operating system's light or dark setting.                                                                                               |
+| Theme                       | The color theme, as tiles. See [Themes](themes.md).                                                                                                                                |
+| Transparent window          | Off by default. The desktop shows through the window's background, blurred. Text and content stay solid, and menus and dialogs blur what is under them. Windows 11 and macOS only. |
+| Language                    | English, Simplified Chinese, Traditional Chinese, German, or Brazilian Portuguese. English is the default; the window reloads when you switch.                                     |
+| Dark PDF pages in dark mode | Darkens the pages in the PDF preview when the mode is dark. Off, the pages keep their original colors.                                                                             |
 
 ## Editor
 
@@ -44,10 +45,12 @@ Settings apply to every folder you open. The compile command and its options are
 
 ### Visual editor
 
-| Setting           | What it does                                                                                                |
-| ----------------- | ----------------------------------------------------------------------------------------------------------- |
-| Editor width      | How wide text gets in the visual editor. Extra window space stays empty, so short lines are easier to read. |
-| Image resize step | Dragging an image snaps its width to multiples of this fraction of the text width: 10%, 25%, or 50%.        |
+| Setting           | What it does                                                                                                                                                    |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Editor width      | How wide text gets in the visual editor. Extra window space stays empty, so short lines are easier to read.                                                     |
+| Justify text      | On by default. Paragraphs run from edge to edge. This changes how the editor looks and does not change the compiled document.                                   |
+| Hyphenate words   | On by default, and shown while Justify text is on. Long words can split at line ends. The hyphens are only drawn in the editor and are not written to the file. |
+| Image resize step | Dragging an image snaps its width to multiples of this fraction of the text width: 10%, 25%, or 50%.                                                            |
 
 ## Collaboration
 

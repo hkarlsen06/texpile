@@ -101,7 +101,9 @@ export function syncWindowOverlay(el: HTMLElement): () => void {
 		// and close keep WORKING while a modal is up, unlike everything else the scrim covers, so
 		// fading the glyphs would advertise them as disabled. Dimming the strip alone puts the
 		// buttons behind the same veil as the rest of the window while leaving them plainly legible.
-		const color = toHex(cs.backgroundColor, ...scrimLayers());
+		// a see-through window (windowGlass.svelte.ts) wants a see-through strip: the bar under it shows, scrim and all
+		const glass = document.documentElement.classList.contains('window-glass');
+		const color = glass ? '#00000000' : toHex(cs.backgroundColor, ...scrimLayers());
 		const symbolColor = toHex(cs.color);
 		// The WINDOW's background, which is a different thing from the bar's. Chromium fills newly
 		// exposed area with it during a resize, before the renderer has painted - so on maximise or
