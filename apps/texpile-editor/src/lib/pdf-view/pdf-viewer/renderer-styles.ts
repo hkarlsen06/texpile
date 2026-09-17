@@ -49,7 +49,8 @@ export const rendererStyles = `
 	height: var(--pdf-scrollbar-width, 10px);
 }
 
-.pdf-custom-scrollbar .pdf-scroll-container::-webkit-scrollbar-track {
+.pdf-custom-scrollbar .pdf-scroll-container::-webkit-scrollbar-track,
+.pdf-custom-scrollbar .pdf-scroll-container::-webkit-scrollbar-corner {
 	background: var(--pdf-scrollbar-track-color, transparent);
 }
 

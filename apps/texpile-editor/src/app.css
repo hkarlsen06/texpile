@@ -380,11 +380,18 @@ select.input {
 
 /* scrollbars for the app's own scrollers, a share of the text colour so they sit on any ground;
    the PDF viewer (shadow DOM) and terminal style their own */
+/* Skeleton puts scrollbar-color on the root, and it inherits. Any value there but auto makes Chromium drop the
+   ::-webkit-scrollbar rules for the system bar: 15px wide, arrows at both ends, drawn even with nothing to scroll */
+:root {
+	scrollbar-color: auto;
+	scrollbar-width: auto;
+}
 ::-webkit-scrollbar {
 	width: calc(var(--spacing) * 2.5);
 	height: calc(var(--spacing) * 2.5);
 }
-::-webkit-scrollbar-track {
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
 	background: transparent;
 }
 ::-webkit-scrollbar-thumb {

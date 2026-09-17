@@ -17,6 +17,7 @@ Release notes for Texpile Desktop. Add notes under `## [Unreleased]` as you work
 - fix: up and down arrows keep their column in the visual editor
 - fix: selection highlight fills the line over inline math, code and deleted words
 - fix: the noindent label no longer sits on a list item's bullet or number
+- fix: scrollbars are the thin bar again, without the system's arrows and an empty track beside the terminal
 
 ## [1.1.0] - 2026-09-10
 
