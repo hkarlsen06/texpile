@@ -1,6 +1,5 @@
 <script lang="ts">
-	// Step two: what the reader writes. It decides whether the typesetter check is worth showing
-	// them, and which engines it looks for
+	// Step two: what the reader writes
 	import SetupChoice from './SetupChoice.svelte';
 	import type { WritingFormats } from './setupSteps';
 

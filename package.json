@@ -61,7 +61,6 @@
 		"onlyBuiltDependencies": [
 			"electron",
 			"esbuild",
-			"@sentry/cli",
 			"node-pty"
 		]
 	},

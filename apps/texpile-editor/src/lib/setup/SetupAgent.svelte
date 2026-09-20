@@ -1,6 +1,5 @@
 <script lang="ts">
-	// Step five: Refine, offered with the agents this computer already has. The feature has no trace
-	// in the app until it is set up, so this is the one place a reader can learn it exists
+	// Step five: the agent Refine runs, and its model
 	import { settings, updateSettings } from '$lib/settings';
 	import { agentBridge, isPresetAgent, PRESET_AGENTS, type PresetAgent } from '$lib/ai/selectionRefiner';
 	import AgentModelChoice from '$lib/modals/window/AgentModelChoice.svelte';
@@ -35,7 +34,6 @@
 </div>
 
 {#if isPresetAgent(picked) && installed?.[picked]}
-	<!-- the same row Preferences shows, so the model is a choice here rather than a thing to go and find -->
 	<div class="border-surface-200-800 mt-4 flex max-w-xl items-start justify-between gap-6 border-t pt-4">
 		<AgentModelChoice agent={picked} />
 	</div>

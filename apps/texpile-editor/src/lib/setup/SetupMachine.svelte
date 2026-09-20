@@ -1,34 +1,24 @@
 <script lang="ts">
-	// Step three: whether this computer can build what the reader writes. Nothing here is a
-	// preference Texpile could have guessed, which is why it is worth a step of its own
+	// Step three: whether this computer can build what the reader writes
 	import { LoaderCircle, X } from '@lucide/svelte';
 	import { tip } from '$lib/components/tooltip.svelte';
 	import { toolchainProbe } from '$lib/modals/window/toolchainProbe.svelte';
 	import { toolDirs } from '$lib/modals/window/toolDirs.svelte';
-	import { latexFound, typstFound } from './machineSummary';
+	import { engineRows } from './typesetterStatus.svelte';
 	import type { WritingFormats } from './setupSteps';
 	import { m } from '$lib/paraglide/messages';
 
-	// the caller owns how Preferences opens: a dialog over the workspace, or the start screen's own copy
 	let { formats, openToolchain }: { formats: WritingFormats; openToolchain: () => void } = $props();
 
-	// the probe holds its results at module scope, so revisiting this step does not respawn the probes
 	void toolchainProbe.run();
 	void toolDirs.refresh();
 
-	// an install Texpile cannot see is the common case here, so the folder can be added on the spot
-	// rather than only from Preferences; browse fills the draft the Toolchain tab submits by hand
 	async function addFolder(): Promise<void> {
 		await toolDirs.browse();
 		await toolDirs.add();
 	}
 
-	const engines = $derived(
-		[
-			formats.latex ? { kind: 'LaTeX', ...latexFound(toolchainProbe.probes, toolchainProbe.distros) } : null,
-			formats.typst ? { kind: 'Typst', ...typstFound(toolchainProbe.tinymist) } : null
-		].filter((e) => e !== null)
-	);
+	const engines = $derived(engineRows(formats));
 </script>
 
 <div class="border-surface-200-800 divide-surface-200-800 rounded-container max-w-xl divide-y border">
@@ -72,10 +62,18 @@
 	</div>
 {/if}
 
-<p class="mt-3.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+<div class="mt-3.5 flex max-w-xl flex-wrap items-center gap-x-4 gap-y-2 text-xs">
 	<a class="anchor" href="https://texpile.com/docs/installation" target="_blank" rel="noopener noreferrer">
 		{m.setup_toolchain_install()}
 	</a>
 	<button type="button" class="anchor" onclick={() => void addFolder()} disabled={toolDirs.busy}>{m.setup_toolchain_add_folder()}</button>
 	<button type="button" class="anchor" onclick={openToolchain}>{m.setup_toolchain_link()}</button>
-</p>
+	<button
+		type="button"
+		class="btn preset-tonal ml-auto shrink-0 text-xs"
+		onclick={() => void toolchainProbe.run()}
+		disabled={toolchainProbe.probing}
+	>
+		{toolchainProbe.probing ? m.prefs_toolchain_checking() : m.prefs_toolchain_recheck()}
+	</button>
+</div>

@@ -1,6 +1,5 @@
 <script lang="ts">
-	// One pick on the welcome screen: a box or a dot, what it is, and what it covers. The whole row
-	// is the target, so a name that reads as a label is still clickable
+	// One pick on the welcome screen: a box or a dot, a name and a note
 	import { Check } from '@lucide/svelte';
 
 	type Props = {

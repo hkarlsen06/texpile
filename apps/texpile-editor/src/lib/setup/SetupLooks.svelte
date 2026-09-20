@@ -1,6 +1,5 @@
 <script lang="ts">
-	// Step one: the settings whose result you see the moment you pick them, in the order
-	// Preferences > Appearance uses, so they are findable again there
+	// Step one: theme, mode, transparency and language
 	import { Languages } from '@lucide/svelte';
 	import { Switch } from '@skeletonlabs/skeleton-svelte';
 	import { settings, updateSettings, applyUiLocale, type AppSettings } from '$lib/settings';
@@ -14,8 +13,6 @@
 
 	const ROW = 'border-surface-200-800 flex items-center justify-between gap-6 border-b py-3.5 last:border-b-0';
 
-	// messages are not reactive in place, so a switch reloads the window; the screen asks to be put
-	// back up, in the language just chosen
 	function pickLocale(uiLocale: string): void {
 		updateSettings({ uiLocale: uiLocale as AppSettings['uiLocale'] });
 		markSetupReopen();
@@ -41,11 +38,9 @@
 {/if}
 
 <div class="{ROW} items-start">
-	<!-- the icon the Preferences row carries, for the same reason: findable in a language you cannot read -->
 	<div class="flex min-w-0 items-center gap-2">
 		<Languages class="text-muted size-4 shrink-0" />
 		<div class="text-sm font-medium">{m.prefs_language()}</div>
 	</div>
-	<!-- rows, not a select: Windows draws a native select's popup light whatever the theme -->
 	<RadioChoiceList choices={uiLocaleOptions()} value={settings.current.uiLocale} label={m.prefs_language()} onpick={pickLocale} />
 </div>

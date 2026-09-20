@@ -1,7 +1,4 @@
-// Which steps the welcome screen shows, in order.
-//
-// The typesetter check is only worth a screen to someone whose format needs one: a reader who
-// writes Markdown alone is never asked to install TeX.
+// Which steps the welcome screen shows, in order
 export type SetupStepId = 'looks' | 'formats' | 'toolchain' | 'profile' | 'agent';
 
 export type WritingFormats = { latex: boolean; typst: boolean; markdown: boolean };

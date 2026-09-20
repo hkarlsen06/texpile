@@ -37,8 +37,6 @@ window.addEventListener('unhandledrejection', (e) => console.error('[client erro
 
 // adopt before mount, or the start screen renders first and is thrown away
 const boot = bootOpen();
-// a restored folder would carry a reader who is owed the welcome screen straight past it; the
-// screen opens the folder itself once it is done (lib/setup/pendingWorkspace)
 if (boot?.kind === 'folder' && setupOwedAtBoot()) {
 	pendingWorkspace.current = boot.path;
 } else if (boot) {

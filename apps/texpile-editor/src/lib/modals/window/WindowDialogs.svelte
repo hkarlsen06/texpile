@@ -17,7 +17,6 @@
 	import { preferencesOpen, dictionaryOpen, setupOpen, takePreferencesReopen, takeSetupReopen } from '$lib/stores/dialogStore';
 
 	if (takePreferencesReopen()) preferencesOpen.current = true;
-	// the language switch on the welcome screen reloads the window; it asked to be put back up
 	if (takeSetupReopen()) setupOpen.current = true;
 </script>
 

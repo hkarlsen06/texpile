@@ -121,7 +121,6 @@
 		const n = nativeBridge();
 		if (!n?.onOpenFolder) return;
 		return n.onOpenFolder((root) => {
-			// session restore would carry a reader who is owed the welcome screen straight past it
 			if (setupOwed() && route.path === '/') {
 				pendingWorkspace.current = root;
 				return;
