@@ -6,7 +6,10 @@
 import { box } from '$lib/runes/box.svelte';
 
 /** `win` is the trigger's window: a TooltipHost draws only the tips raised in its own */
-export type ShownTip = { text: string; rect: DOMRect; win: Window };
+export type ShownTip = { text: string; rect: DOMRect; win: Window; above?: boolean };
+
+/** `above` for a trigger that floats over content of its own, where the usual card below would cover it */
+export type TipOptions = { above?: boolean };
 
 export const shownTip = box<ShownTip | null>(null);
 
@@ -28,17 +31,17 @@ export function hideTip(): void {
 	owner = null;
 }
 
-function tipFor(node: HTMLElement, text: string): ShownTip {
-	return { text, rect: node.getBoundingClientRect(), win: node.ownerDocument.defaultView ?? window };
+function tipFor(node: HTMLElement, text: string, above?: boolean): ShownTip {
+	return { text, rect: node.getBoundingClientRect(), win: node.ownerDocument.defaultView ?? window, above };
 }
 
-function show(node: HTMLElement, text: string): void {
+function show(node: HTMLElement, text: string, above?: boolean): void {
 	armed = null;
 	owner = node;
-	shownTip.current = tipFor(node, text);
+	shownTip.current = tipFor(node, text, above);
 }
 
-export function tip(node: HTMLElement, text: string | null | undefined) {
+export function tip(node: HTMLElement, text: string | null | undefined, options?: TipOptions) {
 	let current = text ?? '';
 
 	// what `title` gave an icon-only control for free. Only when nothing else names it: on a
@@ -59,9 +62,9 @@ export function tip(node: HTMLElement, text: string | null | undefined) {
 	function open(instant: boolean) {
 		if (!current) return;
 		clearTimeout(timer);
-		if (instant || Date.now() < warmUntil) return show(node, current);
+		if (instant || Date.now() < warmUntil) return show(node, current, options?.above);
 		armed = node;
-		timer = setTimeout(() => show(node, current), OPEN_DELAY);
+		timer = setTimeout(() => show(node, current, options?.above), OPEN_DELAY);
 	}
 
 	function close() {
@@ -89,7 +92,7 @@ export function tip(node: HTMLElement, text: string | null | undefined) {
 			current = next ?? '';
 			mark(current);
 			if (owner !== node) return;
-			if (current) shownTip.current = tipFor(node, current);
+			if (current) shownTip.current = tipFor(node, current, options?.above);
 			else hideTip();
 		},
 		destroy() {

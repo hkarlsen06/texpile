@@ -3,33 +3,19 @@
 // quote comes back with the lines of its copies, which is what lets the caller try again with a
 // prefix or a line instead of guessing.
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { BrowserWindow } from 'electron';
 import { z } from 'zod';
-import { askRenderer } from './bridge';
-import { fail, ok, refused } from './toolReply';
+import { relayer, type TargetWindow } from './relay';
 
-/** the window a tool acts on; root picks one when several are open */
-type TargetWindow = (root?: string) => { win: BrowserWindow } | null;
-type Answer = { ok?: boolean; reason?: string } | null;
-
-const rootArg = z.string().optional().describe('workspace root; defaults to the focused window');
-const byArg = z.string().optional().describe("your own name, shown as the author; defaults to 'AI assistant'");
-const pickArgs = {
+export const rootArg = z.string().optional().describe('workspace root; defaults to the focused window');
+export const byArg = z.string().optional().describe("your own name, shown as the author; defaults to 'AI assistant'");
+export const pickArgs = {
 	prefix: z.string().optional().describe('text right before the quote, to pick between copies'),
 	suffix: z.string().optional().describe('text right after the quote, to pick between copies'),
 	line: z.number().int().positive().optional().describe('1-based line the quote starts on, to pick between copies')
 };
 
 export function registerCommentTools(server: McpServer, target: TargetWindow): void {
-	/** ask the renderer and pass its answer through, refusal and all */
-	async function relay(root: string | undefined, kind: string, args: Record<string, unknown>, timeoutMs?: number) {
-		const t = target(root);
-		if (!t) return fail('no matching Texpile window');
-		const r = (await askRenderer(t.win, kind, args, timeoutMs)) as Answer;
-		if (r === null) return fail('the editor did not respond in time');
-		if (!r.ok) return refused(r);
-		return ok(r);
-	}
+	const relay = relayer(target);
 
 	server.registerTool(
 		'get_comments',

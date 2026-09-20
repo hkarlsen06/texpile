@@ -100,6 +100,9 @@ export type SkeletonResult =
 /** a held main thread or a timed spawn, epoch ms; see electron/src/startupStats.ts */
 export type MainSpan = { label: string; at: number; ms: number };
 
+type NativeMenuItem =
+	{ separator: true } | { id: string; label: string; enabled?: boolean; accelerator?: string; submenu?: NativeMenuItem[] };
+
 type TexpileNative = {
 	/** answered synchronously in preload, so the first render already knows what it is opening */
 	bootstrap?: { open: { kind: 'file' | 'folder'; path: string } | null; settings: Record<string, unknown> };
@@ -132,11 +135,7 @@ type TexpileNative = {
 		buttons: string[];
 		cancelId?: number;
 	}) => Promise<number | null>;
-	popupMenu?: (req: {
-		items: ({ separator: true } | { id: string; label: string; enabled?: boolean; accelerator?: string })[];
-		x: number;
-		y: number;
-	}) => Promise<string | null>;
+	popupMenu?: (req: { items: NativeMenuItem[]; x: number; y: number }) => Promise<string | null>;
 	fsScan: (root: string, exts?: string) => Promise<{ root: string; files: TexFile[] }>;
 	fsRead: (path: string) => Promise<{ content: string; encoding: SourceEncoding }>;
 	// optional: an older preload predates the binary probe

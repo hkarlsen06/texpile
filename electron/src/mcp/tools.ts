@@ -1,11 +1,12 @@
 // The MCP tool surface: what the server tells a client at initialize, and every registered tool.
-// Nothing here mutates a document, deliberately - see server.ts for the hosting story. The comment
-// tools write the review log in .texpile only.
+// The one change to a document is suggest_edit, which lands as a suggestion the reader decides on; the
+// comment tools write the review log in .texpile only. See server.ts for the hosting story.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { snapshotWindows, type WorkspaceSnapshot } from './windowState';
 import { askRenderer, sendCommand } from './bridge';
 import { registerCommentTools } from './commentTools';
+import { registerSuggestTools } from './suggestTools';
 import { fail, ok } from './toolReply';
 import type { McpHost } from './server';
 
@@ -20,8 +21,10 @@ const INSTRUCTIONS = [
 	'Texpile is a local, offline LaTeX editor. It opens a FOLDER of .tex files, and the file on disk IS the document:',
 	'no database, no document ids, and saving writes the .tex back in place.',
 	'',
-	'Nothing on this server writes a document, deliberately. Your own file tools are better at that. What this gives',
-	'you instead is the state of the editor the user is actually looking at, and the ability to steer it.',
+	'What this server gives you is the state of the editor the user is actually looking at, and the ability to steer it.',
+	'Its one change to a document is suggest_edit: it puts your edit into the open file as a suggestion under your name,',
+	'which the user accepts or rejects. Use it for wording the author should review (a rewrite, a grammar fix, a fix',
+	'for a compile error), and your own file tools for mechanical edits, which land as plain changes.',
 	'',
 	'Before you read a .tex from disk, check get_editor_state. A tab marked dirty means the editor holds newer content',
 	'than the file, and get_unsaved returns it; writing over a dirty file raises a conflict prompt at the user rather',
@@ -38,6 +41,10 @@ const INSTRUCTIONS = [
 	'Do not infer where a build lands from the compile command. A folder can override the PDF and log paths',
 	'independently of it, which is normal in a repo where one output directory serves several documents, so',
 	'get_compile_config reports the resolved paths and set_output_paths is what changes them.',
+	'',
+	'No tool here sets the compile command. It belongs to the project, in .texpile/config.json, and Texpile hands it to',
+	'a shell, so a command written there waits behind an accept bar until the user takes it. Write the file with your own',
+	'file tools and say what you changed; set_output_paths retargets the build with no such step.',
 	'',
 	'Review comments live in .texpile/comments.jsonl, pinned to the exact text they quote. Rewriting a quoted',
 	'sentence detaches its thread, and a detached thread reads as lost, not as done. So before editing a file, call',
@@ -297,8 +304,7 @@ export function buildServer(currentHost: () => McpHost | null): McpServer {
 				'The compile command, its format (latex or typst), the engine, the output directory, and - the ' +
 				'part worth having - the RESOLVED paths the PDF pane and the log parser actually watch. In a monorepo those are ' +
 				'routinely not what the command implies, because a folder can override either one. Read this ' +
-				'before assuming where a build landed. canSetCommand tells you whether set_compile_command is ' +
-				'permitted here, so you can pick a route without provoking a refusal.',
+				'before assuming where a build landed.',
 			inputSchema: { root: z.string().optional().describe('workspace root; defaults to the focused window') }
 		},
 		async ({ root }) => {
@@ -339,35 +345,8 @@ export function buildServer(currentHost: () => McpHost | null): McpServer {
 		}
 	);
 
-	server.registerTool(
-		'set_compile_command',
-		{
-			title: 'Set the compile command',
-			description:
-				"Replace the project's compile command outright - for a wrapper script, a Makefile target, or " +
-				'an engine this editor does not generate. Must contain {main}, which expands to the main file. ' +
-				'OFF BY DEFAULT: a compile command is a shell command line, so the user has to enable this ' +
-				'separately from MCP access, and get_compile_config reports whether they have (canSetCommand). ' +
-				'If you only need the build to land elsewhere, use set_output_paths instead - that needs no ' +
-				'permission.',
-			inputSchema: {
-				command: z.string().describe('shell command; {main} expands to the main file path'),
-				root: z.string().optional().describe('workspace root; defaults to the focused window')
-			}
-		},
-		async ({ command, root }) => {
-			const t = target(root);
-			if (!t) return fail('no matching Texpile window');
-			// the gate lives in the renderer, with the settings store, so it cannot be bypassed by
-			// reaching this server directly
-			const r = (await askRenderer(t.win, 'set_compile_command', { command })) as { ok?: boolean; reason?: string } | null;
-			if (r === null) return fail('the editor did not respond in time');
-			if (!r.ok) return fail(r.reason ?? 'the editor refused to set the compile command');
-			return ok(r);
-		}
-	);
-
 	registerCommentTools(server, target);
+	registerSuggestTools(server, target);
 
 	return server;
 }

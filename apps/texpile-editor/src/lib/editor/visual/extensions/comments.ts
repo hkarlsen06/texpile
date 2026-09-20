@@ -1,5 +1,5 @@
 // Review comments in the source editor: the highlight under commented text, the mark on its line
-// number, and the pill in the left margin that offers to comment on a selection.
+// number, and the selection toolbar in the left margin (cmSelectionToolbar).
 //
 // There is no comments plugin for CodeMirror 6 - not an official one, and nothing maintained worth
 // taking - so this is the usual shape: a StateField holding a RangeSet of decorations, remapped
@@ -9,12 +9,10 @@
 // Ranges arrive already resolved. Anchoring lives in $lib/comments/anchor and runs on load; once a
 // range is in this field, CodeMirror's own mapping keeps it correct through every edit, exactly and
 // for free. Nothing here re-searches the document.
-import { EditorView, Decoration, type DecorationSet, ViewPlugin, gutterLineClass, GutterMarker, type BlockInfo } from '@codemirror/view';
+import { EditorView, Decoration, type DecorationSet, gutterLineClass, GutterMarker, type BlockInfo } from '@codemirror/view';
 import { StateEffect, StateField, RangeSet, type Extension, type EditorState } from '@codemirror/state';
-import { settings, updateSettings } from '$lib/settings';
 import { cmSuggestions, suggestionAt } from '$lib/editor/source/cmSuggestions';
-import { observe } from '$lib/runes/observe.svelte';
-import { m } from '$lib/paraglide/messages';
+import { cmSelectionToolbar } from './cmSelectionToolbar';
 
 export type CommentRange = {
 	id: string;
@@ -206,159 +204,9 @@ export function comments({ onSelect, onAdd, addLabel = 'Comment' }: CommentsConf
 			}
 		}),
 		cmSuggestions(),
-		onAdd ? addButton(onAdd, addLabel) : [],
+		onAdd ? cmSelectionToolbar(onAdd, addLabel) : [],
 		theme
 	];
-}
-
-/** the pill fades in rather than flashing under the pointer for every drag it passes through */
-const SHOW_DELAY = 120;
-
-function svgIcon(body: string) {
-	return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
-}
-const COMMENT_ICON = svgIcon('<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>');
-const X_ICON = svgIcon('<path d="M18 6 6 18"/><path d="m6 6 12 12"/>');
-
-/**
- * The Comment affordance for a non-empty selection: an icon pill in the LEFT margin, vertically
- * centred on the cursor's line.
- *
- * This is Overleaf's editor-floating-menu, whose measure is `right: window.innerWidth -
- * contentDOM.left` - the pill's right edge flush against the left edge of the text, so it lands in
- * the gutter and covers nothing. A tooltip above the selection sits ON the line you are reading to
- * decide, and the right margin is already spoken for here by the preview divider and its lozenge.
- *
- * `position: fixed` with a measured `right`, not `absolute` inside the editor: the gutter's width
- * changes with the line count and the pane's own left edge moves when the sidebar resizes, and
- * fixed coordinates read off contentDOM track both without a second source of truth.
- */
-function addButton(onAdd: (from: number, to: number) => void, label: string): Extension {
-	return ViewPlugin.fromClass(
-		class {
-			/** the row: the Comment button, then the control that turns the whole thing off */
-			private readonly dom: HTMLDivElement;
-			private timer: ReturnType<typeof setTimeout> | null = null;
-			private shown = false;
-			private added: { from: number; to: number } | null = null;
-			private readonly resize: ResizeObserver;
-			private readonly unsub: () => void;
-
-			constructor(private readonly view: EditorView) {
-				this.dom = document.createElement('div');
-				this.dom.className = 'cm-comment-add-row';
-				this.dom.style.display = 'none';
-				const button = (title: string, svg: string, extra: string, onDown: () => void) => {
-					const b = this.dom.appendChild(document.createElement('button'));
-					b.className = `cm-comment-add${extra}`;
-					b.title = title;
-					b.setAttribute('aria-label', title);
-					b.innerHTML = svg;
-					// mousedown, not click: by the time click fires the editor has collapsed the selection
-					// under the pointer and there is nothing left to comment on
-					b.onmousedown = (e) => {
-						e.preventDefault();
-						onDown();
-					};
-				};
-				button(label, COMMENT_ICON, '', () => {
-					const sel = view.state.selection.main;
-					if (sel.empty) return;
-					this.added = { from: sel.from, to: sel.to };
-					onAdd(sel.from, sel.to);
-					this.hide();
-				});
-				button(m.comments_pill_off(), X_ICON, ' cm-comment-add-off', () => {
-					updateSettings({ commentPill: false });
-					this.hide(); // the setting keeps it off; this is only so it leaves under the pointer
-				});
-				view.dom.appendChild(this.dom);
-				// scrolling moves the line without changing the viewport, so update() alone would
-				// leave the pill behind; the observer catches pane and window resizes, which move
-				// contentDOM's left edge without any editor update at all
-				view.scrollDOM.addEventListener('scroll', this.schedule);
-				this.resize = new ResizeObserver(this.schedule);
-				this.resize.observe(view.scrollDOM);
-				// the toggle has to bite without waiting for the next selection change, both ways
-				this.unsub = observe(
-					() => settings.current,
-					() => this.schedule()
-				);
-				this.schedule();
-			}
-
-			update() {
-				this.schedule();
-			}
-
-			destroy() {
-				this.view.scrollDOM.removeEventListener('scroll', this.schedule);
-				this.resize.disconnect();
-				this.unsub();
-				if (this.timer) clearTimeout(this.timer);
-				this.dom.remove();
-			}
-
-			/**
-			 * Measuring has to go through requestMeasure.
-			 *
-			 * coordsAtPos reads DOM layout, and CodeMirror forbids that inside update() - it throws
-			 * "Reading the editor layout isn't allowed during an update" and disables the plugin,
-			 * which is why calling it directly meant the pill never appeared at all. The read phase
-			 * runs once the update has settled; write is where the style goes.
-			 */
-			private schedule = () => {
-				this.view.requestMeasure<{ top: number; right: number } | null>({
-					key: 'cm-comment-add',
-					read: (view) => {
-						const sel = view.state.selection.main;
-						// turned off in Preferences: the pill never appears
-						if (settings.current.commentPill === false || sel.empty) return null;
-						if (this.added && this.added.from === sel.from && this.added.to === sel.to) return null;
-						const coords = view.coordsAtPos(sel.head);
-						if (!coords) return null;
-						const scroller = view.scrollDOM.getBoundingClientRect();
-						// scrolled out of the pane: hide rather than park the pill at the edge
-						if (coords.top < scroller.top || coords.top > scroller.bottom) return null;
-						if (view.contentDOM.getBoundingClientRect().left < scroller.left) return null;
-						const height = this.dom.getBoundingClientRect().height;
-						return {
-							top: (coords.top + coords.bottom) / 2 - height / 2,
-							right: window.innerWidth - view.contentDOM.getBoundingClientRect().left
-						};
-					},
-					// written straight to the DOM: this runs on every scroll frame, and routing it
-					// through state would re-render the whole plugin each time
-					write: (box) => {
-						if (!box) {
-							this.hide();
-							return;
-						}
-						this.dom.style.display = '';
-						this.dom.style.top = `${box.top}px`;
-						this.dom.style.right = `${box.right}px`;
-						if (!this.shown && !this.timer) {
-							this.timer = setTimeout(() => {
-								this.timer = null;
-								this.shown = true;
-								this.dom.classList.add('cm-comment-add-visible');
-							}, SHOW_DELAY);
-						}
-					}
-				});
-			};
-
-			private hide() {
-				if (this.timer) {
-					clearTimeout(this.timer);
-					this.timer = null;
-				}
-				this.shown = false;
-				this.dom.classList.remove('cm-comment-add-visible');
-				this.dom.style.display = 'none';
-			}
-		}
-	);
 }
 
 const theme = EditorView.baseTheme({
@@ -382,33 +230,5 @@ const theme = EditorView.baseTheme({
 	},
 	'.cm-lineNumbers .cm-comment-line:hover': {
 		boxShadow: 'inset 3px 0 0 var(--comment-tint)'
-	},
-	// Only geometry lives here. The pill's colours need the app's surface tokens and a dark-mode
-	// branch, which a CodeMirror baseTheme cannot express, so they are in app.css.
-	// the ROW is what gets positioned and faded; the buttons inside it are plain chrome
-	'.cm-comment-add-row': {
-		position: 'fixed',
-		zIndex: '5',
-		display: 'flex',
-		alignItems: 'center',
-		gap: '2px',
-		opacity: '0',
-		transition: 'opacity 0.05s ease-in'
-	},
-	'.cm-comment-add': {
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		width: '26px',
-		height: '26px',
-		padding: '0',
-		cursor: 'pointer'
-	},
-	// narrower than the button it dismisses: secondary, and it must not read as a second action
-	'.cm-comment-add-off': {
-		width: '20px'
-	},
-	'.cm-comment-add-visible': {
-		opacity: '1'
 	}
 });

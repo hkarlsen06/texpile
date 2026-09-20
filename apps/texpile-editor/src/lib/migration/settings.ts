@@ -16,7 +16,6 @@ const V1_SETTINGS_FIELDS = [
 	'spellcheck',
 	'checkForUpdates',
 	'mcpEnabled',
-	'mcpAllowCompileCommand',
 	'mcpPort',
 	'uiZoom',
 	'whatsNewSeen',

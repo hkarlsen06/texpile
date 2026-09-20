@@ -10,6 +10,8 @@ import { EditorView } from 'prosemirror-view';
 import { schema } from '$lib/languages/latex/schema/latexPMSchema';
 import { settings } from '$lib/settings';
 import { pmComments } from '$lib/editor/visual/extensions/pmComments';
+import { refiner, type SelectionRefiner } from '$lib/ai/selectionRefiner';
+import { refineCard } from '$lib/ai/refineCardState.svelte';
 
 let host: HTMLDivElement;
 let view: EditorView | null = null;
@@ -53,17 +55,31 @@ describe('comment pill', () => {
 	it('offers the Comment button and a way to turn it off', () => {
 		const row = mountWithSelection();
 		expect(row).not.toBeNull();
-		expect(row.querySelectorAll('button').length).toBe(2);
+		expect(row.querySelectorAll('button:not([hidden])').length).toBe(2);
 		// shown for a real selection - without this the two "hidden" cases below prove nothing
 		expect(row.style.display).toBe('flex');
 	});
 
 	it('the dismiss control turns the setting off, not just this one showing', () => {
 		const row = mountWithSelection();
-		press(row.querySelectorAll('button')[1]);
+		press(row.querySelector('.cm-comment-add-off')!);
 		expect(settings.current.commentPill).toBe(false);
 		// and it leaves immediately rather than lingering until the next selection change
 		expect(row.style.display).toBe('none');
+	});
+
+	it('offers Refine when an agent is set up, and opens its card', () => {
+		refiner.current = { available: true, busy: false } as SelectionRefiner;
+		try {
+			const row = mountWithSelection();
+			const buttons = row.querySelectorAll('button:not([hidden])');
+			expect(buttons.length).toBe(3);
+			press(buttons[1]);
+			expect(refineCard.current).not.toBeNull();
+		} finally {
+			refiner.current = null;
+			refineCard.current = null;
+		}
 	});
 
 	it('stays away entirely once turned off', () => {

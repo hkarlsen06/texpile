@@ -1,7 +1,6 @@
 // Renderer end of the MCP tools: answering requests main cannot serve from its state cache, and
-// carrying out the steer commands. Nothing here writes a document - the connected agent has its own
-// file tools for that, and keeping writes out is what makes this surface safe. The comment tools
-// (mcpComments.ts) write the comment log only, never a document.
+// carrying out the steer commands. The comment tools (mcpComments.ts) write the comment log only; the one
+// change to a document is suggest_edit (mcpSuggestEdit.ts), which lands as a suggestion.
 import { browser } from '$lib/runtime';
 import { workspaceRoot, isDirty, mainFile, texFiles, effectiveCompileFormat } from './workspaceStore';
 import { isGitRepo, refreshGitStatus } from './gitStore';
@@ -18,6 +17,7 @@ import {
 	resolveCommentPayload,
 	type McpCommentDeps
 } from './mcpComments';
+import { suggestEditPayload } from './mcpSuggestEdit';
 import {
 	compileOutDir,
 	detectEngine,
@@ -230,16 +230,14 @@ function compileConfigPayload(deps: McpCommandDeps) {
 		// null rather than absent, so "no override, this was detected" is distinguishable from
 		// "an override happens to match what would have been detected"
 		overrides: { pdf: ov.pdf ?? null, log: ov.log ?? null },
-		live: compileConfig.current.latex.liveMode,
-		// so a caller can tell "you may not do that" apart from "that failed", without trying it
-		canSetCommand: s.mcpAllowCompileCommand === true
+		live: compileConfig.current.latex.liveMode
 	};
 }
 
 /**
  * Retarget the build: the output directory, and/or where the viewer reads the PDF and log.
  *
- * Ungated, unlike set_compile_command, and the validation here is what earns that. The output
+ * The only tool that reaches a shell command line, and the validation here is what earns that. The output
  * directory is spliced into a shell command line, so it goes through sanitizeOutputDir and can
  * only ever name a place; the PDF/log overrides are never executed at all, only read, so they only
  * have to be single real files of the right kind.
@@ -282,29 +280,6 @@ function setOutputPathsPayload(deps: McpCommandDeps, a: Record<string, unknown>)
 	return { ok: true, ...compileConfigPayload(deps) };
 }
 
-/**
- * Replace the compile command outright.
- *
- * Gated behind a setting that is off by default, and that gate is the whole point: this string is
- * handed to a shell, so anything able to set it can run anything the user can. Every other tool on
- * this server reads state or moves the window. Refusing loudly - naming the setting - beats
- * failing in a way a caller would work around by editing the settings file itself.
- */
-function setCompileCommandPayload(deps: McpCommandDeps, command: unknown) {
-	if (!settings.current.mcpAllowCompileCommand)
-		return {
-			ok: false,
-			reason:
-				'setting the compile command is turned off. The user can enable it in Preferences > AI assistant ("Allow changing the compile command"); it is separate from MCP access because a compile command is a shell command line. set_output_paths can retarget the output directory without it.'
-		};
-	const cmd = typeof command === 'string' ? command.trim() : '';
-	if (!cmd) return { ok: false, reason: 'command must be a non-empty string' };
-	if (!cmd.includes('{main}'))
-		return { ok: false, reason: 'command must contain the {main} token, which expands to the project main file' };
-	deps.applyCompile(cmd);
-	return { ok: true, ...compileConfigPayload(deps) };
-}
-
 function syncTexPayload(deps: McpCommandDeps, line: unknown) {
 	const n = Number(line);
 	if (!Number.isInteger(n) || n < 1) return { ok: false, reason: 'line must be a positive integer' };
@@ -329,13 +304,13 @@ export function attachMcpCommands(deps: McpCommandDeps): () => void {
 		if (req.kind === 'synctex') return reply(syncTexPayload(deps, a.line));
 		if (req.kind === 'compile_config') return reply(compileConfigPayload(deps));
 		if (req.kind === 'set_output_paths') return reply(setOutputPathsPayload(deps, a));
-		if (req.kind === 'set_compile_command') return reply(setCompileCommandPayload(deps, a.command));
 		if (req.kind === 'main_file') return void mainFilePayload(deps, a.path).then(reply);
 		if (req.kind === 'comments') return void commentsPayload(deps.comments, a).then(reply);
 		if (req.kind === 'comment_add') return void addCommentPayload(deps.comments, a).then(reply);
 		if (req.kind === 'comment_reply') return void replyCommentPayload(deps.comments, a).then(reply);
 		if (req.kind === 'comment_resolve') return void resolveCommentPayload(deps.comments, a).then(reply);
 		if (req.kind === 'comment_reanchor') return void reanchorCommentPayload(deps.comments, a).then(reply);
+		if (req.kind === 'suggest_edit') return void suggestEditPayload(deps.comments, a).then(reply);
 		if (req.kind === 'compile') {
 			// Live mode and terminal mode are different enough that the caller has to be told which one
 			// it got. In live mode runCompile() drives the incremental draft engine, the preview is

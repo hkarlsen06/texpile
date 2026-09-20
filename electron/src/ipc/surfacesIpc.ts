@@ -13,8 +13,11 @@ export type MessageBoxRequest = {
 	cancelId?: number;
 };
 
+type PopupMenuItem =
+	{ separator: true } | { id: string; label: string; enabled?: boolean; accelerator?: string; submenu?: PopupMenuItem[] };
+
 export type PopupMenuRequest = {
-	items: ({ separator: true } | { id: string; label: string; enabled?: boolean; accelerator?: string })[];
+	items: PopupMenuItem[];
 	x: number;
 	y: number;
 };
@@ -46,13 +49,22 @@ export function registerSurfacesIpc(): void {
 				done = true;
 				resolve(id);
 			};
-			const template: MenuItemConstructorOptions[] = req.items.map((i) =>
-				'separator' in i
-					? { type: 'separator' }
-					: { label: i.label, enabled: i.enabled !== false, accelerator: i.accelerator, click: () => settle(i.id) }
-			);
+			function template(items: PopupMenuItem[]): MenuItemConstructorOptions[] {
+				return items.map((i) =>
+					'separator' in i
+						? { type: 'separator' }
+						: i.submenu
+							? { label: i.label, enabled: i.enabled !== false, submenu: template(i.submenu) }
+							: { label: i.label, enabled: i.enabled !== false, accelerator: i.accelerator, click: () => settle(i.id) }
+				);
+			}
 			// the close callback can land before a chosen item's click, so it yields to it first
-			Menu.buildFromTemplate(template).popup({ window: win, x: req.x, y: req.y, callback: () => setTimeout(() => settle(null), 100) });
+			Menu.buildFromTemplate(template(req.items)).popup({
+				window: win,
+				x: req.x,
+				y: req.y,
+				callback: () => setTimeout(() => settle(null), 100)
+			});
 		});
 	});
 }

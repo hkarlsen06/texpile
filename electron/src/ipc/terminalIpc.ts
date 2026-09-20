@@ -7,6 +7,7 @@ import * as path from 'node:path';
 import * as typstService from '../typstService';
 import { withPathDirs } from '../shell/pathDirs';
 import { shellEnvReady } from '../shell/shellEnv';
+import { killTree } from '../shell/killTree';
 import { timeSync } from '../startupStats';
 
 // node-pty is a native module: if it isn't built for this Electron ABI the require throws,
@@ -40,24 +41,6 @@ async function childPids(pid: number): Promise<number[]> {
 			.filter((n) => n > 0);
 	} catch {
 		return []; // pgrep exits 1 when there are none
-	}
-}
-
-/** a job and everything it spawned */
-function killTree(pid: number): void {
-	if (process.platform === 'win32') {
-		execFile('taskkill', ['/T', '/F', '/PID', String(pid)], { windowsHide: true }, () => {});
-		return;
-	}
-	// an interactive shell gives each job its own process group, so the group is the tree
-	try {
-		process.kill(-pid, 'SIGTERM');
-	} catch {
-		try {
-			process.kill(pid, 'SIGTERM');
-		} catch {
-			/* already gone */
-		}
 	}
 }
 

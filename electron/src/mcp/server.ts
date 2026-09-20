@@ -5,10 +5,10 @@
 // would know none of that. Clients that only speak stdio reach this through the `texpile-mcp`
 // bridge, which reads the endpoint file below and pipes stdio to this port.
 //
-// Nothing here mutates a document. The connected agent already has its own file tools and is better
-// at using them; what it cannot get any other way is the editor's state, and what it cannot do is
-// steer the window. That is the whole scope, and it is what keeps this safe: no tool accepts an
-// arbitrary path, so there is no traversal surface to defend. The tools live in tools.ts.
+// The connected agent already has its own file tools and is better at using them; what it cannot get
+// any other way is the editor's state, and what it cannot do is steer the window. Its one change to a
+// document is suggest_edit, which goes into the open file as a suggestion the reader decides on. Every
+// path a tool takes is checked against the open workspace. The tools live in tools.ts.
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import { writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';

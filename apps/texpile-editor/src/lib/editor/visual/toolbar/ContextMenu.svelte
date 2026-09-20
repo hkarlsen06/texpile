@@ -10,6 +10,7 @@
 	import { buildMenuItems, buildTableMenuItems, type ContextMenuEntry } from './contextMenuItems';
 	import { showContextMenu, type ContextMenuItem } from '$lib/menus/contextMenu.svelte';
 	import { m } from '$lib/paraglide/messages';
+	import { refineMenuItem } from '$lib/ai/refineMenu';
 
 	type Props = {
 		/** dialect-aware chrome (see lib/editor/dialect.ts): feature flags derive from this. */
@@ -126,6 +127,8 @@
 		const hasTextSelection = sel instanceof TextSelection && !sel.empty;
 
 		const items: ContextMenuItem[] = menuItems.map(entry);
+		const refine = refineMenuItem(hasTextSelection);
+		if (refine) items.push({ separator: true }, refine);
 		if (onAddComment) {
 			// the same gesture the floating tooltip offers, for people who reach for the menu;
 			// disabled rather than hidden with nothing selected, so it is discoverable

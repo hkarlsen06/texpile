@@ -20,6 +20,7 @@
 		toggleGlobalSearch as toggleSearchPanel
 	} from '$lib/workspace/editorCommands';
 	import { WorkspaceComments } from './workspaceComments.svelte';
+	import { wireRefiner } from './workspaceRefiner.svelte';
 	import { WorkspaceFiles } from './workspaceFiles.svelte';
 	import { WorkspaceDoc } from './workspaceDoc.svelte';
 	import { WorkspaceEditFlow } from './workspaceEditFlow.svelte';
@@ -85,6 +86,7 @@
 		flushSave: () => saver.flush()
 	});
 	const commentsCtl = commentsW.ctl;
+	wireRefiner({ comments: commentsW, doc, modes, kind: () => kind, guest: () => guest });
 	// an outside write adopted into the open file (an agent, vim) re-places its threads now, so a
 	// rewritten quote badges detached at once rather than at the next mode switch
 	external.onAdopted = () => void commentsW.adoptDisk();

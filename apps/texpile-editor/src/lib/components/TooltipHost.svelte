@@ -24,7 +24,10 @@
 		const { offsetWidth: w, offsetHeight: h } = card;
 		const x = Math.min(Math.max(EDGE, shown.rect.left + shown.rect.width / 2 - w / 2), win.innerWidth - w - EDGE);
 		const below = shown.rect.bottom + GAP;
-		placed = { x, y: below + h > win.innerHeight - EDGE ? shown.rect.top - h - GAP : below, for: shown };
+		const above = shown.rect.top - h - GAP;
+		// a trigger that asks for above still goes below when there is no room up there
+		const wantsAbove = shown.above ? above >= EDGE : below + h > win.innerHeight - EDGE;
+		placed = { x, y: wantsAbove ? above : below, for: shown };
 	});
 
 	// the card is pinned to a rect measured once, so anything that moves the trigger under it

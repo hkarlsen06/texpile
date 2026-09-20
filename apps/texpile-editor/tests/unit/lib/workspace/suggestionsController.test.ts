@@ -197,6 +197,31 @@ describe('a suggestion in the file', () => {
 		expect(ctl.store.serialize()).toBe('\n');
 	});
 
+	it('records an agent’s rewrite as one suggestion of its own while the reader is editing, and keeps the reader’s typing theirs', async () => {
+		const start = 'Away from a shock a coarse grid resolves the flow well enough for now.\n';
+		const { ctl, open, type, text } = make(start, 'editing');
+		await open();
+		const typed = start.replace('for now', 'for this test');
+		type(typed);
+		ctl.suggestions.textChanged(FILE, typed);
+		const words = 'a coarse grid resolves the flow well enough';
+		const from = typed.indexOf(words);
+		const id = await ctl.suggestions.suggestAs('Claude', { from, to: from + words.length, insert: 'coarse grids resolve it' }, 'Shorten');
+		await ctl.suggestions.beforeSave('main.tex', text());
+		const opened = logged().filter((e) => e.t === 'open');
+		expect(opened).toEqual([
+			expect.objectContaining({
+				id,
+				by: 'Claude',
+				body: 'Shorten',
+				restore: words,
+				anchor: expect.objectContaining({ quote: 'coarse grids resolve it' })
+			})
+		]);
+		expect(await ctl.suggestions.reject(ctl.threads[0])).toBe(true);
+		expect(text()).toBe(typed);
+	});
+
 	it('writes what was typed while suggesting to the log before the file is saved', async () => {
 		const { ctl, open, type } = make(TEXT, 'suggesting');
 		await open();

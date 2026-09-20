@@ -1,16 +1,22 @@
 <script lang="ts">
 	// Draws the app's own context menu; contextMenu.svelte.ts decides when. Mounted once, at the
 	// app root, like the tooltip host.
+	import { ChevronRight } from '@lucide/svelte';
 	import Kbd from '$lib/components/Kbd.svelte';
 	import { tip } from '$lib/components/tooltip.svelte';
 	import { m } from '$lib/paraglide/messages';
 	import { openMenu, closeContextMenu, type ContextMenuItem } from './contextMenu.svelte';
 
 	const EDGE = 8;
+	// the card's own top padding, so a submenu's first item lines up with the item that opened it
+	const PAD = 4;
 
 	let card = $state<HTMLDivElement | null>(null);
+	let subCard = $state<HTMLDivElement | null>(null);
 	// measured against THIS menu before it paints, so it never shows for a frame off-screen
 	let placed = $state.raw<{ x: number; y: number; for: object } | null>(null);
+	let sub = $state.raw<{ items: ContextMenuItem[]; from: DOMRect; for: object } | null>(null);
+	let subPlaced = $state.raw<{ x: number; y: number; for: object } | null>(null);
 
 	$effect(() => {
 		const menu = openMenu.current;
@@ -23,15 +29,65 @@
 		};
 	});
 
+	$effect(() => {
+		if (!sub || !subCard) return;
+		const { offsetWidth: w, offsetHeight: h } = subCard;
+		const right = sub.from.right - PAD;
+		subPlaced = {
+			x: right + w > window.innerWidth - EDGE ? Math.max(EDGE, sub.from.left - w + PAD) : right,
+			y: Math.max(EDGE, Math.min(sub.from.top - PAD, window.innerHeight - h - EDGE)),
+			for: sub
+		};
+	});
+
 	function run(item: ContextMenuItem): void {
+		if ('separator' in item || item.submenu) return;
 		// close first: an item that opens an inline input needs the menu's focus hand-back to land
 		// before the input takes focus
 		closeContextMenu();
-		if (!('separator' in item)) item.onclick();
+		item.onclick?.();
+	}
+
+	function hover(item: ContextMenuItem, el: HTMLElement): void {
+		const menu = openMenu.current;
+		if (!menu || 'separator' in item) return;
+		sub = item.submenu && !item.disabled ? { items: item.submenu, from: el.getBoundingClientRect(), for: menu } : null;
 	}
 </script>
 
 <svelte:window onkeydown={(e) => openMenu.current && e.key === 'Escape' && closeContextMenu()} />
+
+{#snippet entries(items: ContextMenuItem[], top: boolean)}
+	{#each items as item, i (i)}
+		{#if 'separator' in item}
+			<div class="border-surface-200-800 my-1 border-t"></div>
+		{:else}
+			<button
+				type="button"
+				role="menuitem"
+				aria-haspopup={item.submenu ? 'menu' : undefined}
+				class="flex w-full items-center gap-2.5 px-3 py-1.5 text-left disabled:pointer-events-none disabled:opacity-40 {item.danger
+					? 'hover:preset-tonal text-error-ink'
+					: 'hover:preset-tonal'}"
+				disabled={item.disabled}
+				onclick={(e) => (item.submenu ? hover(item, e.currentTarget) : run(item))}
+				onpointerenter={(e) => top && hover(item, e.currentTarget)}
+				onmousedown={(e) => e.preventDefault()}
+				use:tip={item.tip}
+			>
+				{#if item.icon}
+					{@const Icon = item.icon}
+					<Icon class="size-4 shrink-0 {item.danger ? '' : 'text-muted'}" />
+				{:else}
+					<span class="size-4 shrink-0"></span>
+				{/if}
+				<span class="min-w-0 flex-1 truncate">{item.label}</span>
+				{#if item.keys}<Kbd keys={item.keys} class="ml-auto" />{/if}
+				{#if item.submenu}<ChevronRight class="text-muted ml-auto size-4 shrink-0" />{/if}
+			</button>
+		{/if}
+	{/each}
+{/snippet}
 
 {#if openMenu.current}
 	{@const menu = openMenu.current}
@@ -48,31 +104,16 @@
 		class="bg-surface-50-950 border-surface-300-700 z-dropdown fixed min-w-48 overflow-hidden card border py-1 text-sm shadow-lg"
 		style="left: {placed?.x ?? menu.x}px; top: {placed?.y ?? menu.y}px; opacity: {placed?.for === menu ? 1 : 0}"
 	>
-		{#each menu.items as item, i (i)}
-			{#if 'separator' in item}
-				<div class="border-surface-200-800 my-1 border-t"></div>
-			{:else}
-				<button
-					type="button"
-					role="menuitem"
-					class="flex w-full items-center gap-2.5 px-3 py-1.5 text-left disabled:pointer-events-none disabled:opacity-40 {item.danger
-						? 'hover:preset-tonal text-error-ink'
-						: 'hover:preset-tonal'}"
-					disabled={item.disabled}
-					onclick={() => run(item)}
-					onmousedown={(e) => e.preventDefault()}
-					use:tip={item.tip}
-				>
-					{#if item.icon}
-						{@const Icon = item.icon}
-						<Icon class="size-4 shrink-0 {item.danger ? '' : 'text-muted'}" />
-					{:else}
-						<span class="size-4 shrink-0"></span>
-					{/if}
-					<span class="min-w-0 flex-1 truncate">{item.label}</span>
-					{#if item.keys}<Kbd keys={item.keys} class="ml-auto" />{/if}
-				</button>
-			{/if}
-		{/each}
+		{@render entries(menu.items, true)}
 	</div>
+	{#if sub?.for === menu}
+		<div
+			bind:this={subCard}
+			role="menu"
+			class="bg-surface-50-950 border-surface-300-700 z-dropdown fixed min-w-44 overflow-hidden card border py-1 text-sm shadow-lg"
+			style="left: {subPlaced?.x ?? sub.from.right}px; top: {subPlaced?.y ?? sub.from.top}px; opacity: {subPlaced?.for === sub ? 1 : 0}"
+		>
+			{@render entries(sub.items, false)}
+		</div>
+	{/if}
 {/if}

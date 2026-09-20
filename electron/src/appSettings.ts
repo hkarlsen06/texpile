@@ -32,13 +32,15 @@ const DEFAULT_SETTINGS = {
 	// default: connecting also requires pasting a config snippet into the client, so defaulting this
 	// on would open a loopback port for everyone while buying nothing until they act anyway.
 	mcpEnabled: false,
-	// Whether a connected client may rewrite the compile command, which is a shell command line and
-	// so amounts to running anything this user can. A separate permission from mcpEnabled, and off
-	// even when that is on; retargeting only the output DIRECTORY does not need it.
-	mcpAllowCompileCommand: false,
 	// 0 = use the channel default (mcp.PORT_DEFAULT / PORT_DEFAULT_DEV). Fixed rather than
 	// ephemeral so a client config keeps working across restarts; overridable for a port clash.
 	mcpPort: 0,
+	// the reader's own command-line agent that Refine runs ('' = none, 'claude', 'codex', 'agy', 'custom'). Kept here and
+	// not in a folder's .texpile/config.json, which travels with the folder: a downloaded project must never pick
+	// the program that runs, and no MCP tool writes this file
+	aiAgent: '',
+	aiAgentCommand: '', // the command line when aiAgent is 'custom'; the prompt goes on its stdin
+	aiAgentModel: '', // a preset's --model, from the list it gives (agentModels.ts); '' = its own default
 	openFolders: [] as string[], // folders open across windows; maintained here for session restore
 	toolDirs: [] as string[] // searched before PATH by every program Texpile starts; see shell/toolDirs.ts
 };

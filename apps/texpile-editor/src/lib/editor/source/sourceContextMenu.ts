@@ -7,6 +7,7 @@ import { ArrowRight, BookMarked, Scissors, Copy, ClipboardPaste, Search, Message
 import { copySelection, cutSelection, pasteAtCursor } from '$lib/editor/source/cmClipboardUtils';
 import { showContextMenu, type ContextMenuItem } from '$lib/menus/contextMenu.svelte';
 import { m } from '$lib/paraglide/messages';
+import { refineMenuItem } from '$lib/ai/refineMenu';
 
 export type SourceMenuDeps = {
 	onSyncToPdf?: (line: number) => void;
@@ -35,6 +36,8 @@ export function openSourceContextMenu(event: MouseEvent, view: CMView, deps: Sou
 			}
 		}
 	];
+	const refine = refineMenuItem(!!selection);
+	if (refine) items.push({ separator: true }, refine);
 	// the same gesture the margin pill offers, for people who reach for the menu instead; disabled
 	// rather than hidden with nothing selected, so it is discoverable
 	if (deps.onAddComment) {

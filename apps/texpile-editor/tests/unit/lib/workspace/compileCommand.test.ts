@@ -166,9 +166,9 @@ describe('latexmk -cd', () => {
 	});
 });
 
-// The MCP set_output_paths tool splices a caller-supplied directory into a shell command line, and
-// is deliberately NOT behind the permission gate that set_compile_command is. sanitizeOutputDir is
-// the entirety of what makes that safe, so it is tested as a boundary, not as a formatter.
+// The MCP set_output_paths tool splices a caller-supplied directory into a shell command line, and it
+// is the only tool that reaches one. sanitizeOutputDir is the entirety of what makes that safe, so it
+// is tested as a boundary, not as a formatter.
 describe('sanitizeOutputDir', () => {
 	it('accepts ordinary relative, nested and absolute directories', () => {
 		expect(sanitizeOutputDir('output')).toBe('output');

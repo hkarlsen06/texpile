@@ -689,6 +689,11 @@ select.input {
 .app-window-controls {
 	width: calc(100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px));
 }
+/* and the start of the bar, for desktops set to put the buttons on the left (xfwm and GNOME both offer it): the
+   draggable span then begins where the buttons end */
+.app-window-controls-start {
+	width: env(titlebar-area-x, 0px);
+}
 /* thin always-present scrollbar on the toolbar: the macOS overlay scrollbar hides until you
    scroll, which made off-screen toolbar icons look simply missing */
 /* Chrome bars scroll by wheel and trackpad, but never show a bar. A horizontal scrollbar inside a
@@ -700,10 +705,29 @@ select.input {
 	scrollbar-width: none;
 }
 
-/* The "add comment" pill that floats in the source editor's left margin. Its geometry is set by
-   the CodeMirror extension; the colours are here because a baseTheme cannot branch on dark mode,
-   and this has to read as part of the app's chrome rather than as part of the document. */
+/* The selection toolbar (editor/selectionToolbarRow.ts), in both editors: in the source editor's left margin and
+   above the selection in the visual one. Here rather than in a CodeMirror baseTheme because the colours need a dark
+   mode branch, and it has to read as part of the app's chrome rather than as part of the document. The row is what
+   gets positioned and faded; the buttons inside it are plain chrome. */
+.cm-comment-add-row {
+	position: fixed;
+	z-index: 5;
+	align-items: center;
+	gap: 2px;
+	opacity: 0;
+	transition: opacity 0.05s ease-in;
+}
+.cm-comment-add-visible {
+	opacity: 1;
+}
 .cm-comment-add {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 26px;
+	height: 26px;
+	padding: 0;
+	cursor: pointer;
 	border: var(--default-border-width) solid var(--color-surface-300-700);
 	border-radius: calc(var(--radius-base) * 1.5);
 	background-color: light-dark(var(--color-surface-50), var(--color-surface-900));
@@ -713,6 +737,18 @@ select.input {
 .cm-comment-add:hover {
 	background-color: light-dark(var(--color-surface-100), var(--color-surface-800));
 	color: var(--primary-ink);
+}
+/* the class's display would otherwise beat the attribute: Refine is hidden until an agent is set up */
+.cm-comment-add[hidden] {
+	display: none;
+}
+.cm-comment-add:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+/* narrower than the buttons it dismisses: secondary, and it must not read as another action */
+.cm-comment-add-off {
+	width: 20px;
 }
 
 /* Review-comment highlights in the visual editor: the same tints as the source editor's
@@ -1128,6 +1164,14 @@ select.input {
 [data-scope='toast'][data-part='root']:has([data-part='description']:empty) [data-part='close-trigger'] {
 	height: auto;
 	padding-block: calc(var(--spacing) * 0.5);
+}
+/* Skeleton fills a toast's action, a white block on a dark toast; a toast's action is a quiet second choice */
+[data-scope='toast'][data-part='action-trigger'] {
+	@apply btn-sm preset-tonal;
+}
+/* work under way is one line, so its action (a Cancel) sits beside the title rather than on a row of its own */
+[data-scope='toast'][data-part='root'][data-type='loading'] {
+	display: flex;
 }
 
 .box-show .preview-box {

@@ -75,10 +75,10 @@ export function buildCompileCommand(engine: Engine, latexmk: boolean, cmd: strin
 /**
  * A directory name safe to splice into the compile command, or null.
  *
- * This is the whole defence for the MCP set_output_paths tool. That tool is deliberately NOT gated
- * behind a setting, unlike set_compile_command, and the only thing separating "retarget the build
- * output" from "run an extra command" is what is allowed through here - the value lands inside a
- * string that a shell will parse.
+ * This is the whole defence for the MCP set_output_paths tool, the only tool that reaches the
+ * compile command at all, and the only thing separating "retarget the build output" from "run an
+ * extra command" is what is allowed through here - the value lands inside a string that a shell
+ * will parse.
  *
  * Backslashes are folded to forward slashes rather than permitted: a backslash is an escape to a
  * POSIX shell, and every TeX engine accepts forward slashes on Windows anyway, so folding removes

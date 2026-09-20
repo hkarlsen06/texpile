@@ -139,6 +139,10 @@
 		<!-- measured as one block: everything to the left of the centre. On macOS that is the gap the
 		     OS draws the traffic lights into; trafficLightPosition in main.ts matches the inset. -->
 		<div class="flex shrink-0 items-stretch" bind:clientWidth={leftW}>
+			<!-- empty like .app-window-controls: room for window buttons a Linux desktop puts on the left -->
+			{#if !isMac && desktop}
+				<div class="app-window-controls-start shrink-0"></div>
+			{/if}
 			{#if isMac && desktop}
 				<div class="app-drag w-[76px] shrink-0"></div>
 			{:else if showIcon}

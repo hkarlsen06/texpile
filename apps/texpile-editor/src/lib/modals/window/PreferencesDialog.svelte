@@ -3,7 +3,7 @@
 	import { X, Languages } from '@lucide/svelte';
 	import { Switch } from '@skeletonlabs/skeleton-svelte';
 	import Modal from '../Modal.svelte';
-	import { settings, updateSettings, updateSettingsLive, setMcpEnabled, type AppSettings } from '$lib/settings';
+	import { settings, updateSettings, updateSettingsLive, type AppSettings } from '$lib/settings';
 	import { layout, updateLayout } from '$lib/storage/layout';
 	import { compileConfig } from '$lib/workspace/projectConfigSync.svelte';
 	import { setSpellcheckEnabled } from '$lib/editor/spellcheck/spellcheckConfig';
@@ -14,7 +14,7 @@
 	import AppearanceMode from './AppearanceMode.svelte';
 	import ThemePicker from './ThemePicker.svelte';
 	import { preferencesTab } from '$lib/stores/dialogStore';
-	import McpSetupModal from './McpSetupModal.svelte';
+	import PrefsAiPanel from './PrefsAiPanel.svelte';
 	import logoOnLight from '$branding/Logo-dark.svg';
 	import logoOnDark from '$branding/Logo-light.svg';
 	import { LogoSpin } from './logoSpin.svelte';
@@ -26,35 +26,6 @@
 
 	let { open = $bindable(false) }: { open?: boolean } = $props();
 	const logoSpin = new LogoSpin();
-
-	// MCP
-	type McpStatus = {
-		running: boolean;
-		port: number | null;
-		error: string | null;
-	};
-	let mcp = $state<McpStatus | null>(null);
-
-	function nativeMcp() {
-		return (window as unknown as { texpileNative?: { mcpStatus?: () => Promise<McpStatus> } }).texpileNative;
-	}
-
-	async function refreshMcp() {
-		mcp = (await nativeMcp()?.mcpStatus?.()) ?? null;
-	}
-	// the port only exists once main has actually bound, so read it back after the flip
-	async function onMcpToggle(v: boolean) {
-		await setMcpEnabled(v);
-		await refreshMcp();
-	}
-	// re-read whenever the dialog opens: another window may have toggled it, or the port may have
-	// been taken since the last look
-	$effect(() => {
-		if (open) void refreshMcp();
-	});
-
-	/** the instructions modal, stacked above this dialog */
-	let setupOpen = $state(false);
 
 	// One category on screen at a time, rather than every setting in one scroll. The list had grown
 	// past the point where "wrap long lines" and "editor width" could be told apart at a glance -
@@ -330,41 +301,8 @@
 				)}
 				{@render toggleRow(m.prefs_check_updates(), '', settings.current.checkForUpdates, (v) => updateSettings({ checkForUpdates: v }))}
 			{:else if category === 'ai'}
-				<div class={ROW}>
-					<!-- persisted through the main process, not updateSettings: flipping this also has to
-							     start or stop the loopback server, and main owns it -->
-					{@render label(m.prefs_mcp(), m.prefs_mcp_note())}
-					<Switch checked={settings.current.mcpEnabled === true} onCheckedChange={(d) => void onMcpToggle(d.checked)}>
-						<Switch.Control><Switch.Thumb /></Switch.Control>
-						<Switch.HiddenInput />
-					</Switch>
-				</div>
-				{#if settings.current.mcpEnabled === true && mcp}
-					<div class="border-surface-200-800 flex items-center justify-between gap-3 border-b py-3">
-						{#if mcp.running && mcp.port}
-							<span class="text-muted text-xs">{m.prefs_mcp_status({ addr: `127.0.0.1:${mcp.port}` })}</span>
-							<!-- the command lives in its own modal: it is long, and read once -->
-							<button class="btn btn-xs preset-tonal shrink-0 text-xs" onclick={() => (setupOpen = true)}>{m.prefs_mcp_show()}</button>
-						{:else}
-							<span class="text-error-ink text-xs">{m.prefs_mcp_error({ error: mcp.error ?? '' })}</span>
-						{/if}
-					</div>
-					<!-- A SECOND permission, listed under the first because it is meaningless without it,
-							     but deliberately not implied by it: everything else this server exposes reads
-							     state or moves the window, while a compile command is a shell command line. -->
-					{@render toggleRow(
-						m.prefs_mcp_compile_command(),
-						m.prefs_mcp_compile_command_note(),
-						settings.current.mcpAllowCompileCommand === true,
-						(v) => updateSettings({ mcpAllowCompileCommand: v })
-					)}
-				{/if}
+				<PrefsAiPanel />
 			{/if}
 		</div>
 	</div>
 </Modal>
-
-{#if open}
-	<!-- only while Preferences is open, so closing Preferences takes the instructions with it -->
-	<McpSetupModal bind:open={setupOpen} port={mcp?.port ?? null} />
-{/if}

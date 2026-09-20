@@ -39,7 +39,6 @@ export type AppSettings = {
 	 * Retargeting the OUTPUT DIRECTORY does not need this - that path goes through
 	 * sanitizeOutputDir and can only ever change where the build lands.
 	 */
-	mcpAllowCompileCommand: boolean;
 	/** whole-window zoom factor (1 = 100%), applied via webContents.setZoomFactor. */
 	uiZoom: number;
 	/** the window's grounds let the blurred desktop through. Text and content stay solid. */
@@ -81,6 +80,12 @@ export type AppSettings = {
 	openFolders: string[];
 	/** MCP port override (0 = channel default); a hand-edit escape hatch for port clashes. */
 	mcpPort: number;
+	/** the reader's own command-line agent that Refine runs; main reads it, see electron/src/ai */
+	aiAgent: '' | 'claude' | 'codex' | 'agy' | 'custom';
+	/** the command line when aiAgent is 'custom'; the prompt goes on its stdin */
+	aiAgentCommand: string;
+	/** a preset agent's --model, one of the ids it lists; '' = its own default */
+	aiAgentModel: string;
 	/** folders searched before PATH; per machine, so never in a project's config */
 	toolDirs: string[];
 };
@@ -104,7 +109,6 @@ const DEFAULTS: AppSettings = {
 	figureResizeStep: 0.25,
 	checkForUpdates: true,
 	mcpEnabled: false,
-	mcpAllowCompileCommand: false,
 	uiZoom: 1,
 	transparentWindow: false,
 	whatsNewSeen: '',
@@ -123,6 +127,9 @@ const DEFAULTS: AppSettings = {
 	collabRelayUrl: DEFAULT_COLLAB_RELAY_URL,
 	openFolders: [],
 	mcpPort: 0,
+	aiAgent: '',
+	aiAgentCommand: '',
+	aiAgentModel: '',
 	toolDirs: []
 };
 

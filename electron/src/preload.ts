@@ -366,6 +366,17 @@ contextBridge.exposeInMainWorld('texpileZotero', {
 	exportBib: (keys: string[], translator: string) => ipcRenderer.invoke('zotero:export', { keys, translator })
 });
 
+// the reader's own command-line agent (Preferences > AI); main picks the command, a run only carries the prompt
+contextBridge.exposeInMainWorld('texpileAgent', {
+	/** which preset agents are on PATH */
+	detect: () => ipcRenderer.invoke('agent:detect') as Promise<Record<string, boolean>>,
+	/** the models a preset agent offers, asked of the agent */
+	models: (agent: 'claude' | 'codex' | 'agy') => ipcRenderer.invoke('agent:models', agent),
+	/** run the agent on a prompt; resolves { ok, text } or { ok: false, error } */
+	run: (id: string, prompt: string) => ipcRenderer.invoke('agent:run', { id, prompt }),
+	cancel: (id: string) => ipcRenderer.send('agent:cancel', id)
+});
+
 // terminal bridge to the node-pty shells in the main process, keyed by a string `id`
 contextBridge.exposeInMainWorld('texpileTerminal', {
 	/** whether node-pty loaded (false if it needs `pnpm electron:rebuild`). */

@@ -134,11 +134,12 @@
 	}
 
 	import { Toast } from '@skeletonlabs/skeleton-svelte';
-	import { CircleAlert, CircleCheck, Info, TriangleAlert } from '@lucide/svelte';
+	import { CircleAlert, CircleCheck, Info, LoaderCircle, TriangleAlert } from '@lucide/svelte';
 	import { toaster } from '$lib/modals/toaster-svelte';
 	import ConfirmHost from '$lib/modals/ConfirmHost.svelte';
 	import TooltipHost from '$lib/components/TooltipHost.svelte';
 	import ContextMenuHost from '$lib/menus/ContextMenuHost.svelte';
+	import RefineCard from '$lib/ai/RefineCard.svelte';
 </script>
 
 <svelte:window onkeydown={onKeydown} />
@@ -153,6 +154,7 @@
 					{#if toast.type === 'success'}<CircleCheck class="text-success-ink mt-0.5 size-4 shrink-0" />
 					{:else if toast.type === 'warning'}<TriangleAlert class="text-warning-ink mt-0.5 size-4 shrink-0" />
 					{:else if toast.type === 'error'}<CircleAlert class="text-error-ink mt-0.5 size-4 shrink-0" />
+					{:else if toast.type === 'loading'}<LoaderCircle class="text-muted mt-0.5 size-4 shrink-0 animate-spin" />
 					{:else}<Info class="text-primary-ink mt-0.5 size-4 shrink-0" />{/if}
 					<div class="min-w-0">
 						<Toast.Title>{toast.title}</Toast.Title>
@@ -163,13 +165,15 @@
 			{#if toast.action}
 				<Toast.ActionTrigger>{toast.action.label}</Toast.ActionTrigger>
 			{/if}
-			<Toast.CloseTrigger />
+			<!-- a toast for work under way ends with it, or with its own action; closing it would only hide the work -->
+			{#if toast.type !== 'loading'}<Toast.CloseTrigger />{/if}
 		</Toast>
 	{/snippet}
 </Toast.Group>
 
 <ConfirmHost />
 <TooltipHost />
+<RefineCard />
 <ContextMenuHost />
 
 {#if __WEB__}

@@ -24,29 +24,29 @@ export type McpCommentDeps = {
 	adoptDiskChange(): Promise<void>;
 };
 
-type Args = Record<string, unknown>;
+export type Args = Record<string, unknown>;
 type FileText = { text: string; unsaved: boolean };
 type Refusal = { ok: false; reason: string } & Args;
 
 /** shown as the author when the caller gives no name; a name of its own, never the user's */
 const DEFAULT_BY = 'AI assistant';
-const NO_LOG = 'this window keeps no comment log (a shared-session guest, or a single file)';
+export const NO_LOG = 'this window keeps no comment log (a shared-session guest, or a single file)';
 
-function str(v: unknown): string | undefined {
+export function str(v: unknown): string | undefined {
 	return typeof v === 'string' ? v : undefined;
 }
 function num(v: unknown): number | undefined {
 	return typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : undefined;
 }
-function fail(reason: string, extra: Args = {}): Refusal {
+export function fail(reason: string, extra: Args = {}): Refusal {
 	return { ok: false, reason, ...extra };
 }
-function author(a: Args): string {
+export function authorOf(a: Args): string {
 	return str(a.by)?.trim() || DEFAULT_BY;
 }
 
 /** workspace-relative with posix separators, the form thread.file is stored in */
-function relOf(v: unknown): string | null {
+export function relOf(v: unknown): string | null {
 	const s = str(v)?.trim().replace(/\\/g, '/').replace(/^\.\//, '');
 	return s || null;
 }
@@ -76,7 +76,7 @@ async function textOf(deps: McpCommentDeps, rel: string): Promise<FileText | nul
 }
 
 /** a file the caller may pin a thread to, with its text */
-async function readTarget(deps: McpCommentDeps, rel: string): Promise<{ ok: true; src: FileText } | Refusal> {
+export async function readTarget(deps: McpCommentDeps, rel: string): Promise<{ ok: true; src: FileText } | Refusal> {
 	const abs = resolveInWorkspace(rel);
 	if (!abs) return fail('path is outside this workspace');
 	if (!inOpenTree(abs)) return fail('no such file in this workspace');
@@ -89,7 +89,7 @@ async function readTarget(deps: McpCommentDeps, rel: string): Promise<{ ok: true
 }
 
 /** locateQuote with the caller's arguments, plus the note a miss on a dirty buffer needs */
-function locate(src: FileText, rel: string, a: Args) {
+export function locate(src: FileText, rel: string, a: Args) {
 	const quote = str(a.quote);
 	if (!quote) return fail('quote is required');
 	const r = locateQuote(src.text, { quote, prefix: str(a.prefix), suffix: str(a.suffix), line: num(a.line) }, dialectOfPath(rel));
@@ -188,7 +188,7 @@ export async function addCommentPayload(deps: McpCommentDeps, a: Args) {
 	if (!target.ok) return target;
 	const loc = locate(target.src, rel, a);
 	if (!loc.ok) return loc;
-	const id = await ctl.openOn(rel, loc.anchor, body, author(a));
+	const id = await ctl.openOn(rel, loc.anchor, body, authorOf(a));
 	if (!id) return fail('the editor refused to open the thread');
 	return { ok: true, thread: id, file: rel, line: lineOf(target.src.text, loc.from), quote: loc.anchor.quote };
 }
@@ -205,7 +205,7 @@ export async function reanchorCommentPayload(deps: McpCommentDeps, a: Args) {
 	if (!target.ok) return target;
 	const loc = locate(target.src, rel, a);
 	if (!loc.ok) return loc;
-	await ctl.moveAnchor(thread, loc.anchor, rel, author(a));
+	await ctl.moveAnchor(thread, loc.anchor, rel, authorOf(a));
 	return { ok: true, thread: thread.id, file: rel, line: lineOf(target.src.text, loc.from), quote: loc.anchor.quote };
 }
 
@@ -216,7 +216,7 @@ export async function replyCommentPayload(deps: McpCommentDeps, a: Args) {
 	if (!thread) return fail('no thread with that id; get_comments lists them');
 	const body = str(a.body)?.trim();
 	if (!body) return fail('body is required');
-	const id = await ctl.reply(thread, body, author(a));
+	const id = await ctl.reply(thread, body, authorOf(a));
 	return { ok: true, thread: thread.id, message: id };
 }
 
@@ -232,6 +232,6 @@ export async function resolveCommentPayload(deps: McpCommentDeps, a: Args) {
 		if (src && resolveExactly(src.text, thread.anchor))
 			return fail('an open suggestion is accepted or rejected in the editor; only one whose words are gone can be resolved');
 	}
-	await ctl.setResolved(thread, resolved, author(a));
+	await ctl.setResolved(thread, resolved, authorOf(a));
 	return { ok: true, thread: thread.id, resolved };
 }

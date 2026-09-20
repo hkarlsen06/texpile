@@ -46,6 +46,9 @@ type Deps = {
 
 type FileState = { text: string; placed: PlacedSuggestion[] };
 
+/** an edit recorded for someone other than the reader: `gesture` is where it landed, `opened` what it opened */
+type AgentEdit = { by: string; note: string; gesture: TextSpan; opened: string[] };
+
 export class SuggestionsController {
 	private states = new Map<string, FileState>();
 	private placedFile: string | null = null;
@@ -225,11 +228,34 @@ export class SuggestionsController {
 		return true;
 	}
 
+	/**
+	 * An edit made for someone else, an agent: applied to the open file and recorded as a suggestion by
+	 * `by` whatever mode the reader is in, with `note` as its first message. The reader's own typing is
+	 * compared first so it stays theirs. Resolves the new suggestion's id, or null when nothing was made.
+	 */
+	async suggestAs(by: string, edit: SourceEdit, note = ''): Promise<string | null> {
+		const file = this.deps.activeFile();
+		if (!file || !this.deps.compares()) return null;
+		await this.settle();
+		const before = this.deps.activeText();
+		if (this.states.get(file)?.text !== before) return null;
+		if (!(await this.deps.applyEdit(edit))) return null;
+		const after = this.deps.activeText();
+		// the edit's own landing, so the change it makes is one suggestion however many words it touches
+		const { start, end } = commonEnds(before, after);
+		const agent: AgentEdit = { by, note, gesture: { from: start, to: after.length - end }, opened: [] };
+		this.seen = { path: this.seen?.path ?? null, file, text: after };
+		this.gestures = [];
+		await this.run(file, after, 'suggesting', undefined, agent);
+		return agent.opened[0] ?? null;
+	}
+
 	private run(
 		file: string,
 		after: string,
 		mode: EditMode,
-		whitespace: WhitespaceChanges = this.deps.rewraps() ? 'paragraphs' : 'exact'
+		whitespace: WhitespaceChanges = this.deps.rewraps() ? 'paragraphs' : 'exact',
+		agent?: AgentEdit
 	): Promise<void> {
 		const active = file === this.deps.activeFile();
 		if (active && this.timer) {
@@ -237,11 +263,11 @@ export class SuggestionsController {
 			this.timer = null;
 		}
 		const measured = this.seen?.file === file && this.seen.text === after;
-		const gestures = measured ? this.gestures : [];
-		const sides = active ? this.sides : {};
+		const gestures = agent ? [agent.gesture] : measured ? this.gestures : [];
+		const sides = active && !agent ? this.sides : {};
 		if (measured) this.gestures = [];
 		if (active) this.sides = {};
-		this.chain = this.chain.then(() => this.compare(file, after, mode, gestures, sides, whitespace)).catch(() => undefined);
+		this.chain = this.chain.then(() => this.compare(file, after, mode, gestures, sides, whitespace, agent)).catch(() => undefined);
 		return this.chain;
 	}
 
@@ -251,7 +277,8 @@ export class SuggestionsController {
 		mode: EditMode,
 		gestures: TextSpan[],
 		sides: Record<string, TypingSide>,
-		whitespace: WhitespaceChanges
+		whitespace: WhitespaceChanges,
+		agent?: AgentEdit
 	): Promise<void> {
 		const state = this.states.get(file);
 		if (!state || state.text === after) return;
@@ -260,8 +287,8 @@ export class SuggestionsController {
 			if (!this.deps.compares()) this.refit(file);
 			return;
 		}
-		const author = await this.deps.author();
-		this.me = author;
+		const author = agent?.by ?? (await this.deps.author());
+		if (!agent) this.me = author;
 		const current = this.states.get(file);
 		if (!current || current.text !== state.text) return;
 		const r = compareSuggestions({
@@ -277,7 +304,9 @@ export class SuggestionsController {
 		});
 		this.states.set(file, { text: after, placed: r.placed });
 		if (!this.deps.compares()) return this.refit(file);
-		this.stage(this.eventsFor(file, after, r, author));
+		for (const c of r.changes)
+			if (agent && c.t === 'open' && r.placed.some((s) => s.id === c.id && s.author === author)) agent.opened.push(c.id);
+		this.stage(this.eventsFor(file, after, r, author, agent?.note));
 		if (file === this.deps.activeFile()) this.show(after, r.placed);
 	}
 
@@ -289,7 +318,7 @@ export class SuggestionsController {
 		this.deps.onLost?.(file, lost);
 	}
 
-	private eventsFor(file: string, text: string, r: ComparedSuggestions, by: string): CommentEvent[] {
+	private eventsFor(file: string, text: string, r: ComparedSuggestions, by: string, note = ''): CommentEvent[] {
 		const at = new Date().toISOString();
 		const placed = new Map(r.placed.map((s) => [s.id, s]));
 		const ranks = spotRanks(r.placed);
@@ -297,7 +326,8 @@ export class SuggestionsController {
 		for (const c of r.changes) {
 			const s = placed.get(c.id);
 			if (c.t === 'open' && s) {
-				out.push(openEvent({ id: s.id, file, by: s.author, body: '', anchor: anchorOf(text, s, ranks), at, restore: s.restore }));
+				const body = s.author === by ? note : '';
+				out.push(openEvent({ id: s.id, file, by: s.author, body, anchor: anchorOf(text, s, ranks), at, restore: s.restore }));
 			} else if (c.t === 'revise' && s) {
 				out.push(anchorEvent({ thread: s.id, anchor: anchorOf(text, s, ranks), restore: s.restore, by, at }));
 			} else if (c.t === 'close') {

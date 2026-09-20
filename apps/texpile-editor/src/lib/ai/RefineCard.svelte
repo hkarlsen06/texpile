@@ -1,0 +1,103 @@
+<script lang="ts">
+	// The Refine card the selection toolbar opens, laid out like Google Docs': quick actions, More for the rest, and a
+	// box for an instruction of the reader's own. Mounted once, at the app root, before the context menu host so the
+	// More menu opens over it
+	import { ArrowUp, ChevronDown } from '@lucide/svelte';
+	import { showContextMenu } from '$lib/menus/contextMenu.svelte';
+	import { m } from '$lib/paraglide/messages';
+	import { REFINE_ACTIONS, customRefineAction, type RefineAction } from './refineActions';
+	import { agentName, refiner } from './selectionRefiner';
+	import { closeRefineCard, refineCard } from './refineCardState.svelte';
+
+	const EDGE = 8;
+	const QUICK = ['rephrase', 'shorten', 'grammar'];
+	const quick = REFINE_ACTIONS.filter((a) => QUICK.includes(a.id));
+	const rest = REFINE_ACTIONS.filter((a) => !QUICK.includes(a.id));
+
+	let card = $state<HTMLDivElement | null>(null);
+	let input = $state<HTMLInputElement | null>(null);
+	let instruction = $state('');
+	// measured before it paints, so it never shows for a frame off-screen
+	let placed = $state.raw<{ x: number; y: number; for: object } | null>(null);
+
+	$effect(() => {
+		const open = refineCard.current;
+		if (!open || !card) return;
+		const { offsetWidth: w, offsetHeight: h } = card;
+		const { anchor } = open;
+		// above the toolbar, so the selected text stays in view; below it where there is no room above
+		const y = anchor.top - h - 6 >= EDGE ? anchor.top - h - 6 : anchor.bottom + 6;
+		placed = { x: Math.max(EDGE, Math.min(anchor.left, window.innerWidth - w - EDGE)), y, for: open };
+		// the toolbar button kept focus in the editor, where typing would overwrite the selected text
+		input?.focus();
+	});
+
+	function run(action: RefineAction): void {
+		const r = refiner.current;
+		closeRefineCard();
+		instruction = '';
+		if (r) void r.refine(action);
+	}
+
+	function more(button: HTMLElement): void {
+		const box = button.getBoundingClientRect();
+		void showContextMenu(
+			rest.map((a) => ({ label: a.label(), icon: a.icon, onclick: () => run(a) })),
+			{ x: box.left, y: box.bottom + 4 }
+		);
+	}
+
+	function send(): void {
+		const text = instruction.trim();
+		if (text) run(customRefineAction(text));
+	}
+</script>
+
+<svelte:window onkeydown={(e) => refineCard.current && e.key === 'Escape' && closeRefineCard()} />
+
+{#if refineCard.current}
+	{@const open = refineCard.current}
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="fixed inset-0 z-dropdown" onpointerdown={closeRefineCard}></div>
+	<div
+		bind:this={card}
+		role="dialog"
+		aria-label={m.ai_refine_menu({ agent: agentName() })}
+		class="bg-surface-50-950 border-surface-300-700 z-dropdown fixed w-max min-w-96 max-w-[calc(100vw-16px)] card border shadow-lg"
+		style="left: {placed?.x ?? open.anchor.left}px; top: {placed?.y ?? open.anchor.bottom}px; opacity: {placed?.for === open ? 1 : 0}"
+	>
+		<div class="flex items-center gap-1 px-2 py-1.5">
+			{#each quick as action (action.id)}
+				{@const Icon = action.icon}
+				<button type="button" class="btn btn-sm hover:preset-tonal gap-1.5 px-2 text-sm" onclick={() => run(action)}>
+					<Icon class="text-muted size-4" />{action.label()}
+				</button>
+			{/each}
+			<button type="button" class="btn btn-sm hover:preset-tonal gap-1 px-2 text-sm" onclick={(e) => more(e.currentTarget)}>
+				{m.ai_refine_more()}<ChevronDown class="text-muted size-4" />
+			</button>
+		</div>
+		<form
+			class="border-surface-200-800 flex items-center gap-2 border-t px-3 py-2"
+			onsubmit={(e) => {
+				e.preventDefault();
+				send();
+			}}
+		>
+			<input
+				class="min-w-0 flex-1 bg-transparent text-sm outline-none"
+				placeholder={m.ai_refine_instruction({ agent: agentName() })}
+				bind:value={instruction}
+				bind:this={input}
+			/>
+			<button
+				type="submit"
+				class="btn-icon btn-icon-sm preset-tonal shrink-0 rounded-full"
+				disabled={!instruction.trim()}
+				aria-label={m.ai_refine_send()}
+			>
+				<ArrowUp class="size-4" />
+			</button>
+		</form>
+	</div>
+{/if}
