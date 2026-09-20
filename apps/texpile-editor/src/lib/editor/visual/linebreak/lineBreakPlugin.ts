@@ -9,6 +9,7 @@ import { isLargeDocument } from '$lib/languages/latex/visual/largeDocument';
 import { hasOldWords, pmSuggestionsKey } from '../extensions/pmSuggestionsState';
 import { cssZoomOf } from '../lineBoxes';
 import { compositionWrapPlugin } from './compositionWrap';
+import { hyphenSelectionPlugin } from './hyphenSelection';
 import type { DocumentHyphenation } from './documentHyphenationLanguage';
 import { isHeldBlock } from './heldBlocks';
 import { loadHyphenator } from './hyphenationLanguages';
@@ -56,7 +57,9 @@ function decorationsFor(pos: number, paragraph: PMNode, breaks: ChosenBreaks): D
 	);
 	const ends = breaks.marks
 		.filter((mark) => !mark.inside)
-		.map((mark) => Decoration.inline(pos + mark.from, pos + mark.to, { class: `pm-line-${mark.kind}` }, { made: ++marksMade }));
+		.map((mark) =>
+			Decoration.inline(pos + mark.from, pos + mark.to, { class: `pm-line-${mark.kind}` }, { made: ++marksMade, kind: mark.kind })
+		);
 	return [held, ...ends];
 }
 
@@ -419,5 +422,5 @@ function lineBreakPlugin(): Plugin<LineBreakState> {
 }
 
 export function lineBreakPlugins(): Plugin[] {
-	return [wordBeingTypedPlugin(), compositionWrapPlugin(), lineBreakPlugin()];
+	return [wordBeingTypedPlugin(), compositionWrapPlugin(), lineBreakPlugin(), hyphenSelectionPlugin()];
 }

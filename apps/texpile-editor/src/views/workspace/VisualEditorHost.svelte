@@ -66,8 +66,10 @@
 <!-- texpile-main-editor scopes the editor's right-click context menu (ContextMenu.svelte) -->
 <!-- px-12 reserves room for the block-handle gutters (~48px left / ~30px right); on narrow
      windows the mx-auto centering margin collapses and this padding keeps them from clipping.
-     The \noindent marker has to fit this 48px too, which is why it is abbreviated (app.css) -->
-<div class="px-12 py-8">
+     The \noindent marker has to fit this 48px too, which is why it is abbreviated (app.css).
+     No bottom padding: the editor itself runs to the foot of the pane (app.css), so a drop or a
+     click below the last block lands in it -->
+<div class="flex min-h-full flex-col px-12 pt-8">
 	<!-- the measure, from Preferences. Was a fixed max-w-3xl (768px), which is still the
 	     default; past it a wide window pads with empty space rather than stretching the
 	     line length, and how much of that is comfortable is a matter of taste -->

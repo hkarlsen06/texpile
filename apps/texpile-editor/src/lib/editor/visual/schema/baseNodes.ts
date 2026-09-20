@@ -35,7 +35,8 @@ export const baseNodes = {
 	blockquote: {
 		content: 'block+',
 		group: 'block',
-		defining: true,
+		// as context only: text dragged or pasted out of the quote travels as a paragraph, the quote stays
+		definingAsContext: true,
 		// env: 'quotation' when the source used that environment rather than quote
 		attrs: { env: { default: null } },
 		parseDOM: [{ tag: 'blockquote' }],

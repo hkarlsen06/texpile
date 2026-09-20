@@ -113,7 +113,8 @@ html.window-glass
 		.preset-outlined-surface-400-600,
 		.fieldset
 	),
-html.window-glass .TexpileEditor hr {
+/* the editor's own boxes draw their borders through @apply, not a utility class, so the rule above misses them */
+html.window-glass .TexpileEditor :is(hr, div.abstract, .table-wrapper, .table-header, td, th, .settings-button) {
 	border-color: var(--glass-line);
 }
 /* scroll-inset-r is a 3px TRANSPARENT border, a spacer that keeps a scrollbar off the divider's handle. The rule above
@@ -588,6 +589,12 @@ select.input {
 /* a soft hyphen as generated content: drawn only if the line does end there, and never in the text */
 .ProseMirror .pm-line-par .pm-line-hyphen::after {
 	content: '\00AD';
+}
+/* the browser paints no selection over generated content; a selected word's hyphen gets the colour from hyphenSelection */
+.ProseMirror .pm-line-par .pm-line-hyphen.pm-line-hyphen-selected::after {
+	background-color: var(--editor-selection);
+	/* up to the line box, as the browser paints selected text (selectionBands.ts measures the line) */
+	padding-block: var(--band-up, 0px) var(--band-down, 0px);
 }
 /* inside a word no line can hold, the browser's way out; a zero width space makes the character's end a break */
 .ProseMirror .pm-line-par .pm-line-anywhere {
@@ -1491,6 +1498,18 @@ select.input {
 /* figure counter root; equation numbering itself is handled by JS */
 .ProseMirror {
 	counter-reset: figure;
+}
+
+/* the writing area runs to the foot of the pane, so a drop or a click below the last block lands at the end of the document */
+.texpile-main-editor,
+.texpile-main-editor > main {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+}
+.texpile-main-editor > main > .ProseMirror {
+	flex: 1;
+	padding-bottom: 2rem;
 }
 
 /* "(X)" to the right of single-line equations, from data-equation-number */

@@ -154,7 +154,9 @@
 	</div>
 {/snippet}
 
-<Modal bind:open card="flex h-[34rem] max-h-full max-w-3xl overflow-hidden p-0">
+<!-- overflow-clip, not hidden: a hidden box can still be scrolled by a script, and under the see-through window's
+     sheet blur a switch that keeps focus while a setting changes scrolled the whole card off its content -->
+<Modal bind:open card="flex h-[34rem] max-h-full max-w-3xl overflow-clip p-0">
 	<!-- category list. Plain buttons rather than a tree: there is one level, and a disclosure
 	     arrow on something that never expands is a promise the UI does not keep. -->
 	<nav class="border-surface-300-700 bg-surface-100-900 w-44 shrink-0 overflow-y-auto border-r p-2">

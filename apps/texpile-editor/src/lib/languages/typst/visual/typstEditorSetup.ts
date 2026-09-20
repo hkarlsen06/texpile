@@ -52,6 +52,7 @@ import { createPersistentSelectionPlugin } from '$lib/editor/visual/extensions/p
 import { proofreadPlugin, spellClickBoundaryPlugin } from '$lib/editor/spellcheck/spellcheckplugin';
 import { createBoundaryClickPlugin } from '$lib/editor/visual/extensions/boundary-click-plugin';
 import { createBlockHandlePlugin } from '$lib/editor/visual/extensions/block-handle-plugin.svelte';
+import { wholeBlockDragPlugin } from '$lib/editor/visual/extensions/wholeBlockDrag';
 import { createNodeFlashPlugin } from '$lib/editor/visual/extensions/flash-plugin';
 import { remoteCursorsPlugin } from '$lib/editor/visual/extensions/remoteCursors';
 import { CodeBlockView } from '$lib/editor/visual/extensions/codemirrorbridge/cmview.svelte';
@@ -205,6 +206,7 @@ export function typstEditorPlugins(setup: TypstEditorSetup): Plugin[] {
 		createBoundaryClickPlugin(),
 		// the Notion-style + / drag / delete gutter, with the typst insert set
 		createBlockHandlePlugin({ items: TYP_BLOCK_INSERT_ITEMS }),
+		wholeBlockDragPlugin(),
 		createNodeFlashPlugin(),
 		// collaborators' carets; VisualCollab feeds it, and is inert outside a shared session
 		remoteCursorsPlugin,

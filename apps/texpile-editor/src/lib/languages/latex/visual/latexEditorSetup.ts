@@ -57,6 +57,7 @@ import { environmentView } from '$lib/languages/latex/visual/extensions/environm
 import { IncludeDocView } from '$lib/editor/visual/extensions/includedoc/includeDocView.svelte';
 import { createBoundaryClickPlugin } from '$lib/editor/visual/extensions/boundary-click-plugin';
 import { createBlockHandlePlugin } from '$lib/editor/visual/extensions/block-handle-plugin.svelte';
+import { wholeBlockDragPlugin } from '$lib/editor/visual/extensions/wholeBlockDrag';
 import { createNodeFlashPlugin } from '$lib/editor/visual/extensions/flash-plugin';
 import { createLinkPlugin } from '$lib/editor/visual/extensions/link';
 import { pmComments } from '$lib/editor/visual/extensions/pmComments';
@@ -168,6 +169,7 @@ export function latexEditorPlugins(setup: LatexEditorSetup): Plugin[] {
 		proofreadPlugin,
 		createBoundaryClickPlugin(),
 		createBlockHandlePlugin(),
+		wholeBlockDragPlugin(),
 		createNodeFlashPlugin(),
 		...pmComments({
 			onSelect: (id) => onSelectComment?.(id),

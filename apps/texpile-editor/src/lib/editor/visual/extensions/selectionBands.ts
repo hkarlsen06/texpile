@@ -32,11 +32,14 @@ function blockOf(el: Element): HTMLElement | null {
 	return null;
 }
 
+// the hyphen of a selected word is painted by hand (hyphenSelection) and needs the same band
+const BANDED = '.pm-selected-node[data-band], .pm-line-hyphen-selected[data-band]';
+
 /** one rule per crossed inline element on screen: how far its line reaches above and below it */
 export function selectionBandRules(view: EditorView): string {
 	const linesOf = new Map<HTMLElement, LineBox[]>();
 	let rules = '';
-	const crossed = blocksNearScreen(view.dom).flatMap((block) => [...block.querySelectorAll<HTMLElement>('.pm-selected-node[data-band]')]);
+	const crossed = blocksNearScreen(view.dom).flatMap((block) => [...block.querySelectorAll<HTMLElement>(BANDED)]);
 	for (const el of crossed) {
 		const outer = el.getClientRects()[0];
 		if (!outer) continue;

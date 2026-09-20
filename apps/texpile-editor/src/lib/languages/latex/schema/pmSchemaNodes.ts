@@ -28,7 +28,7 @@ export const nodes: Record<string, NodeSpec> = {
 	abstract: withOrigAttr({
 		content: 'block+',
 		group: 'block',
-		defining: true,
+		definingAsContext: true,
 		attrs: {
 			sourceForm: { default: 'env' }
 		},
@@ -49,7 +49,7 @@ export const nodes: Record<string, NodeSpec> = {
 	environment: withOrigAttr({
 		content: 'block+',
 		group: 'block',
-		defining: true,
+		definingAsContext: true,
 		allowGapCursor: true,
 		attrs: {
 			name: { default: 'environment' },

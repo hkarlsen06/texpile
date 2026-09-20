@@ -149,7 +149,7 @@
 		role="presentation"
 		onmousedown={(e) => e.target === e.currentTarget && commandPalette.hide()}
 	>
-		<div class="card bg-surface-50-950 border-surface-300-700 flex max-h-[70vh] w-full max-w-xl flex-col overflow-hidden border shadow-2xl">
+		<div class="card bg-surface-50-950 border-surface-300-700 flex max-h-[70vh] w-full max-w-xl flex-col overflow-clip border shadow-2xl">
 			<Combobox
 				class="flex min-h-0 w-full flex-col"
 				{collection}

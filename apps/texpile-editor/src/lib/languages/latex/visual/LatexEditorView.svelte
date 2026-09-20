@@ -345,7 +345,7 @@
 	}
 
 	:global(.TexpileEditor div.abstract) {
-		@apply border-surface-300-700 bg-surface-100-900 rounded-base relative mx-4 my-6 border p-4 pt-8;
+		@apply border-surface-300-700 bg-surface-100-900 rounded-base relative my-6 border p-4 pt-8;
 	}
 	:global(.TexpileEditor div.abstract::before) {
 		content: 'Abstract';
