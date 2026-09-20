@@ -10,9 +10,8 @@ import { box } from '$lib/runes/box.svelte';
 
 export type UserData = {
 	v: 1;
-	/** name shown to peers in shared sessions */
+	/** name shown to peers in shared sessions; the color beside it is derived from it */
 	collabName: string;
-	collabColor: string;
 	/** name put on review comments; blank falls back to the repo's git user.name */
 	commentAuthor: string;
 	/** spell-check ignore list */
@@ -32,7 +31,6 @@ const MAX_RECENT = 10;
 const DEFAULTS: UserData = {
 	v: 1,
 	collabName: '',
-	collabColor: '',
 	commentAuthor: '',
 	dictionary: [],
 	recentFolders: [],

@@ -1,24 +1,17 @@
 <script lang="ts">
 	// Step four: the name other people see, drawn into the comment it lands on, because a name field
-	// on its own says nothing about where the name goes. The color under it is the session one: a
-	// comment's own circle is hashed from the name, so the preview uses the real avatar and does not
-	// take the color
+	// on its own says nothing about where the name goes. No color to pick: it comes from the name
 	import InitialAvatar from '$lib/components/InitialAvatar.svelte';
 	import { userData, updateUserData } from '$lib/storage/userData';
-	import { PRESENCE_COLORS, HOST_COLOR } from '$lib/collab/identity';
 	import { workspaceRoot } from '$lib/workspace/workspaceStore';
 	import { m } from '$lib/paraglide/messages';
 
-	const typed = $derived(userData.current.collabName.trim());
-	const shown = $derived(typed || m.setup_profile_placeholder());
-	const color = $derived(userData.current.collabColor || HOST_COLOR);
-
-	const SWATCH = 'size-6 rounded-full border-2';
+	const shown = $derived(userData.current.collabName.trim() || m.setup_profile_placeholder());
 
 	// a rename during a live session has to reach the peers, and the collab stores carry Yjs with
 	// them: no workspace open means no session to tell, and the start screen never loads them
-	async function write(patch: { collabName?: string; collabColor?: string }): Promise<void> {
-		updateUserData(patch);
+	async function write(collabName: string): Promise<void> {
+		updateUserData({ collabName });
 		if (!workspaceRoot.current) return;
 		const [host, guest] = await Promise.all([import('$lib/collab/hostStore.svelte'), import('$lib/collab/guestStore.svelte')]);
 		host.collabHost.refreshIdentity();
@@ -27,29 +20,13 @@
 </script>
 
 <div class="grid items-center gap-8 md:grid-cols-2">
-	<div>
-		<input
-			class="input text-sm"
-			maxlength={40}
-			placeholder={m.setup_profile_placeholder()}
-			value={userData.current.collabName}
-			oninput={(e) => void write({ collabName: e.currentTarget.value })}
-		/>
-
-		<span class="text-muted mt-5 mb-2 block text-xs">{m.setup_profile_color()}</span>
-		<div class="flex gap-2.5" role="group" aria-label={m.setup_profile_color()}>
-			{#each PRESENCE_COLORS as c, i (c)}
-				<button
-					type="button"
-					class="{SWATCH} {color === c ? 'border-surface-950-50' : 'border-transparent'}"
-					style="background-color: {c}"
-					aria-pressed={color === c}
-					aria-label={m.prefs_collab_color_option({ index: i + 1 })}
-					onclick={() => void write({ collabColor: c })}
-				></button>
-			{/each}
-		</div>
-	</div>
+	<input
+		class="input text-sm"
+		maxlength={40}
+		placeholder={m.setup_profile_placeholder()}
+		value={userData.current.collabName}
+		oninput={(e) => void write(e.currentTarget.value)}
+	/>
 
 	<div class="border-surface-200-800 bg-surface-100-900 rounded-container border px-3.5 py-3">
 		<div class="flex items-center gap-2 text-xs">
