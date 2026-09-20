@@ -4,11 +4,11 @@
 // NOT open the suggestion box. The first attempt keyed off event.target, which never fired - that
 // click lands outside the flagged span's own box, so the target is the block around it - and the
 // bug survived a release. These assertions are the reason to trust the second attempt.
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { EditorState, Plugin } from 'prosemirror-state';
 import { EditorView, Decoration, DecorationSet } from 'prosemirror-view';
 import { schema } from '$lib/languages/latex/schema/latexPMSchema';
-import { spellClickBoundaryPlugin } from '$lib/editor/spellcheck/spellcheckplugin';
+import { proofreadPlugin, spellClickBoundaryPlugin } from '$lib/editor/spellcheck/spellcheckplugin';
 
 // "Hello World" in one paragraph: content starts at 1, so Hello is 1-6, the space 6, World 7-12.
 const FLAG_FROM = 7;
@@ -83,6 +83,42 @@ describe('spellClickBoundaryPlugin', () => {
 	it('ignores a position with no character behind it', () => {
 		const { view, place } = mountEditor();
 		expect(clickAt(view, 1)).toBe(false);
+		view.destroy();
+		place.remove();
+	});
+});
+
+describe('a click on struck words', () => {
+	// the box animates in; jsdom has no Web Animations
+	beforeAll(() => {
+		if (!Element.prototype.animate) {
+			Element.prototype.animate = (() => ({ cancel() {}, finished: Promise.resolve(), onfinish: null })) as never;
+		}
+	});
+	afterEach(() => document.getElementById('harper-suggestion-container')?.remove());
+
+	it('opens no box for the flagged word the struck words touch, and leaves the click to the caret', () => {
+		const doc = schema.node('doc', null, [schema.node('paragraph', null, [schema.text('Hello World')])]);
+		const struck = () => Object.assign(document.createElement('span'), { className: 'pm-suggest-old', textContent: 'the ' });
+		const oldWords = new Plugin({
+			props: { decorations: (state) => DecorationSet.create(state.doc, [Decoration.widget(FLAG_FROM, struck)]) }
+		});
+		const place = document.body.appendChild(document.createElement('div'));
+		const view = new EditorView(place, { state: EditorState.create({ doc, plugins: [oldWords, proofreadPlugin] }) });
+		const error = { from: 6, to: 11, msg: 'Spelling', shortmsg: 'Spelling', type: 'Spelling', replacements: ['Word'], text: 'World' };
+		const flagged = Decoration.inline(FLAG_FROM, FLAG_TO, { class: 'proofread-spelling' }, { errors: [error], keys: ['k'] });
+		const lintState = {
+			cacheMap: new Map(),
+			ignoredErrors: new Map(),
+			spellcheckEnabled: true,
+			decor: DecorationSet.create(doc, [flagged])
+		};
+		view.dispatch(view.state.tr.setMeta('updateSpellcheckEnabled', true).setMeta('proofread', lintState));
+		const click = new MouseEvent('click');
+		Object.defineProperty(click, 'target', { value: place.querySelector('.pm-suggest-old') });
+		expect(spellClickBoundaryPlugin.props.handleClick!.call(spellClickBoundaryPlugin, view, FLAG_FROM, click)).toBe(false);
+		expect(proofreadPlugin.props.handleClick!.call(proofreadPlugin, view, FLAG_FROM, click)).toBe(false);
+		expect(document.getElementById('harper-suggestion-container')).toBeNull();
 		view.destroy();
 		place.remove();
 	});

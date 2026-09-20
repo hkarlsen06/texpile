@@ -2,6 +2,7 @@
 import { mount, unmount } from 'svelte';
 import type { CreateSuggestionBox, Problem as ProofreadProblem } from 'prosemirror-proofread';
 import SuggestionBox from './SuggestionBox.svelte';
+import { readableSpellText } from './blockSpellText';
 
 // shapes match prosemirror-proofread
 type Position = {
@@ -40,7 +41,11 @@ let currentCleanup: (() => void) | null = null;
 // a word too far from anything known comes with no list at all, and the box still has to open
 // for it: ignore and add-to-dictionary are what it is there for
 function normalizeProblem(p: ProofreadProblem): Problem {
-	return { ...p, replacements: (p.replacements ?? []).map((r) => (typeof r === 'string' ? r : r.value)) };
+	return {
+		...p,
+		text: readableSpellText(p.text),
+		replacements: (p.replacements ?? []).map((r) => (typeof r === 'string' ? r : r.value))
+	};
 }
 
 export function createHarperSuggestionBox(options: Parameters<CreateSuggestionBox>[0]): { destroy: () => void } {

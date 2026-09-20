@@ -1,8 +1,8 @@
 import { Plugin } from 'prosemirror-state';
-import type { EditorView } from 'prosemirror-view';
+import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import { createProofreadPlugin, createSpellCheckEnabledStore } from 'prosemirror-proofread';
 import { lintText, syncDocumentDictionary } from '$lib/editor/spellcheck/linter';
-import { textWithoutLinks } from '$lib/editor/spellcheck/linkFreeText';
+import { blockSpellText, chipLetters, harperReading } from '$lib/editor/spellcheck/blockSpellText';
 import { createHarperSuggestionBox } from '$lib/editor/spellcheck/suggestionBoxFactory';
 import './suggestion.css';
 import { editorConfigStore, editorViewStore } from '$lib/stores/editorStore';
@@ -32,6 +32,11 @@ observe(
 );
 
 const WORD_CHAR = /[\p{L}\p{N}]/u;
+
+/** struck words take a click for the caret beside them (pmOldWordsCaret), never for the squiggle they touch */
+function onOldWords(event: MouseEvent): boolean {
+	return event.target instanceof Element && event.target.closest('.pm-suggest-old') !== null;
+}
 
 /** the element holding the character just before `pos`, or null when it cannot be resolved */
 function elementBefore(view: EditorView, pos: number): HTMLElement | null {
@@ -65,13 +70,14 @@ function elementBefore(view: EditorView, pos: number): HTMLElement | null {
 export const spellClickBoundaryPlugin = new Plugin({
 	props: {
 		handleClick(view, pos, event) {
+			if (onOldWords(event)) return false;
 			const $pos = view.state.doc.resolve(pos);
 			// a link's text is an address, not prose, and its own tooltip owns this click
 			const linkType = view.state.schema.marks.link;
 			if (linkType && $pos.marks().some((mk) => mk.type === linkType)) return true;
 			const before = $pos.nodeBefore;
 			const after = $pos.nodeAfter;
-			const prev = before?.isText ? before.text?.slice(-1) : undefined;
+			const prev = before?.isText ? before.text?.slice(-1) : before && chipLetters(before)?.slice(-1);
 			const next = after?.isText ? after.text?.[0] : undefined;
 			// mid-word (a letter on both sides) is a real request for the suggestions; so is the
 			// leading edge, which matches how source mode behaves
@@ -103,17 +109,56 @@ function sleep(ms: number) {
  * mid-composition; stalling the result defers the whole dispatch chain to after compositionend.
  * Capped so a stuck composing flag cannot dam the linter forever.
  */
-async function lintTextAfterComposition(text: string) {
-	const res = await lintText(text);
+async function lintTextAfterComposition(block: string) {
+	const reading = harperReading(block);
+	const res = reading.text.trim() ? await lintText(reading.text) : { matches: [] };
 	for (let i = 0; i < 100 && editorViewStore.current?.composing; i++) await sleep(150);
-	return res;
+	return { ...res, matches: res.matches.map((match) => ({ ...match, ...reading.blockSpan(match.offset, match.length) })) };
 }
 
-export const proofreadPlugin = createProofreadPlugin(
+const libraryPlugin = createProofreadPlugin(
 	500,
 	lintTextAfterComposition,
 	createHarperSuggestionBox,
 	spellcheckenabled,
-	textWithoutLinks,
+	blockSpellText,
 	true // useCustomCSS: enables the proofread-* class naming
 );
+
+// the library's own spec and key, with its click kept off struck words
+export const proofreadPlugin = new Plugin({
+	...libraryPlugin.spec,
+	props: {
+		...libraryPlugin.spec.props,
+		handleClick(view, pos, event) {
+			return !onOldWords(event) && !!libraryPlugin.spec.props?.handleClick?.call(this, view, pos, event);
+		}
+	}
+});
+
+const chipSquiggles = new WeakMap<DecorationSet, DecorationSet>();
+
+/** a squiggle over a word also draws on a letter chip inside it, since ProseMirror hands the chip's hidden text the one it covers */
+export const spellChipPlugin = new Plugin({
+	props: {
+		decorations(state) {
+			const squiggles: DecorationSet | undefined = proofreadPlugin.getState(state)?.decor;
+			if (!squiggles || squiggles === DecorationSet.empty) return null;
+			let drawn = chipSquiggles.get(squiggles);
+			if (drawn) return drawn;
+			const chips: Decoration[] = [];
+			for (const squiggle of squiggles.find()) {
+				// the class prosemirror-proofread gives the squiggle itself
+				const kind: string = squiggle.spec.errors[0].type;
+				const attrs = { class: `proofread-${kind.toLowerCase().replace(/[^a-z0-9]+/g, '-')}` };
+				state.doc.nodesBetween(squiggle.from, squiggle.to, (node, pos) => {
+					if (pos >= squiggle.from && pos + node.nodeSize <= squiggle.to && chipLetters(node))
+						chips.push(Decoration.node(pos, pos + node.nodeSize, attrs));
+				});
+			}
+			drawn = DecorationSet.create(state.doc, chips);
+			chipSquiggles.set(squiggles, drawn);
+			return drawn;
+		}
+	}
+});
