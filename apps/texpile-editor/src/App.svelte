@@ -3,6 +3,8 @@
 	import { navigate, route } from '$lib/router.svelte';
 	import { nativeBridge, openNewWindow } from '$lib/workspace/fileSystem';
 	import { openFileInWindow, openFolderInWindow } from '$lib/workspace/openWorkspace';
+	import { setupOwed } from '$lib/setup/setupGate';
+	import { pendingWorkspace } from '$lib/setup/pendingWorkspace.svelte';
 	import { settings, loadSettings } from '$lib/settings';
 	import { checkForUpdate, updateModalOpen } from '$lib/updates';
 	import UpdateAvailableModal from '$lib/modals/window/UpdateAvailableModal.svelte';
@@ -119,6 +121,11 @@
 		const n = nativeBridge();
 		if (!n?.onOpenFolder) return;
 		return n.onOpenFolder((root) => {
+			// session restore would carry a reader who is owed the welcome screen straight past it
+			if (setupOwed() && route.path === '/') {
+				pendingWorkspace.current = root;
+				return;
+			}
 			loadWorkspace(); // stream the workspace chunk while the folder scans
 			void openFolderInWindow(root);
 		});

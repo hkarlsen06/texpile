@@ -53,3 +53,26 @@ export function openToolchainPrefs(): void {
  */
 export const dictionaryOpen = box(false);
 export const shortcutsOpen = box(false);
+/** the welcome screen reopened from Help; see lib/setup */
+export const setupOpen = box(false);
+
+const REOPEN_SETUP = 'texpile:reopen-setup';
+
+/** switching the language from the welcome screen reloads the window, so the screen asks for itself back */
+export function markSetupReopen(): void {
+	try {
+		sessionStorage.setItem(REOPEN_SETUP, '1');
+	} catch {
+		return;
+	}
+}
+
+export function takeSetupReopen(): boolean {
+	try {
+		const set = sessionStorage.getItem(REOPEN_SETUP) === '1';
+		sessionStorage.removeItem(REOPEN_SETUP);
+		return set;
+	} catch {
+		return false;
+	}
+}

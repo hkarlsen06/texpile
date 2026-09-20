@@ -10,6 +10,8 @@ import '$lib/theme'; // side-effect: applies the saved appearance and watches OS
 import { loadSettings } from '$lib/settings';
 import { watchWindowGlass } from '$lib/chrome/windowGlass.svelte';
 import { adoptBootOpen, bootOpen } from '$lib/workspace/openWorkspace';
+import { setupOwedAtBoot } from '$lib/setup/setupGate';
+import { pendingWorkspace } from '$lib/setup/pendingWorkspace.svelte';
 import { focusDoctor } from '$lib/debug/focusDoctor';
 import { mark, startupDoctor } from '$lib/debug/startupDoctor';
 import { warmEditor } from '$lib/warmup';
@@ -35,7 +37,11 @@ window.addEventListener('unhandledrejection', (e) => console.error('[client erro
 
 // adopt before mount, or the start screen renders first and is thrown away
 const boot = bootOpen();
-if (boot) {
+// a restored folder would carry a reader who is owed the welcome screen straight past it; the
+// screen opens the folder itself once it is done (lib/setup/pendingWorkspace)
+if (boot?.kind === 'folder' && setupOwedAtBoot()) {
+	pendingWorkspace.current = boot.path;
+} else if (boot) {
 	// head start only; App's own loader owns the retry and the error path
 	void import('./views/workspace/WorkspaceView.svelte').catch(() => {});
 	adoptBootOpen(boot);

@@ -45,6 +45,8 @@ export type AppSettings = {
 	transparentWindow: boolean;
 	/** newest changelog version the What's New modal was dismissed for. */
 	whatsNewSeen: string;
+	/** the app version whose welcome screen this reader finished or skipped; see lib/setup/setupGate.ts */
+	setupSeen: string;
 	/** live math preview tooltip in source mode. */
 	mathPreview: boolean;
 	/** the floating Comment button offered over a selection, in BOTH editors. */
@@ -112,6 +114,7 @@ const DEFAULTS: AppSettings = {
 	uiZoom: 1,
 	transparentWindow: false,
 	whatsNewSeen: '',
+	setupSeen: '',
 	mathPreview: true,
 	commentPill: true,
 	sourceLineWrap: true,

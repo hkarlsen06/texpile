@@ -16,8 +16,15 @@
 	import { openFolderInWindow } from '$lib/workspace/openWorkspace';
 	import { openTutorialProject } from '$lib/workspace/starters';
 	import { m } from '$lib/paraglide/messages';
-	import { takePreferencesReopen } from '$lib/stores/dialogStore';
+	import { preferencesTab, takePreferencesReopen, takeSetupReopen } from '$lib/stores/dialogStore';
 	import { RecentsFit } from './startRecentsFit.svelte';
+	import WelcomeSetup from '$lib/setup/WelcomeSetup.svelte';
+	import { setupOwed } from '$lib/setup/setupGate';
+	import { takePendingWorkspace } from '$lib/setup/pendingWorkspace.svelte';
+
+	// the welcome screen, shown once: see lib/setup/setupGate.ts. The reopen flag is what survives
+	// the reload a language switch costs
+	let welcome = $state(setupOwed() || takeSetupReopen());
 
 	let busy = $state(false);
 	let error = $state<string | null>(null);
@@ -88,6 +95,18 @@
 		} finally {
 			busy = false;
 		}
+	}
+
+	// a folder session restore pushed at this window waited for the screen; open it now
+	function afterSetup() {
+		welcome = false;
+		const held = takePendingWorkspace();
+		if (held) void openFolder(held);
+	}
+
+	function toToolchain() {
+		preferencesTab.current = 'toolchain';
+		void showPrefs();
 	}
 
 	// NOTE: session restore no longer lives here. The main process remembers the open folders
@@ -195,4 +214,11 @@
 {/if}
 {#if PrefsDialog}
 	<PrefsDialog bind:open={prefsOpen} />
+{/if}
+{#if welcome}
+	<!-- hidden rather than unmounted while Preferences is up: the reader sent themselves to Toolchain
+	     from a step, and comes back to the step they were on -->
+	<div class:hidden={prefsOpen}>
+		<WelcomeSetup done={afterSetup} openToolchain={toToolchain} />
+	</div>
 {/if}

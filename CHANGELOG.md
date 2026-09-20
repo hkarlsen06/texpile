@@ -11,14 +11,14 @@ Release notes for Texpile Desktop. Add notes under `## [Unreleased]` as you work
 - feat: allow switching between distrbutions
 - feat: right click an open tab to show right-click menu
 - feat: control/command-shift-t reopens closed tab
-- feat: justified text in the visual editor, with Knuth-Plass line breaks and hyphenation
-- feat: a transparent window in Preferences: the blurred desktop shows through the background, on Windows 11 and macOS
+- feat: justified text in the visual editor (Knuth-Plass line breaks and hyphenation)
+- feat: transparent themes available
+- feat: a welcome screen on first launch, and in the Help menu whenever you want it again
+- feat: Refine rewrites selected text with an AI agent already on your computer
 - fix: version check before collaborations
-- fix: various visual editor accuracy improvements
 - fix: up and down arrows keep their column in the visual editor
-- fix: selection highlight fills the line over inline math, code and deleted words
-- fix: the noindent label no longer sits on a list item's bullet or number
-- fix: scrollbars are the thin bar again, without the system's arrows and an empty track beside the terminal
+- fix: various visual editor improvements bugfixes
+- fix: improved dragging experience for visual editor
 
 ## [1.1.0] - 2026-09-10
 

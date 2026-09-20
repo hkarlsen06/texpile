@@ -13,11 +13,15 @@
 	import PreferencesDialog from './PreferencesDialog.svelte';
 	import SpellcheckDictionary from './SpellcheckDictionary.svelte';
 	import ShortcutsDialog from './ShortcutsDialog.svelte';
-	import { preferencesOpen, dictionaryOpen, takePreferencesReopen } from '$lib/stores/dialogStore';
+	import SetupDialog from '$lib/setup/SetupDialog.svelte';
+	import { preferencesOpen, dictionaryOpen, setupOpen, takePreferencesReopen, takeSetupReopen } from '$lib/stores/dialogStore';
 
 	if (takePreferencesReopen()) preferencesOpen.current = true;
+	// the language switch on the welcome screen reloads the window; it asked to be put back up
+	if (takeSetupReopen()) setupOpen.current = true;
 </script>
 
 <PreferencesDialog bind:open={preferencesOpen.current} />
 <SpellcheckDictionary bind:open={dictionaryOpen.current} />
 <ShortcutsDialog />
+<SetupDialog />
