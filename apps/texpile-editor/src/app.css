@@ -573,6 +573,10 @@ select.input {
 .ProseMirror.pm-lines-native .pm-line-par {
 	text-wrap-mode: wrap;
 }
+/* an input method's text grows at the caret and cannot be re-broken until it commits (compositionWrap) */
+.ProseMirror.pm-composing .pm-line-par.pm-line-caret {
+	text-wrap-mode: wrap;
+}
 .ProseMirror .pm-line-par .pm-line-break {
 	white-space: pre-wrap;
 }
@@ -584,6 +588,13 @@ select.input {
 /* a soft hyphen as generated content: drawn only if the line does end there, and never in the text */
 .ProseMirror .pm-line-par .pm-line-hyphen::after {
 	content: '\00AD';
+}
+/* inside a word no line can hold, the browser's way out; a zero width space makes the character's end a break */
+.ProseMirror .pm-line-par .pm-line-anywhere {
+	text-wrap-mode: wrap;
+}
+.ProseMirror .pm-line-par .pm-line-anywhere::after {
+	content: '\200B';
 }
 
 /* scrollbars for the app's own scrollers, a share of the text colour so they sit on any ground;

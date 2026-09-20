@@ -13,6 +13,8 @@ export type LineBreakPass = {
 	tolerance: number;
 	/** whether breaks found by hyphenation patterns may be taken */
 	hyphenate: boolean;
+	/** stretch every line is given on top of its own, so lines with little of it still rank by how short they fall (TeX's \emergencystretch) */
+	emergencyStretch?: number;
 };
 
 // plain TeX's values
@@ -85,9 +87,9 @@ export function breakLines(items: LineItem[], pass: LineBreakPass, after = -1): 
 			const alone = width - from.width;
 			if (!forced && alone <= target + (shrink - from.shrink)) active[kept++] = from;
 			const natural = alone + ownWidth;
+			const give = stretch - from.stretch + (pass.emergencyStretch ?? 0);
 			let ratio = 0;
-			if (natural < target)
-				ratio = stretch > from.stretch ? Math.min((target - natural) / (stretch - from.stretch), WORST_RATIO) : WORST_RATIO;
+			if (natural < target) ratio = give > 0 ? Math.min((target - natural) / give, WORST_RATIO) : WORST_RATIO;
 			else if (natural > target) ratio = shrink > from.shrink ? (target - natural) / (shrink - from.shrink) : -Infinity;
 			if (ratio < -1) continue;
 			const badness = 100 * Math.abs(ratio) ** 3;

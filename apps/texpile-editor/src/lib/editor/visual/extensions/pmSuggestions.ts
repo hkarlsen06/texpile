@@ -21,18 +21,32 @@ export function focusPmSuggestionMeta(id: string | null): PmSuggestionsMeta {
 	return { type: 'focus', id };
 }
 
+let graphemes: Intl.Segmenter | undefined;
+
+// one span a character, named by its offset in the words: the line breaker ends lines inside them by marking these
+// (lineBreakPlugin), which no decoration could reach
 function oldWords(runs: WordRun[], id: string, focused: boolean): HTMLElement {
+	graphemes ??= new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 	const span = document.createElement('span');
 	span.className = `pm-suggest-old${focused ? ' pm-suggest-focused' : ''}`;
 	span.dataset.comment = id;
+	let offset = 0;
 	for (const run of runs) {
+		const characters = document.createDocumentFragment();
+		for (const { segment } of graphemes.segment(run.text)) {
+			const character = document.createElement('span');
+			character.dataset.i = String(offset);
+			character.textContent = segment;
+			characters.appendChild(character);
+			offset += segment.length;
+		}
 		const node = run.tags.reduceRight<Node>((inner, tag) => {
 			const outer = document.createElement(tag);
 			// dressed like the link mark, without its target: these words are gone from the document
 			if (tag === 'a') outer.className = 'anchor';
 			outer.appendChild(inner);
 			return outer;
-		}, document.createTextNode(run.text));
+		}, characters);
 		span.appendChild(node);
 	}
 	return span;

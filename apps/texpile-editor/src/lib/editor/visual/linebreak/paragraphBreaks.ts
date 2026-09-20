@@ -3,18 +3,25 @@ import type { Node as PMNode } from 'prosemirror-model';
 import type { EditorView } from 'prosemirror-view';
 import { breakLines } from './knuthPlass';
 import { paragraphItems, type BreakMark, type ParagraphItems, type ParagraphMeasures } from './paragraphItems';
+import type { StruckWords } from './struckWords';
 
 export type ChosenBreaks = { marks: BreakMark[]; justified: boolean };
-/** 'native': the browser wraps it, justified when the text is. 'untouched': aligned or directed some other way, nothing of ours applies */
+/** 'native': the browser wraps it, justified when the text is. 'untouched': the browser wraps it and nothing of ours applies */
 export type ParagraphBreaks = ChosenBreaks | 'native' | 'untouched';
 
 /** breaks the paragraph had before an edit, good as far as its text is unchanged (an offset like the marks') */
 export type KeptBreaks = { marks: BreakMark[]; unchangedTo: number };
 
+function sameMark(a: BreakMark, b: BreakMark): boolean {
+	if (a.from !== b.from || a.to !== b.to || a.kind !== b.kind) return false;
+	if (!a.inside || !b.inside) return a.inside === b.inside;
+	return a.inside.id === b.inside.id && a.inside.from === b.inside.from && a.inside.to === b.inside.to;
+}
+
 export function sameBreaks(a: ParagraphBreaks, b: ParagraphBreaks): boolean {
 	if (typeof a === 'string' || typeof b === 'string') return a === b;
 	if (a.justified !== b.justified || a.marks.length !== b.marks.length) return false;
-	return a.marks.every((mark, i) => mark.from === b.marks[i].from && mark.to === b.marks[i].to && mark.hyphen === b.marks[i].hyphen);
+	return a.marks.every((mark, i) => sameMark(mark, b.marks[i]));
 }
 
 export type BreakingContext = ParagraphMeasures & {
@@ -25,16 +32,19 @@ export type BreakingContext = ParagraphMeasures & {
 
 // layout rounds to 1/64 px; this keeps a line that measures exactly full from spilling
 const SLACK = 0.25;
-const BREAKABLE_ALIGNMENTS = new Set(['start', 'left', 'justify', '-webkit-auto']);
+// text set some other way (centered, say) is broken ragged, never justified
+const JUSTIFIABLE_ALIGNMENTS = new Set(['start', 'left', 'justify', '-webkit-auto']);
 
-// TeX's own order: no hyphens at \pretolerance, hyphens at \tolerance, then whatever fits
+// TeX's own order: no hyphens at \pretolerance, hyphens at \tolerance, then whatever fits, with LaTeX's \sloppy
+// emergency stretch so that text with few spaces (Thai, say) still ranks its lines by how short they fall
 const JUSTIFIED_PASSES = [
-	{ tolerance: 100, hyphenate: false },
-	{ tolerance: 200, hyphenate: true },
-	{ tolerance: Infinity, hyphenate: true }
+	{ tolerance: 100, hyphenate: false, sloppy: false },
+	{ tolerance: 200, hyphenate: true, sloppy: false },
+	{ tolerance: Infinity, hyphenate: true, sloppy: true }
 ];
 // a ragged edge hides uneven spaces, so nothing is gained by splitting words for it
-const RAGGED_PASSES = [{ tolerance: Infinity, hyphenate: false }];
+const RAGGED_PASSES = [{ tolerance: Infinity, hyphenate: false, sloppy: true }];
+const EMERGENCY_STRETCH_EMS = 3;
 
 // the items the kept breaks sit on now, up to the first one the paragraph no longer offers (a word held whole, say)
 function keptItems(built: ParagraphItems, kept: KeptBreaks): number[] {
@@ -45,7 +55,7 @@ function keptItems(built: ParagraphItems, kept: KeptBreaks): number[] {
 		if (mark.to > kept.unchangedTo) break;
 		while (next < offered.length && offered[next][1].from < mark.from) next++;
 		const [item, now] = offered[next] ?? [];
-		if (item === undefined || now.from !== mark.from || now.to !== mark.to || now.hyphen !== mark.hyphen) break;
+		if (item === undefined || !sameMark(now, mark)) break;
 		items.push(item);
 	}
 	return items;
@@ -57,23 +67,37 @@ export function paragraphBreaks(
 	pos: number,
 	block: HTMLElement,
 	context: BreakingContext,
+	struck: StruckWords[],
 	kept?: KeptBreaks
 ): ParagraphBreaks {
 	const style = getComputedStyle(block);
-	if (style.direction !== 'ltr' || !BREAKABLE_ALIGNMENTS.has(style.textAlign)) return 'untouched';
+	// a heading is set ragged, as titlesec and KOMA set it
+	const justified = context.justified && paragraph.type.name === 'paragraph' && JUSTIFIABLE_ALIGNMENTS.has(style.textAlign);
 	const width = context.widthOf(block) - SLACK;
 	const indent = parseFloat(style.textIndent) || 0;
-	const built = paragraphItems(view, paragraph, pos, block, context.justified ? context : { ...context, hyphenator: null });
-	if (!built) return 'native';
+	const emergencyStretch = EMERGENCY_STRETCH_EMS * parseFloat(style.fontSize);
+	const measures = justified ? context : { ...context, hyphenator: null };
+	let built = paragraphItems(view, paragraph, pos, block, measures, struck);
+	if (!built) return justified ? 'native' : 'untouched';
+	// a word no line can hold is offered a split at any of its characters, the browser's own way out
+	if (built.items.some((item) => item.kind === 'box' && item.width > width - indent))
+		built = paragraphItems(view, paragraph, pos, block, { ...measures, splitWiderThan: width - indent }, struck) ?? built;
 	const fixed = kept ? keptItems(built, kept) : [];
 	// with nothing that fits after the kept lines, the whole paragraph is tried
 	for (const lines of fixed.length > 0 ? [fixed, []] : [[]]) {
-		for (const pass of context.justified ? JUSTIFIED_PASSES : RAGGED_PASSES) {
-			const breaks = breakLines(built.items, { ...pass, firstLineWidth: width - indent, lineWidth: width }, lines.at(-1) ?? -1);
+		for (const { tolerance, hyphenate, sloppy } of justified ? JUSTIFIED_PASSES : RAGGED_PASSES) {
+			const pass = {
+				tolerance,
+				hyphenate,
+				firstLineWidth: width - indent,
+				lineWidth: width,
+				emergencyStretch: sloppy ? emergencyStretch : 0
+			};
+			const breaks = breakLines(built.items, pass, lines.at(-1) ?? -1);
 			if (!breaks) continue;
 			const marks = [...lines, ...breaks].flatMap((item) => built.marks.get(item) ?? []);
-			return { marks, justified: context.justified };
+			return { marks, justified };
 		}
 	}
-	return 'native';
+	return justified ? 'native' : 'untouched';
 }

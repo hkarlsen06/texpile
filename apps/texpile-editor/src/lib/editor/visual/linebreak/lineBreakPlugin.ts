@@ -8,11 +8,14 @@ import { templateFeaturesStore } from '$lib/stores/editorStore';
 import { isLargeDocument } from '$lib/languages/latex/visual/largeDocument';
 import { hasOldWords, pmSuggestionsKey } from '../extensions/pmSuggestionsState';
 import { cssZoomOf } from '../lineBoxes';
+import { compositionWrapPlugin } from './compositionWrap';
 import type { DocumentHyphenation } from './documentHyphenationLanguage';
+import { isHeldBlock } from './heldBlocks';
 import { loadHyphenator } from './hyphenationLanguages';
 import { inlineBoxWatch } from './inlineBoxWatch';
 import { linesKeptWhileTyping } from './linesKeptWhileTyping';
 import { paragraphBreaks, sameBreaks, type BreakingContext, type ChosenBreaks, type ParagraphBreaks } from './paragraphBreaks';
+import { struckWordsIn } from './struckWords';
 import { runStyleReader } from './textRunStyles';
 import { wordBeingTypedKey, wordBeingTypedPlugin } from './wordBeingTyped';
 import { forgetTextWidths } from './wordWidths';
@@ -51,24 +54,30 @@ function decorationsFor(pos: number, paragraph: PMNode, breaks: ChosenBreaks): D
 		{ class: breaks.justified ? 'pm-line-par pm-line-justified' : 'pm-line-par' },
 		{ holdsParagraph: true }
 	);
-	const ends = breaks.marks.map((mark) =>
-		Decoration.inline(pos + mark.from, pos + mark.to, { class: mark.hyphen ? 'pm-line-hyphen' : 'pm-line-break' }, { made: ++marksMade })
-	);
+	const ends = breaks.marks
+		.filter((mark) => !mark.inside)
+		.map((mark) => Decoration.inline(pos + mark.from, pos + mark.to, { class: `pm-line-${mark.kind}` }, { made: ++marksMade }));
 	return [held, ...ends];
+}
+
+// a line end inside a suggestion's struck words goes on the widget's own spans, which no decoration reaches; ProseMirror
+// ignores changes inside a widget, and a redrawn widget comes back bare, so this runs again after every redraw
+function markStruckWords(block: HTMLElement, breaks: ChosenBreaks): void {
+	for (const widget of block.querySelectorAll<HTMLElement>('.pm-suggest-old')) {
+		const ends = breaks.marks.flatMap((mark) => (mark.inside && mark.inside.id === widget.dataset.comment ? [mark.inside] : []));
+		for (const span of widget.querySelectorAll<HTMLElement>('[data-i]')) {
+			const i = Number(span.dataset.i);
+			span.classList.toggle(
+				'pm-line-break',
+				ends.some((end) => end.from <= i && i < end.to)
+			);
+		}
+	}
 }
 
 // a paragraph the browser wraps sits among held ones, and ragged beside justified text it reads as a mistake
 function plainlyJustified(pos: number, paragraph: PMNode): Decoration {
 	return Decoration.node(pos, pos + paragraph.nodeSize, { class: 'pm-line-justified' }, { holdsParagraph: true });
-}
-
-// struck out words are drawn by a widget, whose width and inner breaks the items know nothing of
-function paragraphsWithOldWords(state: EditorState): Set<PMNode> {
-	const found = new Set<PMNode>();
-	for (const range of pmSuggestionsKey.getState(state)?.ranges ?? []) {
-		if (hasOldWords(range) && range.from <= state.doc.content.size) found.add(state.doc.resolve(range.from).parent);
-	}
-	return found;
 }
 
 function px(length: string): number {
@@ -100,11 +109,20 @@ function lineBreaker(view: EditorView): { update(view: EditorView, before: Edito
 	let language: DocumentHyphenation | undefined;
 	const typing = linesKeptWhileTyping((paragraph) => broken.get(paragraph));
 
-	function paragraphOf(element: Element): PMNode | null {
-		const block = element.closest('p');
-		if (!block || !view.dom.contains(block)) return null;
-		const paragraph = view.state.doc.nodeAt(view.posAtDOM(block, 0) - 1);
-		return paragraph?.type.name === 'paragraph' ? paragraph : null;
+	// the held block an element belongs to, be it the block's own element or one inside a node view of its. An inline
+	// formula keeps its source as content, so a position inside it resolves into the formula, not the paragraph
+	function blockOf(element: Element): PMNode | null {
+		if (!view.dom.contains(element)) return null;
+		try {
+			const $pos = view.state.doc.resolve(view.posAtDOM(element, 0));
+			for (let depth = $pos.depth; depth > 0; depth--) {
+				const node = $pos.node(depth);
+				if (node.isTextblock) return isHeldBlock(node) ? node : null;
+			}
+			return null;
+		} catch {
+			return null;
+		}
 	}
 
 	function publish(next: LineBreakState): void {
@@ -136,8 +154,21 @@ function lineBreaker(view: EditorView): { update(view: EditorView, before: Edito
 	}
 
 	const inlineBoxes = inlineBoxWatch((element) => {
-		const paragraph = paragraphOf(element);
+		const paragraph = blockOf(element);
 		if (paragraph && inlineViewChanged(paragraph)) rebreakNextFrame(false);
+	});
+
+	// a cell whose column changed width is broken again for it; two cells trading widths hit the same limit as views
+	// trading sizes, and the browser takes the paragraph
+	const cellSizes = new ResizeObserver((entries) => {
+		for (const { target } of entries) {
+			if (!(target instanceof HTMLElement)) continue;
+			const known = widths.get(target);
+			if (known === undefined || Math.abs(contentWidth(target) - known) < 0.5) continue;
+			widths.delete(target);
+			const paragraph = blockOf(target);
+			if (paragraph && inlineViewChanged(paragraph)) rebreakNextFrame(false);
+		}
 	});
 
 	const context: BreakingContext = {
@@ -153,8 +184,8 @@ function lineBreaker(view: EditorView): { update(view: EditorView, before: Edito
 		}
 	};
 
-	function drawnAs(breaks: ParagraphBreaks, struck: boolean): DrawnAs {
-		if (typeof breaks === 'object' && !struck) return 'held';
+	function drawnAs(breaks: ParagraphBreaks): DrawnAs {
+		if (typeof breaks === 'object') return 'held';
 		return breaks !== 'untouched' && context.justified ? 'plain' : 'alone';
 	}
 
@@ -164,9 +195,11 @@ function lineBreaker(view: EditorView): { update(view: EditorView, before: Edito
 		let spilled = false;
 		for (const block of unchecked) {
 			if (block.scrollWidth <= block.clientWidth + SPILL_ALLOWANCE) continue;
-			const paragraph = paragraphOf(block);
+			const paragraph = blockOf(block);
 			if (!paragraph) continue;
-			// once more with what is on the page now, then the browser takes it
+			// once more with what is on the page now (a table cell may have been given another width), then the browser
+			// takes it
+			widths.delete(block);
 			if (retried.has(paragraph)) broken.set(paragraph, 'native');
 			else outdated.add(paragraph);
 			retried.add(paragraph);
@@ -184,35 +217,49 @@ function lineBreaker(view: EditorView): { update(view: EditorView, before: Edito
 		context.wholeWord = wordBeingTypedKey.getState(view.state) ?? null;
 		const current = fromScratch ? DecorationSet.empty : held.decorations;
 		const shown = fromScratch ? new WeakMap<PMNode, DrawnAs>() : held.shown;
-		const struck = paragraphsWithOldWords(view.state);
 		const stale: Decoration[] = [];
 		const fresh: Decoration[] = [];
+		const withStruck: [HTMLElement, ChosenBreaks][] = [];
+		const anyStruck = (pmSuggestionsKey.getState(view.state)?.ranges ?? []).some(hasOldWords);
 		const large = isLargeDocument(doc);
 		if (!large)
-			doc.descendants((node, pos) => {
-				// a table sizes its columns from how its cells wrap, so its paragraphs cannot be held to one width
-				if (node.type.name.includes('table')) return false;
+			doc.descendants((node, pos, parent) => {
 				if (!node.isTextblock) return true;
-				if (node.type.name !== 'paragraph' || node.childCount === 0) return false;
+				if (!isHeldBlock(node) || node.childCount === 0) return false;
+				// a table sizes its columns from how its cells wrap, so a held cell can be given another width later
+				if (parent?.type.spec.tableRole === 'cell' || parent?.type.spec.tableRole === 'header_cell') {
+					const block = view.nodeDOM(pos);
+					if (block instanceof HTMLElement) cellSizes.observe(block);
+				}
 				const known = broken.get(node);
-				const hidden = struck.has(node);
-				if (known && !outdated.has(node) && shown.get(node) === drawnAs(known, hidden)) return false;
+				const settled = known !== undefined && !outdated.has(node) && shown.get(node) === drawnAs(known);
+				// a settled paragraph is visited again only for the marks inside its struck words, which a redraw takes off
+				if (settled && (typeof known !== 'object' || !anyStruck)) return false;
 				const block = view.nodeDOM(pos);
 				if (!(block instanceof HTMLElement)) return false;
+				const struck = anyStruck ? struckWordsIn(view.state, node, pos, block) : [];
+				if (settled) {
+					if (typeof known === 'object' && struck?.length) withStruck.push([block, known]);
+					return false;
+				}
 				let breaks = known;
 				if (!breaks || outdated.has(node)) {
-					breaks = paragraphBreaks(view, node, pos, block, context, typing.take(node));
+					breaks = struck ? paragraphBreaks(view, node, pos, block, context, struck, typing.take(node)) : 'native';
 					broken.set(node, breaks);
 					outdated.delete(node);
 					if (typeof breaks === 'object') unchecked.add(block);
-					if (known && sameBreaks(known, breaks) && shown.get(node) === drawnAs(breaks, hidden)) return false;
+					if (known && sameBreaks(known, breaks) && shown.get(node) === drawnAs(breaks)) {
+						if (typeof breaks === 'object' && struck?.length) withStruck.push([block, breaks]);
+						return false;
+					}
 				}
 				const end = pos + node.nodeSize;
 				const mine = current.find(pos, end).filter((old) => old.from >= pos && old.to <= end);
-				const drawn = drawnAs(breaks, hidden);
+				const drawn = drawnAs(breaks);
 				if (drawn === 'held' && typeof breaks === 'object') {
 					stale.push(...mine);
 					fresh.push(...decorationsFor(pos, node, breaks));
+					if (struck?.length) withStruck.push([block, breaks]);
 				} else {
 					// only the hold comes off. Taking every mark out at once leaves ProseMirror more stale pieces of text
 					// than it looks past, and it then rebuilds the formulas and citations behind them
@@ -227,6 +274,8 @@ function lineBreaker(view: EditorView): { update(view: EditorView, before: Edito
 		const plain = large && context.justified;
 		if (decorations !== held.decorations || shown !== held.shown || held.native || held.plain !== plain)
 			publish({ decorations, shown, native: false, plain });
+		// after the publish, so the marks land on the spans as they are drawn now
+		for (const [block, breaks] of withStruck) if (view.dom.contains(block)) markStruckWords(block, breaks);
 		if (unchecked.size > 0 && !checkFrame) checkFrame = requestAnimationFrame(check);
 	}
 
@@ -274,7 +323,7 @@ function lineBreaker(view: EditorView): { update(view: EditorView, before: Edito
 			const element = record.target instanceof Element ? record.target : record.target.parentElement;
 			const swapped = [...record.addedNodes].some((node) => node instanceof HTMLElement && node.contentEditable === 'false');
 			const inside = swapped ? element : element?.closest('[contenteditable="false"]');
-			const paragraph = inside ? paragraphOf(inside) : null;
+			const paragraph = inside ? blockOf(inside) : null;
 			if (paragraph && broken.has(paragraph)) touched.add(paragraph);
 		}
 		if ([...touched].filter(inlineViewChanged).length > 0) rebreak();
@@ -337,6 +386,7 @@ function lineBreaker(view: EditorView): { update(view: EditorView, before: Edito
 			clearTimeout(afterComposition);
 			clearTimeout(widthRest);
 			resized.disconnect();
+			cellSizes.disconnect();
 			inlineBoxes.disconnect();
 			inlineViews.disconnect();
 			document.fonts.removeEventListener('loadingdone', fontsLoaded);
@@ -369,5 +419,5 @@ function lineBreakPlugin(): Plugin<LineBreakState> {
 }
 
 export function lineBreakPlugins(): Plugin[] {
-	return [wordBeingTypedPlugin(), lineBreakPlugin()];
+	return [wordBeingTypedPlugin(), compositionWrapPlugin(), lineBreakPlugin()];
 }

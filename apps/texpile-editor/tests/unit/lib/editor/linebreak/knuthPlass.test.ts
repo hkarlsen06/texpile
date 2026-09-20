@@ -49,6 +49,21 @@ it('leaves a line that is already there alone and breaks only what follows it', 
 	expect(lineWidths(items, [5, ...breaks])).toEqual([100, 60, 90]);
 });
 
+it('fills the lines of text with almost nothing to stretch when given emergency stretch', () => {
+	// Thai: one space in the whole paragraph, every other break between dictionary words with no room in it
+	const between: LineItem = { kind: 'penalty', width: 0, cost: 0, flagged: false, fromPatterns: false };
+	const items: LineItem[] = [{ kind: 'box', width: 70 }, SPACE, { kind: 'box', width: 40 }];
+	for (const width of [60, 50, 45, 55, 40, 60, 50, 45, 55, 40]) items.push(between, { kind: 'box', width });
+	items.push(...END);
+	const pass = { firstLineWidth: 200, lineWidth: 200, tolerance: Infinity, hyphenate: false, emergencyStretch: 40 };
+	const breaks = breakLines(items, pass)!;
+	expect(
+		lineWidths(items, breaks)
+			.slice(0, -1)
+			.every((w) => w >= 150)
+	).toBe(true);
+});
+
 it('finds nothing when a word is wider than the line', () => {
 	expect(breakLines(words(40, 140, 40), { firstLineWidth: 100, lineWidth: 100, tolerance: Infinity, hyphenate: false })).toBeNull();
 });
