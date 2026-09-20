@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { tip } from '$lib/components/tooltip.svelte';
+	import { inEditorPane } from '$lib/editor/visual/editorPanePositioning';
 	import { Popover, Portal } from '@skeletonlabs/skeleton-svelte';
 	import { Plus, GripVertical, Trash2 } from '@lucide/svelte';
 	import { BLOCK_INSERT_ITEMS, type BlockInsertItem } from './blockInsertItems';
@@ -39,7 +40,7 @@
 	<Popover
 		open={state.popoverOpen}
 		onOpenChange={(e) => (state.popoverOpen = e.open)}
-		positioning={{ placement: 'bottom-start', offset: { mainAxis: 4 } }}
+		positioning={inEditorPane({ placement: 'bottom-start', offset: { mainAxis: 4 } })}
 	>
 		<Popover.Trigger class="block-handle-btn" aria-label={m.blockhandle_insert_below()}>
 			{#snippet element(attrs)}

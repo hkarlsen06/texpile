@@ -58,6 +58,8 @@
 		onInsertCitation?: () => void;
 		/** a \ref whose label is not drawn here: the workspace jumps to its \label line */
 		onJumpToLabel?: (name: string) => boolean;
+		/** a drawn call of the paper's own macro: the workspace opens its definition in the source */
+		onJumpToDefinition?: (name: string) => boolean;
 		/** after each placement pass: the threads that could not be drawn in this view (every tier
 		 * failed), so the panel can say "not in this view" instead of implying they are gone */
 		onCommentsPlaced?: (lost: string[]) => void;
@@ -83,6 +85,7 @@
 		onAddComment,
 		onInsertCitation,
 		onJumpToLabel,
+		onJumpToDefinition,
 		onCommentsPlaced,
 		addCommentLabel = 'Comment',
 		commentPendingActive = false
@@ -128,7 +131,7 @@
 				'data-show-section-numbers': 'true'
 			}),
 			state: editorState,
-			nodeViews: latexNodeViews(() => imageDir ?? '', onJumpToLabel),
+			nodeViews: latexNodeViews(() => imageDir ?? '', onJumpToLabel, onJumpToDefinition),
 			editable: () => true,
 			dispatchTransaction(this: EditorView, transaction: Transaction) {
 				// A plugin that finishes asynchronously can dispatch into a view that was destroyed while

@@ -1,5 +1,6 @@
 <script lang="ts">
 	// MathSettings popover for equation numbering, labels, and multi-line environments
+	import { inEditorPane } from '$lib/editor/visual/editorPanePositioning';
 	import { tip } from '$lib/components/tooltip.svelte';
 	import { Popover, Portal } from '@skeletonlabs/skeleton-svelte';
 	import { Settings } from '@lucide/svelte';
@@ -24,7 +25,7 @@
 	<Popover
 		open={settingsOpen}
 		onOpenChange={(details) => (settingsOpen = details.open)}
-		positioning={{ placement: 'bottom-end', offset: { mainAxis: 4 } }}
+		positioning={inEditorPane({ placement: 'bottom-end', offset: { mainAxis: 4 } })}
 	>
 		<Popover.Trigger class="math-settings-btn">
 			<button

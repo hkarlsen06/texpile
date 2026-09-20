@@ -33,6 +33,9 @@ export type SharedDiagnostic = {
 export type SharedCompileIntel = {
 	auxNumbers: Record<string, string>;
 	auxPages: Record<string, string>;
+	/** absent when the host runs a version from before these were shared */
+	auxKinds?: Record<string, string>;
+	auxTitles?: Record<string, string>;
 	log: SharedDiagnostic[];
 };
 

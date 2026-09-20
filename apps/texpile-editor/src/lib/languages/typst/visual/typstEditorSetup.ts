@@ -57,8 +57,9 @@ import { createNodeFlashPlugin } from '$lib/editor/visual/extensions/flash-plugi
 import { remoteCursorsPlugin } from '$lib/editor/visual/extensions/remoteCursors';
 import { CodeBlockView } from '$lib/editor/visual/extensions/codemirrorbridge/cmview.svelte';
 import { typstTableWrapperView } from '$lib/editor/visual/extensions/table/tableWrapperView.svelte';
-import { RawLatexView } from '$lib/editor/visual/extensions/raw-latex/rawLatexView';
-import { InlineLatexView } from '$lib/editor/visual/extensions/raw-latex/inlineLatexView';
+import { drawnOrSource } from '$lib/editor/visual/extensions/drawnChips/DrawnChipView';
+import { drawnChipAtomsPlugin } from '$lib/editor/visual/extensions/drawnChips/drawnChipAtoms';
+import { typstChipKind } from './extensions/typstChipKind';
 import { IncludeDocView } from '$lib/editor/visual/extensions/includedoc/includeDocView.svelte';
 import { pmComments } from '$lib/editor/visual/extensions/pmComments';
 import type { CommentAnchor } from '$lib/comments/anchor';
@@ -157,6 +158,7 @@ export function typstEditorPlugins(setup: TypstEditorSetup): Plugin[] {
 		// the @ reference/citation popup; its arrow/enter keymap must precede the others.
 		// The picker inserts typ_ref atoms (it keys off the mounted schema)
 		...createSuggestPlugin(),
+		drawnChipAtomsPlugin(),
 		keymap(listKeymap),
 		inputRules({ rules: typInputRules }),
 		keymap({
@@ -222,13 +224,13 @@ export function typstNodeViews(docDir: () => string): NonNullable<EditorProps['n
 	return {
 		code_block: (node, view, getPos) => new CodeBlockView(node, view, getPos as () => number),
 		// typst raw islands are the safety valve for everything unmodeled: plain CM views
-		// (highlighting picked by attrs.lang), never a latex-specialized node view. The one
-		// dressed-up island is #bibliography, whose card view keeps the text verbatim
-		raw_latex: (node, view, getPos) =>
+		// (highlighting picked by attrs.lang), never a latex-specialized node view. The dressed-up
+		// ones keep their text verbatim: #bibliography as a card, a comment folded to a line
+		raw_latex: (node, view, getPos, decorations) =>
 			isTypstBibliography(node.textContent)
 				? new TypstBibliographyView(node, view, getPos as () => number)
-				: new RawLatexView(node, view, getPos as () => number),
-		inline_latex: (node, view, getPos) => new InlineLatexView(node, view, getPos as () => number),
+				: drawnOrSource(node, view, getPos as () => number, decorations, typstChipKind(true)),
+		inline_latex: (node, view, getPos, decorations) => drawnOrSource(node, view, getPos as () => number, decorations, typstChipKind(false)),
 		includedoc: (node, view, getPos) => new IncludeDocView(node, view, getPos as () => number, docDir),
 		// the shared table wrapper chrome (Table N header, gear with label + verbatim columns)
 		// in typst mode: every LaTeX-only control is gated off inside

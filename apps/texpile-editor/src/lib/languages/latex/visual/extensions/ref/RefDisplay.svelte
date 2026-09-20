@@ -5,7 +5,7 @@
 	import { refState } from './refState';
 	import { undefinedRefs } from './undefinedRefs.svelte';
 	import { projectIntelStore } from '$lib/stores/projectIntel';
-	import { flashNodeAt } from '$lib/editor/visual/extensions/flash-plugin';
+	import { jumpToLabel } from './jumpToLabel';
 
 	let {
 		node,
@@ -25,29 +25,12 @@
 	const state = $derived(refState(command, label, projectIntelStore.current.auxNumbers, undefinedRefs.current));
 
 	// the anchor in the document decides whether the jump happens, not whether we could resolve a
-	// number. matching in js rather than in the selector keeps a label with a quote in it from
-	// breaking the query. nothing drawn here: the workspace knows this file's raw environments
-	// and the other project files, so the jump is its to make.
+	// number. nothing drawn here: the workspace knows this file's raw environments and the other
+	// project files, so the jump is its to make.
 	function handleClick(e: Event) {
 		e.preventDefault();
 		e.stopPropagation();
-
-		for (const el of view.dom.querySelectorAll('[data-label], [imageplugin-label]')) {
-			if (el.getAttribute('data-label') !== label && el.getAttribute('imageplugin-label') !== label) continue;
-			el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-			flashBlockHolding(el);
-			return;
-		}
-		onJumpToLabel?.(label);
-	}
-
-	// the top-level block the anchor sits in, flashed the way a SyncTeX landing is. found by
-	// containment, not identity: the anchor can be an inline \label chip inside a paragraph
-	function flashBlockHolding(el: Element) {
-		const doc = view.state.doc;
-		for (let i = 0, pos = 0; i < doc.childCount; pos += doc.child(i).nodeSize, i++) {
-			if (view.nodeDOM(pos)?.contains(el)) return flashNodeAt(view, pos);
-		}
+		jumpToLabel(view, label, onJumpToLabel);
 	}
 
 	function handleKeydown(e: KeyboardEvent) {

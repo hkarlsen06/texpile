@@ -248,10 +248,11 @@ describe('converted document shape', () => {
 		const doc = docOf('#quote(block: true)[\n  Two roads.\n]\n\n#quote[inline]\n\n#quote(block: true, attribution: [x])[y]\n');
 		expect(doc.child(0).type.name).toBe('blockquote');
 		expect(doc.child(0).textContent).toBe('Two roads.');
-		// both unmodelled quote forms stay raw, and being adjacent they coalesce into ONE island
+		// both unmodelled quote forms stay raw, a blank line apart, so two islands
 		expect(doc.child(1).type.name).toBe('raw_latex');
-		expect(doc.child(1).textContent).toBe('#quote[inline]\n\n#quote(block: true, attribution: [x])[y]');
-		expect(doc.childCount).toBe(2);
+		expect(doc.child(1).textContent).toBe('#quote[inline]');
+		expect(doc.child(2).textContent).toBe('#quote(block: true, attribution: [x])[y]');
+		expect(doc.childCount).toBe(3);
 	});
 
 	it('#figure(table(...), caption) becomes a captioned table; extra args stay raw', () => {

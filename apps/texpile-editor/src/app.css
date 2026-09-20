@@ -1600,6 +1600,153 @@ select.input {
 	width: fit-content;
 }
 
+/* a raw chip drawn as what it prints (DrawnChipView); a click opens its panel */
+.ProseMirror .drawn-chip-face {
+	cursor: pointer;
+	border-radius: calc(var(--radius-base) * 0.5);
+}
+.ProseMirror .drawn-chip-line {
+	display: block;
+}
+/* ProseMirror's caret hack after a chip ending its paragraph would be an empty line under one on a line of its own;
+   the keys leave the caret on the next line instead. important: prosemirror-view's own sheet forces the image inline */
+.ProseMirror .drawn-chip-line + .ProseMirror-separator,
+.ProseMirror .drawn-chip-line + .ProseMirror-separator + .ProseMirror-trailingBreak {
+	display: none !important;
+}
+.ProseMirror .drawn-chip-face.drawn-chip-selected {
+	outline: var(--default-border-width) solid var(--color-primary-500);
+	outline-offset: 1px;
+}
+
+/* a panel field's suggestions open from its own chevron; the browser's arrow resists a plain display rule */
+.drawn-chip-panel input[list]::-webkit-calendar-picker-indicator {
+	display: none !important;
+}
+
+/* a comment folded to one quiet line */
+.ProseMirror .drawn-comment {
+	display: block;
+	overflow: hidden;
+	font-size: 0.85em;
+	color: var(--faint-text);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.ProseMirror .drawn-comment-marker {
+	font-family: var(--font-mono, monospace);
+}
+.ProseMirror .drawn-comment-more {
+	margin-left: 0.6em;
+	font-size: 0.85em;
+}
+
+/* a vertical space at its size: an arrow from its top to its bottom, labelled with the command and its length */
+.ProseMirror .drawn-vspace {
+	display: flex;
+	align-items: center;
+	gap: 0.4em;
+	color: var(--faint-text);
+}
+/* whole pixels and an odd width, so the heads' tips and the 1px line share one center */
+.ProseMirror .drawn-vspace-arrow {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	align-self: stretch;
+	flex: none;
+	width: 9px;
+	margin-inline: 4px;
+}
+.ProseMirror .drawn-vspace-head {
+	flex: none;
+	width: 9px;
+	height: 6px;
+	fill: currentColor;
+}
+.ProseMirror .drawn-vspace-shaft {
+	flex: 1;
+	width: 1px;
+	background: currentColor;
+}
+.ProseMirror .drawn-space-command,
+.ProseMirror .drawn-space-length {
+	font-family: var(--font-mono, monospace);
+	font-size: 0.7em;
+	line-height: 1;
+}
+
+/* a horizontal space as room in the line; an \hspace also shows its extent, bracketed */
+.ProseMirror .drawn-space,
+.ProseMirror .drawn-hspace {
+	display: inline-block;
+	height: 0.6em;
+	vertical-align: baseline;
+}
+.ProseMirror .drawn-hspace {
+	border: var(--default-border-width) solid var(--faint-text);
+	border-top: none;
+}
+.ProseMirror .drawn-hspace-negative {
+	width: 0;
+	border-right: none;
+	border-bottom: none;
+}
+.ProseMirror .drawn-space:hover,
+.ProseMirror .drawn-hspace:hover {
+	background: color-mix(in srgb, var(--color-primary-500) 12%, transparent);
+}
+
+/* a page break, the appendix, the bibliography: a labelled line across the column, closed at both ends */
+.ProseMirror .drawn-divider {
+	display: flex;
+	align-items: center;
+	gap: 0.75em;
+	margin: calc(var(--spacing) * 2) 0;
+	border-inline: var(--default-border-width) solid currentColor;
+	font-size: 0.7rem;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--faint-text);
+}
+.ProseMirror .drawn-divider::before,
+.ProseMirror .drawn-divider::after {
+	content: '';
+	flex: 1;
+	border-top: var(--default-border-width) solid currentColor;
+}
+.ProseMirror .drawn-divider-label {
+	text-transform: none;
+	letter-spacing: normal;
+}
+
+.ProseMirror .drawn-footnote {
+	margin-left: 0.05em;
+	font-size: 0.75em;
+	line-height: 0;
+	color: var(--color-ref-fg);
+}
+
+/* the same tinted text a \ref is (RefDisplay.svelte) */
+.ProseMirror .drawn-crossref {
+	border-radius: var(--radius-base);
+	color: var(--color-ref-fg);
+}
+.ProseMirror .drawn-crossref:hover {
+	background: var(--color-ref-bg);
+}
+.ProseMirror .drawn-crossref-broken {
+	color: var(--color-ref-broken-fg);
+}
+.ProseMirror .drawn-crossref-broken:hover {
+	background: var(--color-ref-broken-bg);
+}
+
+/* a macro drawn as its definition: the dotted underline says it is a command, as \today's does */
+.ProseMirror .drawn-macro {
+	border-bottom: var(--default-border-width) dotted var(--faint-text);
+}
+
 /* generic editable LaTeX environment block; the env name lives in the node-view header, so no ::before badge */
 .tex-environment {
 	position: relative;

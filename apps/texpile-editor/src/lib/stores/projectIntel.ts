@@ -50,6 +50,10 @@ export type ProjectIntel = {
 	/** \newlabel numbers from the main file's .aux: label -> "3.2" (page in auxPages) */
 	auxNumbers: Record<string, string>;
 	auxPages: Record<string, string>;
+	/** the counter each label numbers (figure, table ...), for the words \cref and \autoref print */
+	auxKinds: Record<string, string>;
+	/** the titles hyperref recorded, for \nameref */
+	auxTitles: Record<string, string>;
 	/** per-file raw outline atoms (markers included), for the merged project outline */
 	outlines: Record<string, RawOutlineItem[]>;
 };
@@ -64,6 +68,8 @@ export const EMPTY_PROJECT_INTEL: ProjectIntel = {
 	sup: [],
 	auxNumbers: {},
 	auxPages: {},
+	auxKinds: {},
+	auxTitles: {},
 	outlines: {}
 };
 

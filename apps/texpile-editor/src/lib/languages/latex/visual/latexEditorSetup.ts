@@ -41,10 +41,8 @@ import { createWordCountPlugin } from '$lib/editor/visual/extensions/wordcount/w
 import { emDashRule, enDashRule, emDashUpgradeRule } from '$lib/editor/visual/extensions/inputrules/dashRules';
 import { tableWrapperView } from '$lib/editor/visual/extensions/table/tableWrapperView.svelte';
 import { CodeBlockView } from '$lib/editor/visual/extensions/codemirrorbridge/cmview.svelte';
-import { RawLatexView } from '$lib/editor/visual/extensions/raw-latex/rawLatexView';
 import { RawFigureView, isRawFigure } from '$lib/editor/visual/extensions/raw-latex/rawFigureView';
 import { IeeeAuthorView, isIeeeAuthorBlock } from '$lib/languages/latex/visual/extensions/template-specific/ieeeAuthorView';
-import { InlineLatexView } from '$lib/editor/visual/extensions/raw-latex/inlineLatexView';
 import { inlinePlaceholder, InlinePlaceholderView } from '$lib/editor/visual/extensions/raw-latex/inlinePlaceholderView';
 import {
 	FrontmatterRawView,
@@ -59,6 +57,10 @@ import { createBoundaryClickPlugin } from '$lib/editor/visual/extensions/boundar
 import { createBlockHandlePlugin } from '$lib/editor/visual/extensions/block-handle-plugin.svelte';
 import { wholeBlockDragPlugin } from '$lib/editor/visual/extensions/wholeBlockDrag';
 import { createNodeFlashPlugin } from '$lib/editor/visual/extensions/flash-plugin';
+import { drawnOrSource } from '$lib/editor/visual/extensions/drawnChips/DrawnChipView';
+import { drawnChipAtomsPlugin } from '$lib/editor/visual/extensions/drawnChips/drawnChipAtoms';
+import { latexChipKind } from '$lib/languages/latex/visual/extensions/drawn/latexChipKind';
+import { footnoteNumbersPlugin } from '$lib/languages/latex/visual/extensions/drawn/footnoteNumbers';
 import { createLinkPlugin } from '$lib/editor/visual/extensions/link';
 import { pmComments } from '$lib/editor/visual/extensions/pmComments';
 import { listRuleWithoutIndent } from './listItemIndent';
@@ -91,6 +93,7 @@ export function latexEditorPlugins(setup: LatexEditorSetup): Plugin[] {
 		...createListPlugins({ schema }),
 		history(),
 		...createSuggestPlugin(),
+		drawnChipAtomsPlugin(),
 		keymap(listKeymap),
 		inputRules({
 			rules: [
@@ -170,6 +173,7 @@ export function latexEditorPlugins(setup: LatexEditorSetup): Plugin[] {
 		createBoundaryClickPlugin(),
 		createBlockHandlePlugin(),
 		wholeBlockDragPlugin(),
+		footnoteNumbersPlugin(),
 		createNodeFlashPlugin(),
 		...pmComments({
 			onSelect: (id) => onSelectComment?.(id),
@@ -181,10 +185,14 @@ export function latexEditorPlugins(setup: LatexEditorSetup): Plugin[] {
 
 // PM types getPos as possibly undefined (unmounted), but these views only call it while
 // mounted, so cast instead of threading the optionality through every constructor
-export function latexNodeViews(imageDir: () => string, onJumpToLabel?: (name: string) => boolean): NonNullable<EditorProps['nodeViews']> {
+export function latexNodeViews(
+	imageDir: () => string,
+	onJumpToLabel?: (name: string) => boolean,
+	onJumpToDefinition?: (name: string) => boolean
+): NonNullable<EditorProps['nodeViews']> {
 	return {
 		code_block: (node, view, getPos) => new CodeBlockView(node, view, getPos as () => number),
-		raw_latex: (node, view, getPos) =>
+		raw_latex: (node, view, getPos, decorations) =>
 			simpleFrontmatter(node.textContent)
 				? new FrontmatterRawView(node, view, getPos as () => number)
 				: placeholderCommand(node.textContent)?.command === 'printbibliography'
@@ -195,11 +203,17 @@ export function latexNodeViews(imageDir: () => string, onJumpToLabel?: (name: st
 							? new IeeeAuthorView(node, view, getPos as () => number)
 							: isRawFigure(node.textContent)
 								? new RawFigureView(node, view, getPos as () => number, imageDir)
-								: new RawLatexView(node, view, getPos as () => number),
-		inline_latex: (node, view, getPos) =>
+								: drawnOrSource(
+										node,
+										view,
+										getPos as () => number,
+										decorations,
+										latexChipKind(view, true, onJumpToLabel, onJumpToDefinition)
+									),
+		inline_latex: (node, view, getPos, decorations) =>
 			inlinePlaceholder(node.textContent)
 				? new InlinePlaceholderView(node, view, getPos as () => number)
-				: new InlineLatexView(node, view, getPos as () => number),
+				: drawnOrSource(node, view, getPos as () => number, decorations, latexChipKind(view, false, onJumpToLabel, onJumpToDefinition)),
 		includedoc: (node, view, getPos) => new IncludeDocView(node, view, getPos as () => number, imageDir),
 		environment: environmentView,
 		table_wrapper: tableWrapperView,

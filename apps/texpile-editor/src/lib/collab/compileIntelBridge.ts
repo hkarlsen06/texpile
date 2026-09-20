@@ -36,7 +36,13 @@ export function shareCompileState(session: EditSession, isGuest: boolean): void 
 				command: e.command
 			};
 		});
-	session.shareCompileIntel({ auxNumbers: intel.auxNumbers, auxPages: intel.auxPages, log: entries });
+	session.shareCompileIntel({
+		auxNumbers: intel.auxNumbers,
+		auxPages: intel.auxPages,
+		auxKinds: intel.auxKinds,
+		auxTitles: intel.auxTitles,
+		log: entries
+	});
 }
 
 /** A shared entry rendered for the editor gutter. Badboxes ride along as "info" so they underline

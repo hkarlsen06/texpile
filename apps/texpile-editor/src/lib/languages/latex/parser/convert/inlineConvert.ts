@@ -9,6 +9,8 @@ import { macroHandlers } from './macroHandlers';
 import { schema } from '../../schema/latexPMSchema';
 import { containsTabular } from './tableConvert';
 import { mathBodyRawSource, nodeRawSource, capture } from './origCapture';
+import { bindTextToChips } from './chipText';
+import { drawnCommand } from '$lib/languages/latex/drawnCommands';
 
 export function latexLigaturesToUnicode(text: string): string {
 	return text
@@ -64,7 +66,7 @@ export function convertNodesToInline(nodes: Node[], ctx: ConversionContext): PmN
 		if (converted) result.push(...converted);
 		prevAst = node;
 	}
-	return applyLigaturesToNodes(collapseTextNodes(result));
+	return applyLigaturesToNodes(bindTextToChips(collapseTextNodes(result)));
 }
 
 export function convertNodeToInline(node: Node, ctx: ConversionContext): PmNode[] | null {
@@ -191,11 +193,12 @@ export function isWhitespaceTextNode(n?: PmNode): boolean {
 
 // merge a maximal run of adjacent inline_latex nodes (separated only by whitespace text) into
 // ONE, baking the separators in. anything else breaks the run. byte-neutral and convergent: the
-// merged text re-parses to the same fragments, which re-merge identically.
+// merged text re-parses to the same fragments, which re-merge identically. only code merges: a
+// command the editor draws stays a chip of its own
 export function mergeAdjacentInlineLatex(nodes: PmNode[]): PmNode[] {
 	const out: PmNode[] = [];
 	function mergeable(n?: PmNode) {
-		return isInlineLatexNode(n) && !n!.textContent.startsWith('%');
+		return isInlineLatexNode(n) && !n!.textContent.startsWith('%') && !drawnCommand(n!.textContent);
 	}
 	let i = 0;
 	while (i < nodes.length) {

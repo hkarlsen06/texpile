@@ -23,7 +23,10 @@ export function balancedGroup(text: string, open: number): { body: string; end: 
 	return null;
 }
 
-const NEWCOMMAND = /\\(?:new|renew|provide)command\*?\s*\{?\\([a-zA-Z@]+)\}?\s*(?:\[(\d)\])?\s*(?:\[[^\]]*\]\s*)?(?=\{)/g;
+const NEWCOMMAND =
+	/\\(?:(?:new|renew|provide)command|DeclareRobustCommand)\*?\s*\{?\\([a-zA-Z@]+)\}?\s*(?:\[(\d)\])?\s*(?:\[[^\]]*\]\s*)?(?=\{)/g;
+// \def\name#1#2{...}: the parameters are counted, anything fancier than #1#2... is not a definition to inline
+const DEF = /\\[gex]?def\s*\\([a-zA-Z@]+)\s*((?:#\d)*)\s*(?=\{)/g;
 const MATH_OPERATOR = /\\DeclareMathOperator(\*?)\{\\([a-zA-Z@]+)\}\s*(?=\{)/g;
 const PAIRED_DELIMITER = /\\DeclarePairedDelimiter\s*\{?\\([a-zA-Z@]+)\}?\s*(?=\{)/g;
 
@@ -35,6 +38,11 @@ export function scanMacroDefinitions(text: string): Record<string, MacroDef> {
 	for (let m = NEWCOMMAND.exec(text); m; m = NEWCOMMAND.exec(text)) {
 		const group = balancedGroup(text, m.index + m[0].length);
 		if (group) out[m[1]] = { def: group.body, args: m[2] ? +m[2] : 0 };
+	}
+	DEF.lastIndex = 0;
+	for (let m = DEF.exec(text); m; m = DEF.exec(text)) {
+		const group = balancedGroup(text, m.index + m[0].length);
+		if (group && !(m[1] in out)) out[m[1]] = { def: group.body, args: m[2].length / 2 };
 	}
 	MATH_OPERATOR.lastIndex = 0;
 	for (let m = MATH_OPERATOR.exec(text); m; m = MATH_OPERATOR.exec(text)) {

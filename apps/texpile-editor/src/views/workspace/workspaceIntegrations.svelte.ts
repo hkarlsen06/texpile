@@ -222,7 +222,14 @@ export class WorkspaceIntegrations {
 			// when a session starts against an already-compiled project.
 			const live = session.active;
 			const sharedAux =
-				guest && session.compileIntel ? { numbers: session.compileIntel.auxNumbers, pages: session.compileIntel.auxPages } : null;
+				guest && session.compileIntel
+					? {
+							numbers: session.compileIntel.auxNumbers,
+							pages: session.compileIntel.auxPages,
+							kinds: session.compileIntel.auxKinds,
+							titles: session.compileIntel.auxTitles
+						}
+					: null;
 			if (fileMode.current) return;
 			void refreshProjectIntel(texList, bibs, guest ? null : aux, active ?? null, (p) => d.provider.readText(p), sharedAux).then(() => {
 				if (live && !guest) d.cc().share();

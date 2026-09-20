@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Popover, Portal } from '@skeletonlabs/skeleton-svelte';
+	import { inEditorPane } from '$lib/editor/visual/editorPanePositioning';
 	import type { Node as PMNode } from 'prosemirror-model';
 	import { referenceStore } from '$lib/stores/editorStore';
 	import { splitCitationKeys } from './citationKeys';
@@ -65,7 +66,7 @@
 <Popover
 	open={dropdownOpen}
 	onOpenChange={(e) => (dropdownOpen = e.open)}
-	positioning={{ placement: 'bottom-start', offset: { mainAxis: 4 } }}
+	positioning={inEditorPane({ placement: 'bottom-start', offset: { mainAxis: 4 } })}
 >
 	<Popover.Trigger class="inline-flex cursor-pointer items-center" style="font-size: 1rem;">
 		<span

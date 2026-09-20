@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { tip } from '$lib/components/tooltip.svelte';
+	import { inEditorPane } from '$lib/editor/visual/editorPanePositioning';
 	import { Popover, Portal } from '@skeletonlabs/skeleton-svelte';
 	import { Tag } from '@lucide/svelte';
 	import { sanitizeLabel } from '$lib/editor/visual/label';
@@ -32,7 +33,11 @@
 	}
 </script>
 
-<Popover {open} onOpenChange={(e) => onOpenChange(e.open)} positioning={{ placement: 'bottom-start', offset: { mainAxis: 4 } }}>
+<Popover
+	{open}
+	onOpenChange={(e) => onOpenChange(e.open)}
+	positioning={inEditorPane({ placement: 'bottom-start', offset: { mainAxis: 4 } })}
+>
 	<Popover.Trigger
 		class="text-muted bg-surface-200-800 hover:bg-surface-300-700 inline-flex cursor-pointer items-center gap-1 rounded-base px-1.5 py-0.5 align-baseline text-xs font-medium transition-colors"
 		style="font-size: 0.75rem;"

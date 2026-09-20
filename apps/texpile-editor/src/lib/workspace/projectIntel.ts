@@ -96,9 +96,11 @@ async function readAux(auxPath: string, draft: ProjectIntel, read: (p: string) =
 	} catch {
 		return; // never compiled (or aux elsewhere): completion just shows no numbers
 	}
-	const { numbers, pages } = parseAuxLabels(aux);
+	const { numbers, pages, kinds, titles } = parseAuxLabels(aux);
 	Object.assign(draft.auxNumbers, numbers);
 	Object.assign(draft.auxPages, pages);
+	Object.assign(draft.auxKinds, kinds);
+	Object.assign(draft.auxTitles, titles);
 }
 
 let scanToken = 0;
@@ -116,7 +118,12 @@ export async function refreshProjectIntel(
 	// injectable so a guest session reads through its provider (files live in the shared doc)
 	read: (p: string) => Promise<string> = readTextFile,
 	// a guest has no .aux on disk; the host shares its parsed label numbers instead
-	auxOverride?: { numbers: Record<string, string>; pages: Record<string, string> } | null
+	auxOverride?: {
+		numbers: Record<string, string>;
+		pages: Record<string, string>;
+		kinds?: Record<string, string>;
+		titles?: Record<string, string>;
+	} | null
 ): Promise<void> {
 	const token = ++scanToken;
 	const into: ProjectIntel = {
@@ -130,6 +137,8 @@ export async function refreshProjectIntel(
 		sup: [],
 		auxNumbers: {},
 		auxPages: {},
+		auxKinds: {},
+		auxTitles: {},
 		outlines: {}
 	};
 
@@ -159,6 +168,8 @@ export async function refreshProjectIntel(
 	if (auxOverride) {
 		Object.assign(into.auxNumbers, auxOverride.numbers);
 		Object.assign(into.auxPages, auxOverride.pages);
+		Object.assign(into.auxKinds, auxOverride.kinds ?? {});
+		Object.assign(into.auxTitles, auxOverride.titles ?? {});
 	} else if (auxPath) await readAux(auxPath, into, read);
 
 	// dedupe the repetition-mining pools

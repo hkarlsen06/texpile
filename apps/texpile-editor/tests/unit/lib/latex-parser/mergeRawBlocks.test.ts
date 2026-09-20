@@ -1,7 +1,7 @@
 // Adjacent raw islands coalesce into ONE block at import.
 //
-// A stack of comment lines, or \bibliographystyle + \bibliography, used to import as one raw
-// block per line - a wall of separate boxes in the visual editor. Merging is byte-driven: it only
+// A stack of comment lines, or of commands kept as code, used to import as one raw block per
+// line - a wall of separate boxes in the visual editor. A command the editor draws never merges. Merging is byte-driven: it only
 // happens when the members' source slices are adjacent (whitespace-only gaps), and the merged
 // block's text IS the combined slice, so the round trip stays a fixed point.
 import { describe, it, expect } from 'vitest';
@@ -25,11 +25,18 @@ describe('latex raw island merging', () => {
 		expect(raws[0].textContent).toBe('% one\n% two\n% three');
 	});
 
-	it('merges across blank lines, keeping them', () => {
-		const parsed = parseLatexFile(wrap('% first group\n\n% second group'));
-		const raws = rawBlocks(parsed.doc);
-		expect(raws.length).toBe(1);
-		expect(raws[0].textContent).toBe('% first group\n\n% second group');
+	it('keeps islands a blank line apart as blocks of their own', () => {
+		const src = wrap('\\bigskip\n\n% first group\n\n% second group\n% more of it');
+		const parsed = parseLatexFile(src);
+		// \bigskip alone is a paragraph holding its chip, as a \vspace on its own line is
+		expect(rawBlocks(parsed.doc).map((raw) => raw.textContent)).toEqual(['% first group', '% second group\n% more of it']);
+		expect(serializeLatexFile(parsed, parsed.doc)).toBe(src);
+	});
+
+	it('keeps the spaces ending one island ahead of the blank line before the next', () => {
+		const src = wrap('Prose.\n\n%a\n%b.  \n\n%c\n%d');
+		const parsed = parseLatexFile(src);
+		expect(serializeLatexFile(parsed, parsed.doc)).toBe(src);
 	});
 
 	it('does not merge across prose', () => {
@@ -37,11 +44,30 @@ describe('latex raw island merging', () => {
 		expect(rawBlocks(parsed.doc).length).toBe(2);
 	});
 
-	it('pulls a chip-only paragraph into the island', () => {
-		const parsed = parseLatexFile(wrap('\\bibliographystyle{plain}\n\\bibliography{refs}'));
+	it('pulls a paragraph of code chips into the island', () => {
+		const parsed = parseLatexFile(wrap('% set up\n\\pagestyle{empty}\\thispagestyle{plain}'));
 		const raws = rawBlocks(parsed.doc);
 		expect(raws.length).toBe(1);
-		expect(raws[0].textContent).toBe('\\bibliographystyle{plain}\n\\bibliography{refs}');
+		expect(raws[0].textContent).toBe('% set up\n\\pagestyle{empty}\\thispagestyle{plain}');
+	});
+
+	it('never merges a command the editor draws', () => {
+		const src = wrap('\\smallskip \\medskip \\bigskip\n% a note\n\\clearpage\n\\bibliographystyle{plain}\n\\bibliography{refs}');
+		const parsed = parseLatexFile(src);
+		const chips: string[] = [];
+		parsed.doc.descendants((node) => {
+			if (node.type.name === 'inline_latex' || node.type.name === 'raw_latex') chips.push(node.textContent.trim());
+		});
+		expect(chips).toEqual([
+			'\\smallskip',
+			'\\medskip',
+			'\\bigskip',
+			'% a note',
+			'\\clearpage',
+			'\\bibliographystyle{plain}',
+			'\\bibliography{refs}'
+		]);
+		expect(serializeLatexFile(parsed, parsed.doc)).toBe(src);
 	});
 
 	it('leaves an untouched merged doc byte-identical', () => {

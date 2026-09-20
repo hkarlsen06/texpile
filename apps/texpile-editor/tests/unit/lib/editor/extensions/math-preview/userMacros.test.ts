@@ -17,6 +17,13 @@ describe('scanMacroDefinitions (math preview macro dictionary)', () => {
 		expect(m.norm).toEqual({ def: '\\lVert#1\\rVert', args: 1 });
 	});
 
+	it('reads \\def and \\DeclareRobustCommand definitions, counting \\def parameters', () => {
+		const m = scanMacroDefinitions('\\def\\ie{i.e.\\xspace}\n\\def\\pair#1#2{(#1, #2)}\n\\DeclareRobustCommand{\\bert}{BERT}');
+		expect(m.ie).toEqual({ def: 'i.e.\\xspace', args: 0 });
+		expect(m.pair).toEqual({ def: '(#1, #2)', args: 2 });
+		expect(m.bert).toEqual({ def: 'BERT', args: 0 });
+	});
+
 	it('skips the optional-default bracket and unclosed bodies', () => {
 		const m = scanMacroDefinitions('\\newcommand{\\greet}[2][world]{hello #1 #2}\n\\newcommand{\\broken}{\\frac{');
 		expect(m.greet).toEqual({ def: 'hello #1 #2', args: 2 });

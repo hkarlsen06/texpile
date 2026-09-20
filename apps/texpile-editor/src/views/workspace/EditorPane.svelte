@@ -89,6 +89,7 @@
 		onJumpToFile,
 		onOpenFileAt,
 		onJumpToLabel,
+		onJumpToDefinition,
 		onCaretMove,
 		commentRanges = [],
 		commentThreads = [],
@@ -406,6 +407,7 @@
 							{onAddCommentAnchored}
 							{onInsertCitation}
 							{onJumpToLabel}
+							{onJumpToDefinition}
 							{onCommentsPlaced}
 							{commentPendingActive}
 						/>

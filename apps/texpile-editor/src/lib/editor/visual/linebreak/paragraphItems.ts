@@ -45,6 +45,8 @@ const ONE_WORD = /^(\P{L}*)(\p{L}{5,})(\P{L}*)$/u;
 const NODE_VIEW = 'x';
 // a tab is as wide as the way to the next tab stop, which no item can say
 const UNPLACEABLE = /[\t\r]/;
+/** a node view that is partly on a line of its own and partly in the text carries this, and its paragraph wraps natively */
+export const UNPLACEABLE_VIEW = 'data-unplaceable';
 
 // a piece of the paragraph's text as one string: the offsets it covers in the paragraph, and its width or style.
 // Struck words cover no offsets (`size` 0) and name their place inside their widget
@@ -122,8 +124,12 @@ export function paragraphItems(
 			text += '\n';
 		} else if (!child.isText) {
 			const dom = view.nodeDOM(pos + at);
-			if (!(dom instanceof HTMLElement)) placeable = false;
-			else {
+			if (!(dom instanceof HTMLElement) || dom.hasAttribute(UNPLACEABLE_VIEW)) placeable = false;
+			else if (getComputedStyle(dom).display === 'block') {
+				// drawn on a line of its own (a comment, a vertical space): the line before it ends there, as at a \\
+				runs.push({ from, to: from + 1, at, size: child.nodeSize, width: 0 });
+				text += '\n';
+			} else {
 				runs.push({ from, to: from + 1, at, size: child.nodeSize, width: inlineWidthOf(dom) });
 				text += NODE_VIEW;
 			}

@@ -32,6 +32,8 @@ import {
 	mergeAdjacentInlineLatex,
 	paragraphAsRawLatex
 } from './convert/inlineConvert';
+import { bindTextToChips } from './convert/chipText';
+import { drawnCommand } from '$lib/languages/latex/drawnCommands';
 export { FIG_IMG_SLOT, FIG_CAP_SLOT, FIG_LAB_SLOT } from './convert/figureConvert';
 export { convertNodeToInline } from './convert/inlineConvert';
 
@@ -109,7 +111,7 @@ export function convertNodesToBlocks(nodes: Node[], options: ConversionOptions):
 
 	function flushParagraph() {
 		pendingWhitespace = null; // a trailing deferred space is dropped at the boundary
-		currentParagraphContent = collapseTextNodes(currentParagraphContent);
+		currentParagraphContent = bindTextToChips(collapseTextNodes(currentParagraphContent));
 		currentParagraphContent = applyLigaturesToNodes(currentParagraphContent);
 		currentParagraphContent = mergeAdjacentInlineLatex(currentParagraphContent);
 		while (currentParagraphContent.length > 0 && currentParagraphContent[0].isText && currentParagraphContent[0].text?.trim() === '') {
@@ -344,7 +346,7 @@ export function latexToProseMirror(latex: string, options: ConversionOptions = {
 	if (cap && cap.prevEnd <= cap.source.length) {
 		docAttrs = { docTail: { text: cap.source.slice(cap.prevEnd, cap.source.length), afterSeq: cap.seq - 1 } };
 	}
-	const doc = mergeAdjacentRawBlocks(buildNode('doc', docAttrs, blocks.length > 0 ? blocks : [buildNode('paragraph')]));
+	const doc = mergeAdjacentRawBlocks(buildNode('doc', docAttrs, blocks.length > 0 ? blocks : [buildNode('paragraph')]), drawnCommand);
 
 	return { doc, ast };
 }

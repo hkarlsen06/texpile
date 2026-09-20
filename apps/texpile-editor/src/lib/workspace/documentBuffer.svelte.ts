@@ -11,8 +11,11 @@ import { serializeTypstFile } from '$lib/languages/typst/visual/roundtrip';
 import { replacePreambleFrontmatter } from '$lib/editor/visual/extensions/raw-latex/frontmatterView';
 import { basename, relativeTo, type Eol } from '$lib/workspace/fileSystem';
 import { citationVariantsFor } from '$lib/languages/latex/visual/extensions/citation/citationVariantsFor';
+import { refCommandsFor } from '$lib/languages/latex/visual/extensions/drawn/settings/refCommandsFor';
 import { templateFeaturesStore } from '$lib/stores/editorStore';
 import { documentHyphenationLanguage } from '$lib/editor/visual/linebreak/documentHyphenationLanguage';
+import { crossRefNamesFromPreamble } from '$lib/languages/latex/visual/extensions/drawn/crossRefNames';
+import { scanMacroDefinitions } from '$lib/editor/source/extensions/math-preview/userMacros';
 import type { Node as PMNode } from 'prosemirror-model';
 
 export type FileKind = 'tex' | 'md' | 'typ' | 'bib' | 'pdf' | 'image' | 'binary' | 'text' | null;
@@ -191,7 +194,10 @@ export class DocumentBuffer {
 		templateFeaturesStore.current = {
 			...templateFeaturesStore.current,
 			citationVariants: citationVariantsFor(parsed.preamble),
-			hyphenationLanguage: documentHyphenationLanguage(source)
+			hyphenationLanguage: documentHyphenationLanguage(source),
+			crossRefNames: crossRefNamesFromPreamble(parsed.preamble),
+			refCommands: refCommandsFor(parsed.preamble),
+			macros: scanMacroDefinitions(source)
 		};
 	}
 

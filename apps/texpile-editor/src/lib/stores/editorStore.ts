@@ -1,4 +1,6 @@
 import type { DocumentHyphenation } from '$lib/editor/visual/linebreak/documentHyphenationLanguage';
+import type { CrossRefNames } from '$lib/languages/latex/visual/extensions/drawn/crossRefNames';
+import type { MacroDef } from '$lib/editor/source/extensions/math-preview/userMacros';
 import { box } from '$lib/runes/box.svelte';
 import type { EditorView } from 'prosemirror-view';
 import type { EditorView as CodeMirrorView } from '@codemirror/view';
@@ -41,6 +43,12 @@ export type TemplateFeatures = {
 	citationVariants?: string[];
 	// the patterns the visual editor splits words by, from the document's own source. undefined = none named
 	hyphenationLanguage?: DocumentHyphenation;
+	// the words \cref and \autoref print, the packages' defaults as renamed in the preamble. undefined = the defaults
+	crossRefNames?: CrossRefNames;
+	// the reference commands the preamble's packages define (refCommandsFor). undefined = no preamble seen, nothing narrowed
+	refCommands?: string[];
+	// the macros the document defines itself, by name without the backslash; the project's others are in projectIntel
+	macros?: Record<string, MacroDef>;
 	highlight?: boolean; // false: highlight won't appear in the final document (user sees warning)
 	textColor?: boolean; // false: text color won't appear in the final document (user sees warning)
 };

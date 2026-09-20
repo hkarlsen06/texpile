@@ -23,6 +23,19 @@ function labelLine(source: string, name: string): number | null {
 	return m ? source.slice(0, m.index).split('\n').length : null;
 }
 
+/** 1-based line where `source` defines the command `\name` (\newcommand, \def, \NewDocumentCommand and kin), or null */
+function definitionLine(source: string, name: string): number | null {
+	const command = '\\\\' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![a-zA-Z@])';
+	const re = new RegExp(
+		String.raw`\\(?:(?:re|provide)?newcommand\*?|DeclareRobustCommand\*?|(?:New|Renew|Provide|Declare)DocumentCommand)\s*\{?\s*` +
+			command +
+			String.raw`|\\[gex]?def\s*` +
+			command
+	);
+	const m = re.exec(source);
+	return m ? source.slice(0, m.index).split('\n').length : null;
+}
+
 type NavDeps = {
 	doc: DocumentBuffer;
 	modes: ViewModeSwitch;
@@ -128,6 +141,23 @@ export class WorkspaceNav {
 		const hit = projectIntelStore.current.labels.find((l) => l.name === name);
 		if (!hit) return false;
 		this.syncJumpToFileLine(hit.file, hit.line);
+		return true;
+	}
+
+	/**
+	 * A drawn macro call's definition, in this file's preamble or whichever project file defines it. Always the source:
+	 * the visual editor shows no preamble. False when nothing knows where it is.
+	 */
+	jumpToDefinition(name: string): boolean {
+		const { doc } = this.d;
+		const own = doc.path ? definitionLine(doc.texSource, name) : null;
+		if (doc.path && own) {
+			this.openFileAtLine(doc.path, own);
+			return true;
+		}
+		const hit = fileMode.current ? null : projectIntelStore.current.macros.find((m) => m.name === name);
+		if (!hit) return false;
+		this.openFileAtLine(hit.file, hit.line);
 		return true;
 	}
 

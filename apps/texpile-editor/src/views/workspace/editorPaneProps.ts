@@ -83,6 +83,8 @@ export type EditorPaneProps = {
 	onOpenFileAt: (file: string, line: number, selectText?: string) => void;
 	/** a visual \ref whose label is not drawn in the open document; true when a jump was made */
 	onJumpToLabel?: (name: string) => boolean;
+	/** a drawn call of the paper's own macro; true when its definition was opened */
+	onJumpToDefinition?: (name: string) => boolean;
 	/** caret moved to this ZERO-based line/column in the source editor */
 	onCaretMove?: (line: number, character: number) => void;
 	/** review-comment ranges for the open file, and the hooks the editor raises; see lib/comments */

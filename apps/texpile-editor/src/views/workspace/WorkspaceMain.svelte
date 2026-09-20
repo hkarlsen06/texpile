@@ -179,6 +179,7 @@
 			onJumpToFile={actions.jumpToFile}
 			onOpenFileAt={actions.openFileAt}
 			onJumpToLabel={actions.jumpToLabel}
+			onJumpToDefinition={actions.jumpToDefinition}
 			onCaretMove={actions.onCaretMove}
 			onToggleDiffLayout={() => diff.toggleLayout()}
 			onRefreshDiff={actions.refreshDiff}
