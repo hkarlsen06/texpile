@@ -240,7 +240,8 @@ export function placeWords(doc: PMNode, flat: FlatDoc, s: SuggestionMark, hit: S
 	}
 	const fresh = inContext(s.anchor.quote);
 	const gone = inContext(s.restore);
-	if (!fresh || !gone || structural(s.anchor.quote) || structural(s.restore)) return null;
+	// a letter a chip draws is its source in the document's text: only old words can show it
+	if (!fresh || !gone || fresh.chips || structural(s.anchor.quote) || structural(s.restore)) return null;
 	if (markerAfter && endsLine(s.anchor.quote) !== endsLine(s.restore)) return null;
 	// one edit can arrive as several suggestions; only one that rejects to balanced text on its own is drawn
 	if (fresh.closed.join() !== gone.closed.join() || fresh.open.join() !== gone.open.join()) return null;

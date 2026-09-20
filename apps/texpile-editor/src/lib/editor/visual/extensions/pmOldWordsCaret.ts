@@ -39,6 +39,21 @@ function stepAtOldWords(view: EditorView, forward: boolean): boolean {
 	return true;
 }
 
+/** old words at the caret that an arrow the given way steps across before anything else moves */
+export function oldWordsAhead(state: EditorState, forward: boolean): boolean {
+	const sel = state.selection;
+	if (!(sel instanceof TextSelection) || !sel.empty) return false;
+	const struck = struckAt(state, sel.head);
+	const side = sideAtOldWords(pmSuggestionsKey.getState(state)?.caret ?? null, sel.head, struck.map(typingSide));
+	return struck.length > 0 && side !== (forward ? 'after' : 'before');
+}
+
+/** a caret stepped over something to `at`: old words there are met on the side it came from */
+export function landBesideOldWords(state: EditorState, tr: Transaction, at: number, forward: boolean): Transaction {
+	if (struckAt(state, at).length === 0) return tr;
+	return tr.setMeta(pmSuggestionsKey, { type: 'caret', caret: { at, side: forward ? 'before' : 'after' } } satisfies PmSuggestionsMeta);
+}
+
 // ProseMirror steps the caret across a widget before the browser moves it a line, which here is a
 // jump the width of the old words; the browser's own move keeps the column
 function moveLineAtOldWords(view: EditorView, forward: boolean, extend: boolean): boolean {

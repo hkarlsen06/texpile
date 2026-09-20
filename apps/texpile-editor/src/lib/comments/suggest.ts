@@ -40,7 +40,7 @@ function formats(source: string, dialect: AnchorDialect) {
 		)
 		.filter(Boolean)
 		.join('\n');
-	return { text, names, balance: rendered.closed.join() + '|' + rendered.open.join() };
+	return { text, names, balance: rendered.closed.join() + '|' + rendered.open.join(), chips: !!rendered.chips };
 }
 
 export function formatChange(quote: string, restore: string, dialect: AnchorDialect): FormatChange | null {
@@ -48,6 +48,8 @@ export function formatChange(quote: string, restore: string, dialect: AnchorDial
 	const fresh = formats(quote, dialect);
 	const gone = formats(restore, dialect);
 	if (!fresh || !gone || !fresh.text || fresh.text !== gone.text || fresh.balance !== gone.balance) return null;
+	// \'e written as é is another spelling of the letter, not other formatting
+	if (fresh.chips !== gone.chips && !fresh.names.size && !gone.names.size) return null;
 	const only = (a: Set<string>, b: Set<string>) => [...a].filter((name) => !b.has(name));
 	return { words: fresh.text, added: only(fresh.names, gone.names), removed: only(gone.names, fresh.names) };
 }

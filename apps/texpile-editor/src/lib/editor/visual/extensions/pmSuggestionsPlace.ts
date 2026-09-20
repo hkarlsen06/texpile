@@ -14,6 +14,7 @@ import type { SuggestionMark } from '$lib/comments/activeSuggestions.svelte';
 import { renderSource, type WordRun } from '$lib/comments/renderedWords';
 import { formatChange } from '$lib/comments/suggest';
 import { flattenDoc } from './pmCommentsResolve';
+import { chipAround, chipHolding } from './pmSuggestionChip';
 import { placeWords, pmSpan } from './pmSuggestionWords';
 
 export type PmSuggestionRange = {
@@ -26,6 +27,8 @@ export type PmSuggestionRange = {
 	partial: boolean;
 	/** the same words with other formatting: the tint says it all, the old words are not struck out */
 	format?: boolean;
+	/** a change inside a chip, which draws itself: the tint is on the whole chip */
+	chip?: boolean;
 };
 
 function searchRendered(text: string, a: CommentAnchor, copy?: () => number): ResolvedAnchor | null {
@@ -109,6 +112,12 @@ export function placePmSuggestions(
 			continue;
 		}
 		const span = hit ? pmSpan(doc, text, index, hit.from, hit.to) : null;
+		const placed = span && near && covers.from === 0 && covers.to === quote.length;
+		const chip = placed ? chipAround(doc, span.from, span.to) : chipHolding(doc, flat, s.anchor);
+		if (chip) {
+			ranges.push({ id: s.id, ...chip, restore: s.restore, old: [], mine: s.mine, partial: false, chip: true });
+			continue;
+		}
 		const region = span
 			? blocksAround(doc, span.from, span.to, paragraphBreaks(quote.slice(0, covers.from)), paragraphBreaks(quote.slice(covers.to)))
 			: null;

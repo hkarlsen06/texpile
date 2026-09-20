@@ -8,6 +8,7 @@ import {
 	snapToWords,
 	textHunks,
 	whitespaceChange,
+	withWholeGroups,
 	type Hunk
 } from './suggestHunks';
 
@@ -79,7 +80,10 @@ export function compareSuggestions(o: CompareInput): ComparedSuggestions {
 	if (before === after) return { placed: given, changes: [] };
 	const typing = mode === 'suggesting' ? (o.gestures ?? []) : [];
 	let hunks = clearOfSuggestions(textHunks(before, after), before, after, given, typing);
-	if (mode === 'suggesting') hunks = joinGestures(snapToWords(hunks, before, after, given, exact), before, after, typing, exact);
+	if (mode === 'suggesting') {
+		const words = withWholeGroups(snapToWords(hunks, before, after, given, exact), before, after, given);
+		hunks = joinGestures(words, before, after, typing, exact);
+	}
 	if (hunks.length === 0) return { placed: given, changes: [] };
 
 	const spotSides = new Map<number, TypingSide>();

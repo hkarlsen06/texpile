@@ -167,3 +167,43 @@ it('tints the copy the suggestion is in when the text around it repeats', () => 
 	expect(placePmSuggestions(doc, [mark()], 'tex').ranges[0].from).toBeLessThan(second);
 	expect(placePmSuggestions(doc, [mark(1)], 'tex').ranges[0].from).toBeGreaterThan(second);
 });
+
+it('tints only the chip a change sits in, and draws a removed accent as its letter', () => {
+	const source =
+		'\\begin{document}\nWe leave some room \\vspace{3cm} for the figure below.\n\n\\newpage\n\nThe Poincar map is the tool we use here.\n\n\\newpage\n\nThe end.\n\\end{document}\n';
+	const doc = parseLatexFile(source).doc;
+	const at = (id: string, words: string, restore: string, from = source.indexOf(words)) => ({
+		id,
+		from,
+		to: from + words.length,
+		restore,
+		mine: true,
+		anchor: buildAnchor(source, from, from + words.length)
+	});
+	const { ranges, partial } = placePmSuggestions(
+		doc,
+		[at('space', '3cm', '1.5cm'), at('break', 'newpage', 'clearpage'), at('accent', '', "\\'e", source.indexOf(' map'))],
+		'tex'
+	);
+	expect([...partial]).toEqual([]);
+	const chip = (id: string) => {
+		const r = ranges.find((x) => x.id === id)!;
+		return r.chip && doc.nodeAt(r.from)?.nodeSize === r.to - r.from ? doc.nodeAt(r.from)!.textContent.trim() : null;
+	};
+	expect(chip('space')).toBe('\\vspace{3cm}');
+	expect(chip('break')).toBe('\\newpage');
+	expect(ranges.find((r) => r.id === 'break')!.from).toBe(doc.child(0).nodeSize);
+	expect(ranges.find((r) => r.id === 'accent')?.old).toEqual([{ text: 'é', tags: [] }]);
+});
+
+it('marks an old font group made ordinary bold as a format change', () => {
+	const source = '\\begin{document}\nThe method is \\textbf{fast and small} on every input we tried.\n\\end{document}\n';
+	const doc = parseLatexFile(source).doc;
+	const from = source.indexOf('\\textbf');
+	const to = source.indexOf('} on') + 1;
+	const mark = { id: 'bold', from, to, restore: '{\\bf fast and small}', mine: true, anchor: buildAnchor(source, from, to) };
+	const [range] = placePmSuggestions(doc, [mark], 'tex').ranges;
+	expect(range.format).toBe(true);
+	expect(range.partial).toBe(false);
+	expect(doc.textBetween(range.from, range.to)).toBe('fast and small');
+});

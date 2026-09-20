@@ -339,6 +339,23 @@ describe('an edit meeting a suggestion', () => {
 		expect(r.placed).toHaveLength(100);
 	});
 
+	it('keeps a command whole when it is removed, added or renamed', () => {
+		const text = 'Text.\n\n\\clearpage\n\n\\appendix\n';
+		const removed = run(text, 'Text.\n\n\\appendix\n', [], 'suggesting');
+		expect(removed.placed.map((s) => s.restore)).toEqual(['\\clearpage\n\n']);
+		const added = run('Text.\n\n\\appendix\n', text, [], 'suggesting');
+		expect(added.placed.map((s) => text.slice(s.from, s.to))).toEqual(['\\clearpage\n\n']);
+		const renamed = 'Text.\n\n\\newpage\n\n\\appendix\n';
+		const kind = run(text, renamed, [], 'suggesting');
+		expect(kind.placed.map((s) => [s.restore, renamed.slice(s.from, s.to)])).toEqual([['\\clearpage', '\\newpage']]);
+	});
+
+	it('runs a change to what opens a group on to where the group closes', () => {
+		const after = 'Some {\\it words} and \\textbf{bold words}, then more.';
+		const { placed } = run('Some {\\it words} and {\\bf bold words}, then more.', after, [], 'suggesting');
+		expect(placed.map((s) => [s.restore, after.slice(s.from, s.to)])).toEqual([['{\\bf bold words}', '\\textbf{bold words}']]);
+	});
+
 	it('suggests by word in text with no spaces', () => {
 		const r = run('我们证明了这个方法是可靠的', '我们证明了这个方法是稳定的', [], 'suggesting');
 		expect(r.placed).toHaveLength(1);

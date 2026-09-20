@@ -5,6 +5,7 @@ import { NodeSelection, Plugin, TextSelection, type EditorState, type Transactio
 import type { Node } from 'prosemirror-model';
 import type { EditorView } from 'prosemirror-view';
 import { drawnChipOf } from './DrawnChipView';
+import { landBesideOldWords, oldWordsAhead } from '$lib/editor/visual/extensions/pmOldWordsCaret';
 
 type Side = -1 | 1;
 
@@ -75,11 +76,11 @@ function onKey(view: EditorView, event: KeyboardEvent): boolean {
 		}
 		case 'ArrowLeft':
 		case 'ArrowRight': {
-			if (event.shiftKey) return false;
+			if (event.shiftKey || oldWordsAhead(state, side > 0)) return false;
 			const beside = chipBeside(state, side, false);
 			if (!beside || !drawnChipOf(beside.node)?.character) return false;
 			const past = side < 0 ? beside.pos : beside.pos + beside.node.nodeSize;
-			return select(view, state.tr.setSelection(TextSelection.create(state.doc, past)));
+			return select(view, landBesideOldWords(state, state.tr.setSelection(TextSelection.create(state.doc, past)), past, side > 0));
 		}
 		case 'ArrowUp':
 		case 'ArrowDown': {

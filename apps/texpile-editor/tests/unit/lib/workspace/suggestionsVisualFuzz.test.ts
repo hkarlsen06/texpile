@@ -245,7 +245,7 @@ describe('suggestions made in the visual editor', () => {
 					return edit ? s.apply(edit.tr) : s;
 				});
 				const { text, marks, shown, placed } = await suggestTyping(f, original, steps);
-				const drawn = placed.ranges.filter((r) => !r.partial);
+				const drawn = placed.ranges.filter((r) => !r.partial && !r.chip);
 				if (!drawn.length) continue;
 				let rejected = text;
 				for (const m of marks.filter((x) => drawn.some((r) => r.id === x.id)).sort((a, b) => b.from - a.from))

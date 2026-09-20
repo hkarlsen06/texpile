@@ -71,7 +71,7 @@ async function suggest(edits: ((s: EditorState) => Transaction)[]): Promise<Outc
 	const marks = activeSuggestions.current;
 	const shown = tex.parse(text).doc;
 	const placed = placePmSuggestions(shown, marks, 'tex');
-	const drawn = placed.ranges.filter((r) => !r.partial);
+	const drawn = placed.ranges.filter((r) => !r.partial && !r.chip);
 	let rejected = text;
 	for (const m of marks.filter((x) => drawn.some((r) => r.id === x.id)).sort((a, b) => b.from - a.from))
 		rejected = rejected.slice(0, m.from) + m.restore + rejected.slice(m.to);

@@ -59,6 +59,11 @@ function build(doc: PMNode, ranges: PmSuggestionRange[], focused: string | null,
 		if (r.from < 0 || r.to > size || r.to < r.from) continue;
 		const on = r.id === focused;
 		const focus = on ? ' pm-suggest-focused' : '';
+		if (r.chip) {
+			if (doc.nodeAt(r.from)?.nodeSize === r.to - r.from)
+				decos.push(Decoration.node(r.from, r.to, { class: `pm-suggest-new${focus}`, 'data-comment': r.id }));
+			continue;
+		}
 		if (r.partial) {
 			doc.nodesBetween(r.from, r.to, (node, pos) => {
 				decos.push(Decoration.node(pos, pos + node.nodeSize, { class: `pm-suggest-partial${focus}`, 'data-comment': r.id }));

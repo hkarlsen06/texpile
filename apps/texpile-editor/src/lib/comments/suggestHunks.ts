@@ -8,6 +8,8 @@ export type SuggestionSpan = { from: number; to: number };
 
 const SEGMENTER = typeof Intl !== 'undefined' && 'Segmenter' in Intl ? new Intl.Segmenter(undefined, { granularity: 'word' }) : null;
 const WORD = /[\p{L}\p{N}_]/u;
+// what a command's name is made of
+const LETTER = /[a-zA-Z@]/;
 const REACH = 64;
 const LIMITS = { maxEditLength: 4000, timeout: 250 };
 
@@ -93,7 +95,31 @@ function lines(s: string): string[] {
 
 const WORD_DIFF_MAX = 40_000;
 
+function escapedAt(text: string, at: number): boolean {
+	let run = 0;
+	while (at - 1 - run >= 0 && text[at - 1 - run] === '\\') run++;
+	return run % 2 === 1;
+}
+
+// the shared prefix takes the backslash of the command after a removed one: \clearpage gone before \appendix reads
+// "clearpage \" unless it slides back one
+function withWholeCommands(hunks: Hunk[], before: string, after: string): Hunk[] {
+	return hunks.map((h) => {
+		const insertion = h.aFrom === h.aTo;
+		if (insertion === (h.bFrom === h.bTo)) return h;
+		const text = insertion ? after : before;
+		const from = insertion ? h.bFrom : h.aFrom;
+		const to = insertion ? h.bTo : h.aTo;
+		if (!LETTER.test(text[from]) || text[to - 1] !== '\\' || !escapedAt(text, from)) return h;
+		return { aFrom: h.aFrom - 1, aTo: h.aTo - 1, bFrom: h.bFrom - 1, bTo: h.bTo - 1 };
+	});
+}
+
 export function textHunks(before: string, after: string): Hunk[] {
+	return withWholeCommands(rawTextHunks(before, after), before, after);
+}
+
+function rawTextHunks(before: string, after: string): Hunk[] {
 	if (before === after) return [];
 	const { start, end } = commonEnds(before, after);
 	const a = before.slice(start, before.length - end);
@@ -241,6 +267,34 @@ export function joinGestures(hunks: Hunk[], before: string, after: string, gestu
 	return out;
 }
 
+// braces the text opens and leaves open, or -1 when it closes one opened before it
+function openBraces(text: string, from: number, to: number): number {
+	let depth = 0;
+	for (let k = from; k < to; k++) {
+		if (escapedAt(text, k)) continue;
+		if (text[k] === '{') depth++;
+		else if (text[k] === '}' && --depth < 0) return -1;
+	}
+	return depth;
+}
+
+/** a change that swaps what opens a group ({\bf made \textbf{) runs on to where the group closes, so it holds whole words */
+export function withWholeGroups(hunks: Hunk[], before: string, after: string, spans: SuggestionSpan[]): Hunk[] {
+	return hunks.map((h, i) => {
+		let depth = openBraces(before, h.aFrom, h.aTo);
+		if (depth <= 0 || depth !== openBraces(after, h.bFrom, h.bTo)) return h;
+		const limit = i + 1 < hunks.length ? hunks[i + 1].aFrom : before.length;
+		for (let k = h.aTo; k < limit; k++) {
+			if (escapedAt(before, k) || (before[k] !== '{' && before[k] !== '}')) continue;
+			depth += before[k] === '{' ? 1 : -1;
+			if (depth > 0) continue;
+			if (spans.some((s) => s.from <= k && s.to >= h.aTo)) return h;
+			return { ...h, aTo: k + 1, bTo: h.bTo + k + 1 - h.aTo };
+		}
+		return h;
+	});
+}
+
 export function snapToWords(hunks: Hunk[], before: string, after: string, spans: SuggestionSpan[], exact = false): Hunk[] {
 	function touches(from: number, to: number) {
 		return spans.some((s) => s.from <= to && s.to >= from);
@@ -249,8 +303,12 @@ export function snapToWords(hunks: Hunk[], before: string, after: string, spans:
 		if (touches(h.aFrom, h.aTo) || (!exact && neutral(before, after, h))) return h;
 		const left = wordAround(before, h.aFrom);
 		const right = wordAround(before, h.aTo);
-		const grow = left && !touches(left[0], h.aFrom) ? h.aFrom - left[0] : 0;
+		let grow = left && !touches(left[0], h.aFrom) ? h.aFrom - left[0] : 0;
 		const tail = right && !touches(h.aTo, right[1]) ? right[1] - h.aTo : 0;
+		// a command's name is a word with its backslash: \clearpage made \newpage, not clearpage made newpage
+		const from = h.aFrom - grow;
+		const named = h.aTo + tail > from && h.bTo + tail > h.bFrom - grow && LETTER.test(before[from]) && LETTER.test(after[h.bFrom - grow]);
+		if (named && escapedAt(before, from) && !touches(from - 1, from)) grow++;
 		return { aFrom: h.aFrom - grow, aTo: h.aTo + tail, bFrom: h.bFrom - grow, bTo: h.bTo + tail };
 	});
 	const out: Hunk[] = [];

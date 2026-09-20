@@ -118,3 +118,23 @@ export function accentBase(argument: string): string | null {
 export function accented(accent: string, base: string): string {
 	return (base + ACCENTS[accent]).normalize('NFC');
 }
+
+// an accent's letter: a letter accent (\v) ends at a space or a brace, as TeX reads it
+const ACCENT_LETTER = /^\s*\{([^{}]*)\}|^\s+(\\[ij](?![a-zA-Z])|\p{L})/u;
+const SYMBOL_ACCENT_LETTER = /^\s*\{([^{}]*)\}|^\s*(\\[ij](?![a-zA-Z])|\p{L})/u;
+
+/** the accented letter or symbol the command whose backslash is at `at` prints, and where the command ends */
+export function readTexCharacter(s: string, at: number): { text: string; end: number } | null {
+	const name = /^(?:[a-zA-Z]+|[^a-zA-Z\s])/.exec(s.slice(at + 1, at + 32))?.[0];
+	if (!name) return null;
+	let i = at + 1 + name.length;
+	if (Object.hasOwn(SYMBOLS, name)) {
+		if (s.startsWith('{}', i)) i += 2;
+		else while (s[i] === ' ') i++;
+		return { text: SYMBOLS[name], end: i };
+	}
+	if (!Object.hasOwn(ACCENTS, name)) return null;
+	const letter = (/[a-zA-Z]/.test(name) ? ACCENT_LETTER : SYMBOL_ACCENT_LETTER).exec(s.slice(i));
+	const base = letter && accentBase(letter[1] ?? letter[2]);
+	return base ? { text: accented(name, base), end: i + letter[0].length } : null;
+}
