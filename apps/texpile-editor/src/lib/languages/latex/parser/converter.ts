@@ -14,7 +14,8 @@ import {
 	heuristicMarkCommentedMacroCalls,
 	heuristicMarkTexPrimitiveDefs,
 	heuristicMarkDelimitedMacroSpans,
-	heuristicInferUnknownMacroSignatures
+	heuristicInferUnknownMacroSignatures,
+	heuristicGlueBareFileArgs
 } from './heuristics';
 
 export type { PmNode, PmMark, ConversionOptions };
@@ -297,6 +298,9 @@ export function latexToProseMirror(latex: string, options: ConversionOptions = {
 	// math the prose path would text-escape into invalid LaTeX. must run after
 	// heuristicMarkTexPrimitiveDefs so only real call sites remain visible.
 	heuristicMarkDelimitedMacroSpans(ast.content as Node[], latex, delimPairs);
+
+	// `\input name.tex` without braces names the whole file, not the token the parser took
+	heuristicGlueBareFileArgs(ast.content as Node[], latex);
 
 	// drop trailing comments so a command's args can attach across them (see fn comment)
 	stripSamelineComments(ast.content as Node[]);

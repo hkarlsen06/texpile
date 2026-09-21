@@ -362,3 +362,43 @@ describe('emphasis beside a link', () => {
 		expect(parseMarkdownFile(out).doc.toString()).toBe(doc.toString());
 	});
 });
+
+describe('a marker typed at the start of a line', () => {
+	it('after a hard break, the marker is escaped so it does not open a list', () => {
+		const src = 'A backslash break works too\\\nlike this, not.\n';
+		const parsed = parseMarkdownFile(src);
+		const at = posOf(parsed.doc, 'like this');
+		const doc = new Transform(parsed.doc).replaceWith(at, at, parsed.doc.type.schema.text('+ ')).doc;
+		const out = serializeMarkdownFile(parsed, doc);
+		expect(out).toBe('A backslash break works too\\\n\\+ like this, not.\n');
+		expect(parseMarkdownFile(out).doc.toString()).toBe(doc.toString());
+	});
+});
+
+describe('a delimiter that a seam would leave unable to flank', () => {
+	it('emphasis widened to take in a leading space is written afresh, the space outside', () => {
+		const src = '## With ap*t*\n\nText.\n';
+		const parsed = parseMarkdownFile(src);
+		const s = parsed.doc.type.schema;
+		const from = posOf(parsed.doc, ' ap');
+		const doc = new Transform(parsed.doc).addMark(from, from + 4, s.marks.em.create()).doc;
+		const out = serializeMarkdownFile(parsed, doc);
+		expect(out).toBe('## With *apt*\n\nText.\n');
+		expect(parseMarkdownFile(out).doc.child(0).toString()).toBe('heading("With ", em("apt"))');
+	});
+
+	it('a space typed before a closing star in a table cell is moved out of the emphasis', () => {
+		const src = '| a | b |\n| --- | --- |\n| `*x*` | *x* |\n';
+		const parsed = parseMarkdownFile(src);
+		const doc0 = padTables(parsed.doc);
+		// the emphasised x, not the one in the code span
+		let at = -1;
+		doc0.descendants((n, pos) => {
+			if (at < 0 && n.isText && n.marks.some((m) => m.type.name === 'em')) at = pos + 1;
+			return at < 0;
+		});
+		const doc = new Transform(doc0).replaceWith(at, at, doc0.type.schema.text('- ', doc0.resolve(at).marks())).doc;
+		const out = serializeMarkdownFile(parsed, doc);
+		expect(out).toBe('| a | b |\n| --- | --- |\n| `*x*` | *x-* |\n');
+	});
+});

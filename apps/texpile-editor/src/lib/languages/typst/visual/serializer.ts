@@ -294,7 +294,9 @@ function leafBytes(leaf: Node, parent: Node, atStart: boolean, block: Node): str
 	const text = leaf.text ?? '';
 	if (parent.type.spec.code || parent.type.spec.leafText) return text;
 	if (leaf.marks.some((m) => m.type.name === 'code')) return text.includes('`') ? null : text;
-	return escTypst(text, atStart, block.type.name === 'term_title' ? ':' : '');
+	// the colon ending a term is structure: the leaf's own block says so, as does the block
+	// spliced when that is the item holding it
+	return escTypst(text, atStart, parent.type.name === 'term_title' || block.type.name === 'term_title' ? ':' : '');
 }
 
 // a typst marker reads on past the seam into the bytes the file keeps: `@` and `#` eat the word
@@ -305,6 +307,8 @@ function fuses(bytes: string, tail: string): boolean {
 	if (/#[\p{L}\p{N}_.-]*$/u.test(bytes) && /^[\p{L}\p{N}_.([-]/u.test(tail)) return true;
 	if (/https?:\/\/\S*$/.test(bytes) && /^[0-9A-Za-z#$%&*+\-/=@_~[(]/.test(tail)) return true;
 	if (/[/*]$/.test(bytes) && /^[/*]/.test(tail)) return true;
+	// a call written for a mark or a reference ends on `]` or `)`: `.`, `(`, `[` or `;` after it go on with it
+	if (/#\S[^\n]*[\])]$/.test(bytes) && /^(?:[([;]|\.[\p{L}_])/u.test(tail)) return true;
 	// a line break is a backslash and the whitespace after it; anything else there escapes instead
 	if (/(^|[^\\])(\\\\)*\\$/.test(bytes) && /^\S/.test(tail)) return true;
 	return false;
@@ -320,14 +324,17 @@ function seam(before: string, after: string): boolean {
 }
 
 // an underscore the file keeps as text, inside a word (`snake_case`), opens emphasis once the
-// seam takes the word away from one of its sides
-function unbound(head: string, bytes: string, tail: string): boolean {
+// seam takes the word away from one of its sides. What stood beside it in the file is the
+// bytes the change took out where there were any, else the kept bytes on that side
+function unbound(head: string, bytes: string, tail: string, gone: string): boolean {
 	const word = /[\p{L}\p{N}]$/u;
 	const wordStart = /^[\p{L}\p{N}]/u;
 	const after = bytes === '' ? tail : bytes;
 	const before = bytes === '' ? head : bytes;
-	if (/[\p{L}\p{N}]_$/u.test(head) && wordStart.test(tail) && !wordStart.test(after)) return true;
-	if (word.test(head) && /^_[\p{L}\p{N}]/u.test(tail) && !word.test(before)) return true;
+	const wasAfter = gone === '' ? tail : gone;
+	const wasBefore = gone === '' ? head : gone;
+	if (/[\p{L}\p{N}]_$/u.test(head) && wordStart.test(wasAfter) && !wordStart.test(after)) return true;
+	if (word.test(wasBefore) && /^_[\p{L}\p{N}]/u.test(tail) && !word.test(before)) return true;
 	return false;
 }
 
@@ -336,7 +343,11 @@ function unbound(head: string, bytes: string, tail: string): boolean {
 // kept bytes that a fresh line end moves to a line start give the splice up
 function atLineStart(head: string, bytes: string, tail: string): string | null {
 	const out = /(^|\n)[ \t]*$/.test(head) && head !== '' ? escLineStart(bytes) : bytes;
-	return /\n[ \t]*$/.test(out) && /^(?:[-+/=]|\d+\.)/.test(tail) ? null : out;
+	// a marker the file kept mid-line now begins a line: with fresh bytes ending the line above
+	// it, or with the bytes before it taken out
+	const opens = /^(?:[-+/=]|\d+\.)\s/.test(tail) || /^[-+/=]$/.test(tail);
+	if (opens && (/\n[ \t]*$/.test(out) || (bytes === '' && /(^|\n)[ \t]*$/.test(head)))) return null;
+	return out;
 }
 
 /** what continues a child's lines inside its container: the indentation the file gave its second
@@ -354,10 +365,10 @@ const assembly = createBlockAssembly((node, ctx) => serializeTypNode(node, ctx),
 	leafBytes,
 	inlineBytes,
 	mapInlineLeaves,
-	keepApart: (bytes, tail, head) => {
+	keepApart: (bytes, tail, head, gone) => {
 		if (bytes === '' ? seam(head, tail) : seam(head, bytes) || seam(bytes, tail)) return null;
-		if (unbound(head, bytes, tail)) return null;
-		return bytes === '' ? bytes : atLineStart(head, bytes, tail);
+		if (unbound(head, bytes, tail, gone)) return null;
+		return atLineStart(head, bytes, tail);
 	}
 });
 

@@ -500,7 +500,13 @@ function paragraphGap(prev: Neighbour, next: Neighbour, contiguous: boolean, bef
 	const pre = origin?.pre;
 	// a later member of a construct (an item of a list written as one) has no gap of its own
 	if (!contiguous || typeof pre !== 'string' || origin!.member !== 0) return null;
-	return prev.node.type.name !== 'paragraph' || /\\par\s*$/.test(before.slice(-16)) ? pre : null;
+	// a paragraph, or a heading, after a paragraph on a single line end takes a blank line unless
+	// a \par parts them; an environment, a list or a display the paragraph ran into opens on the
+	// file's own gap, as it did
+	const prose = next.node.type.name === 'paragraph' || next.node.type.name === 'heading';
+	if (prev.node.type.name === 'paragraph' && prose && !/\\par\s*$/.test(before.slice(-16))) return null;
+	// a comment ending what was written owns the rest of its line: the next block needs a line of its own
+	return /(^|[^\\])(\\\\)*%[^\n]*\n*$/.test(before) && !pre.startsWith('\n') ? '\n' + pre : pre;
 }
 
 function envBody(node: Node): string {
@@ -517,10 +523,17 @@ const assembly = createBlockAssembly((node, ctx) => serializeNode(node, ctx), {
 	// an item's label is written with \item, by the list handler, from the run at the head of the
 	// item's first block: that block cannot be rendered on its own inside the item's frame
 	spliceChild: (parent, index, was) =>
-		!(parent.type.name === 'list' && index === 0 && (splitLeadingLabel(parent.child(0)) !== null || splitLeadingLabel(was) !== null)),
+		!(
+			parent.type.name === 'list' &&
+			(splitLeadingLabel(parent.child(index)) !== null ||
+				(was !== null && splitLeadingLabel(was) !== null) ||
+				(index === 0 && parent.attrs.itemLabel != null))
+		),
 	// inside a formula, a chip or a code block the text is the source; prose is escaped the way the text handler does
 	leafBytes: (leaf, parent, atStart, _block, ctx) => {
 		if (parent.type.spec.leafText || parent.type.spec.code) return leaf.text ?? '';
+		// a label's bytes sit inside \item[..]: a `]` in them needs the whole bracket braced
+		if (leaf.marks.some((m) => m.type.name === 'item_label') && (leaf.text ?? '').includes(']')) return null;
 		const bytes = bareTextString(
 			leaf.text ?? '',
 			leaf.marks.some((m) => m.type.name === 'code')
@@ -627,7 +640,10 @@ const NODES: Record<string, NodeHandler> = {
 		const before = prev?.type.name === 'heading' || continuesDisplay ? '' : '\n';
 		const after = next?.type.name === 'heading' ? '\n' : '';
 		if (runsIntoDisplay) return before + indent + content + '\n';
-		return before + indent + content + ' \\par\n' + after;
+		// an environment, a list or a display ends the paragraph itself: no \par of its own before
+		// one, as the file had none when the two stood on a single line end
+		const endsItself = !!next && ['list', 'environment', 'block_math', 'table_wrapper', 'image', 'code_block', 'abstract'].includes(next.type.name);
+		return before + indent + content + (endsItself ? '\n' : ' \\par\n') + after;
 	},
 
 	heading(node) {
@@ -793,27 +809,35 @@ const NODES: Record<string, NodeHandler> = {
 		// the label is compared with the source's by its words, which a shadow run would not have
 		const shadowing = shadow;
 		shadow = null;
+		// the block carrying the label: the first, unless a line break at its start left empty
+		// paragraphs in front of it, which \item writes as nothing
+		let first = 0;
 		let labelled: ReturnType<typeof splitLeadingLabel>;
 		try {
-			labelled = node.childCount > 0 ? splitLeadingLabel(node.child(0)) : null;
+			while (first < node.childCount - 1 && isEmptyParagraph(node.child(first)) && splitLeadingLabel(node.child(first + 1)) !== null)
+				first++;
+			labelled = node.childCount > 0 ? splitLeadingLabel(node.child(first)) : null;
 		} finally {
 			shadow = shadowing;
 		}
 		const sourceHolds = itemLabel != null && labelled != null && labelKey(labelled.latex) === labelKey(itemLabel);
 		const label = labelled ? (sourceHolds ? itemLabel : labelled.latex) : itemLabel === '' ? '' : null;
-		const itemCmd = label == null ? '\\item' : `\\item[${label}]`;
+		// a `]` in the label would close the bracket early: braces around it keep it inside
+		const bracketed = label != null && label.includes(']') && !/^\{[^]*\}$/.test(label) ? `{${label}}` : label;
+		const itemCmd = label == null ? '\\item' : `\\item[${bracketed}]`;
 
 		// an item's untouched blocks are written out as their bytes; the labelled first block is shown
 		// without its label, so it is always rendered afresh
 		const inners: string[] = [];
 		node.forEach((item, _offset, i) => {
-			const shown = i === 0 && labelled ? labelled.body : item;
+			const shown = i === first && labelled ? labelled.body : item;
 			inners.push(serializeNode(shown, { parent: node, index: i, isLastChild: i === node.childCount - 1, inTableCell: ctx.inTableCell }));
 		});
-		const rendered = assembly.verbatimParts(node, inners, { join: false, keep: (i) => i === 0 && !!labelled });
+		const rendered = assembly.verbatimParts(node, inners, { join: false, keep: (i) => i === first && !!labelled });
 		const parts: string[] = [];
 		node.forEach((item, _offset, i) => {
 			const inner = rendered[i];
+			if (i < first) return;
 			if (item.type.name === 'list') {
 				// only the FIRST of a run of same-kind sub-lists opens \item[]; the rest coalesce
 				// into the same nested env (prevSame means no \begin), and another \item[] would
@@ -824,8 +848,8 @@ const NODES: Record<string, NodeHandler> = {
 				// the break the nested env opens with would put a blank line between the two
 				const afterBody = !!prevChild && prevChild.type.name !== 'list';
 				parts.push(continues ? `\n${inner}` : afterBody ? inner.replace(/^\n/, '') : `\\item[] ${inner}`);
-			} else if (i === 0) {
-				const alone = labelled && !inner.trim() && node.childCount > 1 && node.child(1).type.name !== 'list';
+			} else if (i === first) {
+				const alone = labelled && !inner.trim() && node.childCount > first + 1 && node.child(first + 1).type.name !== 'list';
 				parts.push(alone ? `${itemCmd} \\par` : `${itemCmd}${labelled?.glued ? '' : ' '}${guardItemBody(inner)}`);
 			} else parts.push('\n' + inner); // continuation block within the same item
 		});

@@ -9,7 +9,7 @@ import { Fragment, type Node } from 'prosemirror-model';
 import { createBlockAssembly, type DocSerializeResult } from '$lib/serializer/blockAssembly';
 import type { ParseOrigins, Segment } from '$lib/editor/visual/sourceSpans';
 import type { Ctx } from '$lib/serializer/types';
-import { escMd } from './inlineSyntax';
+import { escLineStart, escMd } from './inlineSyntax';
 import { imageMarkdown, renderInline, mdShadow, isMdHandlerLeaf } from './markdownInline';
 import { listFamily, listMarker, sameList } from './listAttrs';
 
@@ -276,15 +276,64 @@ function continuation(_parent: Node, text: string, head: string): string {
 	return text.startsWith('>') ? prefix.replace(/>[ \t]*$/, '') : prefix;
 }
 
-// an emphasis delimiter opens only where it can flank: not after a letter when punctuation
-// follows it, and `_` never inside a word; likewise a closing one before a letter. The inline
-// renderer moves such punctuation out of the emphasis when it sees the whole run, so a seam
-// that would leave a delimiter unable to flank gives the splice up
+// how many runs of the delimiter `c` stand unescaped in `s`: an odd count means the next one closes
+function delimiterRuns(s: string, c: string): number {
+	let n = 0;
+	for (let i = 0; i < s.length; i++) {
+		if (s[i] === '\\') {
+			i++;
+			continue;
+		}
+		// a code span's characters are its own
+		if (s[i] === '`') {
+			let fence = 1;
+			while (s[i + fence] === '`') fence++;
+			const close = s.indexOf('`'.repeat(fence), i + fence);
+			i = close < 0 ? s.length : close + fence - 1;
+			continue;
+		}
+		if (s[i] !== c) continue;
+		n++;
+		while (s[i + 1] === c) i++;
+	}
+	return n;
+}
+
+const WORD = /[\p{L}\p{N}]/u;
+const PUNCTUATION = /[\p{P}\p{S}]/u;
+
+// whether a delimiter run of `c` can stand between `prev` and `next`, as the run it is: an
+// opener is left-flanking (not before whitespace; before punctuation only after whitespace,
+// punctuation or the start), a closer right-flanking (the mirror); `_` never opens or closes
+// inside a word
+function flanks(c: string, closer: boolean, prev: string, next: string): boolean {
+	if (closer) {
+		if (prev === '' || /\s/.test(prev)) return false;
+		if (PUNCTUATION.test(prev) && next !== '' && !/\s/.test(next) && !PUNCTUATION.test(next)) return false;
+		return !(c === '_' && WORD.test(next));
+	}
+	if (next === '' || /\s/.test(next)) return false;
+	if (PUNCTUATION.test(next) && prev !== '' && !/\s/.test(prev) && !PUNCTUATION.test(prev)) return false;
+	return !(c === '_' && WORD.test(prev));
+}
+
+// a seam where a delimiter run the file keeps, or the fresh bytes bring, could no longer flank:
+// the inline renderer moves whitespace and punctuation out of the emphasis when it sees the whole
+// run, so such a seam gives the splice up
 function delimSeam(before: string, after: string): boolean {
-	const opening = /^([*_])(.)/su.exec(after);
-	if (opening && /[\p{L}\p{N}]$/u.test(before) && (opening[1] === '_' || /[\p{P}\p{S}]/u.test(opening[2]))) return true;
-	const closing = /(.)([*_])$/su.exec(before);
-	if (closing && /^[\p{L}\p{N}]/u.test(after) && (closing[2] === '_' || /[\p{P}\p{S}]/u.test(closing[1]))) return true;
+	const opening = /^([*_])\1*/.exec(after);
+	if (opening) {
+		const c = opening[1];
+		const closer = delimiterRuns(before, c) % 2 === 1;
+		if (!flanks(c, closer, before[before.length - 1] ?? '', after[opening[0].length] ?? '')) return true;
+	}
+	const closing = /([*_])\1*$/.exec(before);
+	if (closing) {
+		const c = closing[1];
+		const rest = before.slice(0, before.length - closing[0].length);
+		const closer = delimiterRuns(rest, c) % 2 === 1;
+		if (!flanks(c, closer, rest[rest.length - 1] ?? '', after[0] ?? '')) return true;
+	}
 	return false;
 }
 
@@ -297,8 +346,12 @@ const assembly = createBlockAssembly((node, ctx) => serializeMdNode(node, ctx), 
 	leafBytes,
 	inlineBytes,
 	mapInlineLeaves,
-	keepApart: (bytes, tail, head) =>
-		(bytes === '' ? delimSeam(head, tail) : delimSeam(head, bytes) || delimSeam(bytes, tail)) ? null : bytes
+	keepApart: (bytes, tail, head) => {
+		// each seam is read with everything on both sides of it, so a delimiter's run is counted whole
+		if (delimSeam(head, bytes + tail) || (bytes !== '' && delimSeam(head + bytes, tail))) return null;
+		// fresh bytes after a line end (a hard break's) begin a line, where a marker would open a block
+		return bytes !== '' && /\n[ \t]*$/.test(head) ? escLineStart(bytes) : bytes;
+	}
 });
 
 export function serializeToMarkdown(doc: Node): string {

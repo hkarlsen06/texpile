@@ -44,18 +44,25 @@ export function alignEnvironment(
 	const envName = opts.numbered ? opts.environment : `${opts.environment}*`;
 	let inner = extractEnvironmentContent(content, opts.environment);
 	if (inner === null) inner = content.trim();
-	const lines = inner.split(/\\\\(?:\s*\[.*?\])?/);
+	// rows at the even indices, the row breaks between them at the odd ones: a break's spacing
+	// argument (`\\[2mm]`) is the row's, and goes back where it was
+	const parts = inner.split(/(\\\\(?:\s*\[[^\]]*\])?)/);
+	const lines = parts.filter((_, i) => i % 2 === 0);
+	const breaks = parts.filter((_, i) => i % 2 === 1).map((b) => b.replace(/^\\\\\s*/, '\\\\'));
 	// a trailing \\ on the last row leaves one final EMPTY split segment. left in, the re-join
 	// adds a stray separator and the template's own \n compounds into a blank line inside math
 	// mode, which is illegal ("Paragraph ended before \align* was complete"). drop it; the join
 	// places separators only between real rows, the canonical trailing-\\-free form.
-	if (lines.length > 1 && lines[lines.length - 1].trim() === '') lines.pop();
+	if (lines.length > 1 && lines[lines.length - 1].trim() === '') {
+		lines.pop();
+		breaks.pop();
+	}
 	const processed = lines.map((line, i) => {
 		const t = line.trim();
 		const lbl = opts.lineLabels[i] || '';
 		return lbl && opts.numbered ? `${t} \\label{${lbl}}` : t;
 	});
-	let joined = processed.join(' \\\\\n');
+	let joined = processed.map((t, i) => (i < processed.length - 1 ? `${t} ${breaks[i] ?? '\\\\'}\n` : t)).join('');
 	if (opts.label && opts.numbered && opts.environment === 'multline') {
 		joined = joined.replace(/\n$/, '') + ` \\label{${opts.label}}`;
 	}

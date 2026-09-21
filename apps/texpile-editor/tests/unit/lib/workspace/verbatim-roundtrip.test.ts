@@ -1158,3 +1158,139 @@ a & b \\\\
 		expect(parseLatexFile(out).doc.toString()).toBe(doc.toString());
 	});
 });
+
+describe('editing inside a labelled item', () => {
+	const FILE19 = `${PREAMBLE}
+\\begin{itemize}
+\\item[(1)](First stage estimation) Uses x.
+\\item[(2)] Second one.
+\\end{itemize}
+\\end{document}
+`;
+
+	it('a paragraph split after the label keeps one label, written once', () => {
+		const parsed = parseLatexFile(FILE19);
+		const at = posOf(parsed.doc, '(Firs') + 5;
+		const doc = new Transform(parsed.doc).split(at).doc;
+		const out = serializeLatexFile(parsed, doc);
+		expect(out).toContain('\\item[(1)](Firs\n\nt stage estimation) Uses x.\n\\item[(2)] Second one.');
+		expect(out).not.toContain('\\textbf');
+		expect(parseLatexFile(out).doc.toString()).toBe(doc.toString());
+	});
+
+	it('a closing bracket typed into the label is kept inside braces', () => {
+		const parsed = parseLatexFile(FILE19);
+		const at = posOf(parsed.doc, '(2)') + 2;
+		const doc = new Transform(parsed.doc).replaceWith(at, at, schema.text(']+the', parsed.doc.resolve(at).marks())).doc;
+		const out = serializeLatexFile(parsed, doc);
+		expect(out).toContain('\\item[{(2]+the)}] Second one.');
+		expect(parseLatexFile(out).doc.child(1).textContent).toBe(doc.child(1).textContent);
+	});
+});
+
+describe('a bare \\input argument names the whole file', () => {
+	it('reads `\\input name.tex` as one chip and writes it back as written', () => {
+		const src = `${PREAMBLE}
+\\input section5.tex
+\\input section6.tex
+\\input{bibl.tex}
+\\end{document}
+`;
+		const parsed = parseLatexFile(src);
+		expect(parsed.doc.toString()).toBe('doc(includedoc, includedoc, includedoc)');
+		expect(parsed.doc.child(1).attrs.path).toBe('section6.tex');
+		expect(serializeLatexFile(parsed, parsed.doc)).toBe(src);
+		const node = parsed.doc.child(1);
+		const doc = replaceChild(parsed.doc, 1, node.type.create({ ...node.attrs, path: 'section6b.tex' }));
+		expect(serializeLatexFile(parsed, doc)).toBe(src.replace('\\input section6.tex', '\\input{section6b.tex}'));
+	});
+});
+
+describe('a regenerated align keeps its row breaks', () => {
+	it("a row break's spacing argument goes back where it was", () => {
+		const src = `${PREAMBLE}
+Text.
+
+\\begin{eqnarray}\\notag
+a \\\\[2mm]
+&& b \\label{x}
+\\end{eqnarray}
+
+After.
+\\end{document}
+`;
+		const parsed = parseLatexFile(src);
+		const out = serializeLatexFile(parsed, withoutOrigins(parsed.doc));
+		expect(out).toContain('a \\\\[2mm]\n&& b \\label{x}\n\\end{eqnarray}');
+	});
+});
+
+describe('a display the paragraph runs into', () => {
+	it('keeps the single line end, and the line end after a comment closing the paragraph', () => {
+		for (const [gap, kept] of [
+			['\n', '\n'],
+			['\n%\n', '\n%\n']
+		]) {
+			const src = `${PREAMBLE}
+the inclusions are continuous in the sense that${gap}\\begin{align*}
+x=1
+\\end{align*}
+and more.
+\\end{document}
+`;
+			const parsed = parseLatexFile(src);
+			const from = posOf(parsed.doc, 'inclusions');
+			const doc = new Transform(parsed.doc).addMark(from, from + 10, schema.marks.strong.create()).doc;
+			expect(serializeLatexFile(parsed, doc)).toContain(`the \\textbf{inclusions} are continuous in the sense that${kept}\\begin{align*}`);
+		}
+	});
+});
+
+describe('a line break at the very start of a labelled item', () => {
+	it('keeps the label on the item, the empty paragraph written as nothing', () => {
+		const src = `${PREAMBLE}
+\\begin{description}
+\\item[Term] its definition.
+\\item[Another term] a second.
+\\end{description}
+\\end{document}
+`;
+		const parsed = parseLatexFile(src);
+		const doc = new Transform(parsed.doc).split(posOf(parsed.doc, 'Another term')).doc;
+		const out = serializeLatexFile(parsed, doc);
+		expect(out).toContain('\\item[Term] its definition.\n\\item[Another term] a second.\n');
+	});
+
+	it('a closing bracket typed into a label kept as bytes braces the whole label', () => {
+		const src = `${PREAMBLE}
+\\begin{description}
+\\item[T] \\par
+\\textbf{erm} its definition.
+\\end{description}
+\\end{document}
+`;
+		const parsed = parseLatexFile(src);
+		const at = posOf(parsed.doc, 'T') + 1;
+		const doc = new Transform(parsed.doc).replaceWith(at, at, schema.text(']+the', parsed.doc.resolve(at).marks())).doc;
+		const out = serializeLatexFile(parsed, doc);
+		expect(out).toContain('\\item[{T]+the}]');
+		expect(parseLatexFile(out).doc.child(0).textContent).toBe(doc.child(0).textContent);
+	});
+});
+
+describe('a paragraph ending in a comment before a list', () => {
+	it("keeps the file's single line end, so the comment does not swallow the list", () => {
+		const src = `${PREAMBLE}
+Some words before the list:
+%
+\\begin{enumerate}
+\\item One.
+\\end{enumerate}
+\\end{document}
+`;
+		const parsed = parseLatexFile(src);
+		const from = posOf(parsed.doc, 'words');
+		const doc = new Transform(parsed.doc).addMark(from, from + 5, schema.marks.strong.create()).doc;
+		expect(serializeLatexFile(parsed, doc)).toContain('Some \\textbf{words} before the list:\n%\n\\begin{enumerate}');
+	});
+});

@@ -450,3 +450,45 @@ describe('typst: markup that a seam would open', () => {
 		expect(serializeTypstFile(parsed, parsed.doc)).toBe('See #link("https://github.com/typst/typst") here.\n');
 	});
 });
+
+describe('typst: what is typed beside a call or a marker', () => {
+	it('a semicolon after a quote call is escaped, or it would end the call', () => {
+		const src = 'Intro.\n\nAn inline #quote[quotation] sits in running text.\n';
+		const parsed = parseTypstFile(src);
+		const at = posOf(parsed.doc, ' sits');
+		const doc = new Transform(parsed.doc).replaceWith(at, at, parsed.doc.type.schema.text(';')).doc;
+		const out = serializeTypstFile(parsed, doc);
+		expect(out).toContain('#quote[quotation]\\; sits');
+		expect(parseTypstFile(out).doc.child(1).textContent).toBe(doc.child(1).textContent);
+	});
+
+	it('a colon typed into a term is escaped, or it would end the term', () => {
+		const src = 'Intro.\n\n/ Another term: a second definition.\n';
+		const parsed = parseTypstFile(src);
+		const at = posOf(parsed.doc, 'Another') + 4;
+		const doc = new Transform(parsed.doc).replaceWith(at, at, parsed.doc.type.schema.text('_:Foo')).doc;
+		const out = serializeTypstFile(parsed, doc);
+		expect(out).toContain('/ Anot\\_\\:Fooher term: a second definition.');
+		expect(parseTypstFile(out).doc.child(1).toString()).toBe(doc.child(1).toString());
+	});
+
+	it('a deletion leaving a marker at the start of the block writes it escaped', () => {
+		const src = 'Intro.\n\nther t- .\n\nTail.\n';
+		const parsed = parseTypstFile(src);
+		const at = posOf(parsed.doc, 'ther t');
+		const doc = new Transform(parsed.doc).delete(at, at + 'ther t'.length).doc;
+		const out = serializeTypstFile(parsed, doc);
+		expect(out).toContain('\n\n\\- .\n');
+		expect(parseTypstFile(out).doc.child(1).toString()).toBe(doc.child(1).toString());
+	});
+
+	it('an at sign ending an emphasis is escaped, or the delimiter would be read as a reference', () => {
+		const parsed = parseTypstFile('Intro.\n\nplain o\\@key text.\n');
+		const s = parsed.doc.type.schema;
+		const from = posOf(parsed.doc, 'o@');
+		const doc = new Transform(parsed.doc).addMark(from, from + 2, s.marks.em.create()).doc;
+		const out = serializeTypstFile(parsed, doc);
+		expect(out).toContain('_o\\@_key text.');
+		expect(parseTypstFile(out).doc.child(1).toString()).toBe(doc.child(1).toString());
+	});
+});

@@ -87,7 +87,7 @@ export type BlockAssemblyOptions = {
 	shadowChunk?: (node: Node, bytes: string) => string;
 	/** whether a changed child may be rendered on its own inside its container's frame; false
 	 *  for one the container's handler renders together with its frame (an item's label) */
-	spliceChild?: (parent: Node, index: number, was: Node) => boolean;
+	spliceChild?: (parent: Node, index: number, was: Node | null) => boolean;
 	/** what goes before every line but the first of a child written afresh inside its container's
 	 *  frame, told from the bytes the child had (`text`) and what stood on its first line before
 	 *  it (`head`: a list marker, a quote prefix, indentation); null or '' for nothing. Dialects
@@ -112,9 +112,9 @@ export type BlockAssemblyOptions = {
 	/** the fresh `bytes` as they must be written between the file's bytes before them (`head`) and
 	 *  after them (`tail`), so no two of the three read as one (a LaTeX control word before a
 	 *  letter takes a space); `bytes` is empty where the change only took bytes out, and the two
-	 *  sides then meet. Null for a seam the dialect cannot write, which gives up the splice and
-	 *  writes the block afresh */
-	keepApart?: (bytes: string, tail: string, head: string) => string | null;
+	 *  sides then meet; `gone` is what the change took out from between them. Null for a seam the
+	 *  dialect cannot write, which gives up the splice and writes the block afresh */
+	keepApart?: (bytes: string, tail: string, head: string, gone: string) => string | null;
 };
 
 /** how a dialect's own rendering of a container's children is joined */
@@ -341,7 +341,7 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 				} else {
 					const k = slot.k;
 					const child = group[0];
-					if (ref && options.spliceChild && !options.spliceChild(node, k, ref.node)) return null;
+					if (options.spliceChild && !options.spliceChild(node, k, ref?.node ?? null)) return null;
 					// what stood on the child's line before it: a marker, a quote prefix, indentation; for a
 					// fresh child, what the nearest parsed child had
 					// a fresh child continues its lines as the nearest parsed child did
@@ -530,6 +530,7 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 			return out;
 		};
 		type Change = {
+			gone: string;
 			srcFrom: number;
 			srcTo: number;
 			bytes: string;
@@ -608,13 +609,14 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 						);
 			if (bytes === null) return null;
 			// fresh bytes that would fuse with the bytes kept beside them are kept apart
+			const gone = origin.text.slice(from - base, to - base);
 			if (options.keepApart) {
-				const apart = options.keepApart(bytes, origin.text.slice(to - base), origin.text.slice(0, from - base));
+				const apart = options.keepApart(bytes, origin.text.slice(to - base), origin.text.slice(0, from - base), gone);
 				if (apart === null) return null;
 				bytes = apart;
 			}
 			if (prefix) bytes = bytes.replace(/\n/g, '\n' + prefix);
-			changes.push({ srcFrom: from, srcTo: to, bytes, pair: p, exact: bytes === middle, cut, cutEnd, runs });
+			changes.push({ srcFrom: from, srcTo: to, bytes, gone, pair: p, exact: bytes === middle, cut, cutEnd, runs });
 		}
 		if (changes.length === 0) return null;
 		changes.sort((a, b) => a.srcFrom - b.srcFrom);
@@ -640,7 +642,7 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 		if (options.keepApart && changes.length > 1) {
 			for (const c of changes) {
 				const at = shifted(c.srcFrom) - base;
-				if (options.keepApart(c.bytes, text.slice(at + c.bytes.length), text.slice(0, at)) !== c.bytes) return null;
+				if (options.keepApart(c.bytes, text.slice(at + c.bytes.length), text.slice(0, at), c.gone) !== c.bytes) return null;
 			}
 		}
 		// the runs: an untouched leaf's, moved to where its bytes and its node now are; a changed
@@ -917,7 +919,12 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 		if (bytes === null) return null;
 		// fresh bytes that would fuse with the bytes kept beside them are kept apart
 		if (options.keepApart) {
-			const apart = options.keepApart(bytes, origin.text.slice(end - base), origin.text.slice(0, start - base));
+			const apart = options.keepApart(
+				bytes,
+				origin.text.slice(end - base),
+				origin.text.slice(0, start - base),
+				origin.text.slice(start - base, end - base)
+			);
 			if (apart === null) return null;
 			bytes = apart;
 		}

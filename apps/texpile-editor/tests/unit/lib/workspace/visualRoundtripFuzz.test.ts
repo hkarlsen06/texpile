@@ -196,7 +196,9 @@ function textDiff(a: string, b: string): string {
 	while (s < a.length && a[s] === b[s]) s++;
 	let e = 0;
 	while (e < a.length - s && e < b.length - s && a[a.length - 1 - e] === b[b.length - 1 - e]) e++;
-	const cut = (x: string) => JSON.stringify(x.slice(Math.max(0, s - 40), Math.min(x.length - e + 20, s + 300)));
+	// VISUAL_FUZZ_CONTEXT widens the window shown around the first difference
+	const width = Number(process.env.VISUAL_FUZZ_CONTEXT ?? 300);
+	const cut = (x: string) => JSON.stringify(x.slice(Math.max(0, s - 40), Math.min(x.length - e + 20, s + width)));
 	return `  was:    ${cut(a)}\n  became: ${cut(b)}`;
 }
 

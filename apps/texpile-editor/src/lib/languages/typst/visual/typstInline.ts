@@ -293,7 +293,7 @@ function continuesCode(code: string, s: string): boolean {
 	return /[\p{L}\p{N}_-]$/u.test(code) && /^[\p{L}\p{N}\p{M}_-]/u.test(s);
 }
 
-type ActiveMark = { mark: Mark; close: string; expel: boolean };
+type ActiveMark = { mark: Mark; close: string; expel: boolean; call?: boolean };
 
 const KEYWORD_CODE = /^#(if|for|while|context)\b/;
 
@@ -360,6 +360,8 @@ function render(parent: Node, startOfLine: boolean, extra: string, singleLine: b
 		if (escapable && codeEnd === out.length && !KEYWORD_CODE.test(code) && continuesCode(code, piece)) piece = '\\' + piece;
 		codeEnd = -1;
 		if (escapable && /^[\p{L}\p{N}\p{M}\p{Pc}-]/u.test(piece) && /(^|[^\\])(\\\\)*@$/.test(out)) piece = '\\' + piece;
+		// an emphasis delimiter is an identifier character to a reference: the `@` before it is escaped instead
+		if (!escapable && /^[_*]/.test(piece) && /(^|[^\\])(\\\\)*@$/.test(out)) out = out.slice(0, -1) + '\\@';
 		if (/^[/*]/.test(piece) && /(^|[^\\])(\\\\)*\/$/.test(out)) out = out.slice(0, -1) + '\\/';
 		else if (piece.startsWith('/') && /(^|[^\\])(\\\\)*\*$/.test(out)) piece = (escapable ? '\\' : ' ') + piece;
 		out += piece;
@@ -378,7 +380,7 @@ function render(parent: Node, startOfLine: boolean, extra: string, singleLine: b
 			emit(a.close);
 			// a mark written as a call (`#text(fill: ..)[..]`) ends a code expression: text going
 			// straight on from its `]` with `.`, `(` or `[` would read as more of the call
-			if (a.close.endsWith(']') && MARK_DELIMS[a.mark.type.name]?.(a.mark.attrs)?.open.startsWith('#')) {
+			if (a.call && a.close.endsWith(']')) {
 				codeEnd = out.length;
 				code = '#';
 			}
@@ -412,7 +414,7 @@ function render(parent: Node, startOfLine: boolean, extra: string, singleLine: b
 			}
 			if (!d.expel) {
 				emit(d.open);
-				active.push({ mark: m, close: d.close, expel: false });
+				active.push({ mark: m, close: d.close, expel: false, call: d.open.startsWith('#') });
 				bracketBody = d.open.endsWith('[');
 				continue;
 			}
@@ -429,7 +431,7 @@ function render(parent: Node, startOfLine: boolean, extra: string, singleLine: b
 				(isAlnum(runs[end].content[runs[end].content.length - 1]) && isAlnum(charAfterSpan(runs, end, k)));
 			if (intraword) {
 				emit(m.type.name === 'strong' ? '#strong[' : '#emph[');
-				active.push({ mark: m, close: ']', expel: false });
+				active.push({ mark: m, close: ']', expel: false, call: true });
 				bracketBody = true;
 				continue;
 			}
