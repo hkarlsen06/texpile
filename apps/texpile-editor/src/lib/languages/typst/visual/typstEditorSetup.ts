@@ -51,6 +51,7 @@ import { createTocPlugin } from '$lib/editor/visual/extensions/tableofcontents/t
 import { createPersistentSelectionPlugin } from '$lib/editor/visual/extensions/persistentSelection/persistentSelectionPlugin';
 import { proofreadPlugin, spellClickBoundaryPlugin } from '$lib/editor/spellcheck/spellcheckplugin';
 import { createBoundaryClickPlugin } from '$lib/editor/visual/extensions/boundary-click-plugin';
+import { wordSelectionTrim } from '$lib/editor/visual/extensions/wordSelectionTrim';
 import { createBlockHandlePlugin } from '$lib/editor/visual/extensions/block-handle-plugin.svelte';
 import { wholeBlockDragPlugin } from '$lib/editor/visual/extensions/wholeBlockDrag';
 import { createNodeFlashPlugin } from '$lib/editor/visual/extensions/flash-plugin';
@@ -63,6 +64,7 @@ import { typstChipKind } from './extensions/typstChipKind';
 import { IncludeDocView } from '$lib/editor/visual/extensions/includedoc/includeDocView.svelte';
 import { pmComments } from '$lib/editor/visual/extensions/pmComments';
 import type { CommentAnchor } from '$lib/comments/anchor';
+import type { SourceAnchorFn } from '$lib/editor/visual/extensions/pmComments';
 
 // typst-flavored autoformat: = headings, ``` fences, - / + / 1. lists. Deliberately no task
 // rule: the serializer has no typst form for a checkbox, so a task list must not be creatable.
@@ -126,6 +128,8 @@ export type TypstEditorSetup = {
 	onOpenLink?: (href: string) => boolean;
 	onSelectComment?: (id: string) => void;
 	onAddComment?: (anchor: CommentAnchor | null) => void;
+	/** the selection as a range of the file; see pmComments */
+	sourceAnchor?: SourceAnchorFn;
 	addCommentLabel: string;
 };
 
@@ -139,6 +143,7 @@ export function typstEditorPlugins(setup: TypstEditorSetup): Plugin[] {
 		onOpenLink,
 		onSelectComment,
 		onAddComment,
+		sourceAnchor,
 		addCommentLabel
 	} = setup;
 	return [
@@ -206,6 +211,7 @@ export function typstEditorPlugins(setup: TypstEditorSetup): Plugin[] {
 		spellClickBoundaryPlugin, // must precede proofreadPlugin; see its comment
 		proofreadPlugin,
 		createBoundaryClickPlugin(),
+		wordSelectionTrim(),
 		// the Notion-style + / drag / delete gutter, with the typst insert set
 		createBlockHandlePlugin({ items: TYP_BLOCK_INSERT_ITEMS }),
 		wholeBlockDragPlugin(),
@@ -215,6 +221,7 @@ export function typstEditorPlugins(setup: TypstEditorSetup): Plugin[] {
 		...pmComments({
 			onSelect: (id) => onSelectComment?.(id),
 			onAdd: onAddComment,
+			sourceAnchor,
 			addLabel: addCommentLabel
 		})
 	];

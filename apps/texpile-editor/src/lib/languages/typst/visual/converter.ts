@@ -30,6 +30,7 @@ import {
 	EXPRESSION_KINDS
 } from './inlineConvert';
 import { typstMathToLatex } from './mathTranslate';
+import { bytesSpan, concatSpans, noteSpans, standsFor, type LeafSpan, withAttrs } from '$lib/editor/visual/sourceSpans';
 import { tableSeg } from './tableConvert';
 import { figureSeg } from './figureConvert';
 import { headingSeg, headingCallSeg, listSeg, termSeg, quoteSeg, aloneWithLabel } from './segConvert';
@@ -58,7 +59,7 @@ export function gapKind(gap: string): GapKind {
 /** recreate `node` with its typGap; types without the attr pass through unchanged */
 export function withGap(node: PmNode, gap: GapKind): PmNode {
 	if (!node.type.spec.attrs || !('typGap' in node.type.spec.attrs)) return node;
-	return node.type.create({ ...node.attrs, typGap: gap }, node.content, node.marks);
+	return withAttrs(node, { ...node.attrs, typGap: gap });
 }
 
 export function ensureBlocks(blocks: PmNode[]): PmNode[] {
@@ -86,13 +87,17 @@ function fenceBlock(k: SyntaxNode, src: string): PmNode | null {
 	const delim = k.firstChild;
 	if (!delim || delim.name !== 'RawDelim' || delim.to - delim.from < 3 || !/[\r\n]/.test(src.slice(k.from, k.to))) return null;
 	const lang = childOf(k, 'RawLang');
-	const content = children(k)
-		.filter((c) => c.name === 'Text')
-		.map((c) => src.slice(c.from, c.to))
-		.join('\n');
+	const lines = children(k).filter((c) => c.name === 'Text');
+	const content = lines.map((c) => src.slice(c.from, c.to)).join('\n');
+	// each line is its bytes; the line end between two stands for the break and the indent typst dropped
+	const parts: { len: number; spans: LeafSpan[] }[] = [];
+	lines.forEach((c, i) => {
+		if (i > 0) parts.push({ len: 1, spans: standsFor(1, lines[i - 1].to, c.from) });
+		parts.push({ len: c.to - c.from, spans: bytesSpan(c.to - c.from, c.from) });
+	});
 	const infoString = lang ? src.slice(lang.from, lang.to) : '';
 	// no infoString string means NO language recorded: plain text, no settings chip
-	return buildNode('code_block', { lang: infoString, env: 'fence', args: infoString }, textNodes(content));
+	return buildNode('code_block', { lang: infoString, env: 'fence', args: infoString }, textNodes(content, null, concatSpans(parts)));
 }
 
 /**
@@ -195,7 +200,7 @@ export function convertMarkup(kids: SyntaxNode[], src: string): Seg[] {
 						// alone - a fully underlined paragraph serializes as a lone #underline[..] and
 						// must parse back as prose
 						const end = alone.label ?? next;
-						segs.push({ blocks: [rawBlock(src.slice(k.from, end.to))], from: k.from, to: end.to });
+						segs.push({ blocks: [rawBlock(src.slice(k.from, end.to), k.from)], from: k.from, to: end.to });
 						i = alone.next - 1;
 					} else {
 						buf.push(k);
@@ -208,7 +213,7 @@ export function convertMarkup(kids: SyntaxNode[], src: string): Seg[] {
 			case 'LineComment':
 			case 'BlockComment':
 				if (buf.length === 0) {
-					segs.push({ blocks: [rawBlock(src.slice(k.from, k.to))], from: k.from, to: k.to });
+					segs.push({ blocks: [rawBlock(src.slice(k.from, k.to), k.from)], from: k.from, to: k.to });
 				} else {
 					buf.push(k);
 				}
@@ -225,27 +230,23 @@ export function convertMarkup(kids: SyntaxNode[], src: string): Seg[] {
 					const latex = typstMathToLatex(inner);
 					const to = (labelNode ?? k).to;
 					if (latex != null) {
-						segs.push({
-							blocks: [
-								buildNode(
-									'block_math',
-									{
-										label: labelNode ? src.slice(labelNode.from + 1, labelNode.to - 1) : null,
-										numbered: false,
-										environment: null,
-										lineLabels: [],
-										typst: inner,
-										latexOrig: latex
-									},
-									textNodes(latex)
-								)
-							],
-							from: k.from,
-							to
-						});
+						const equation = buildNode(
+							'block_math',
+							{
+								label: labelNode ? src.slice(labelNode.from + 1, labelNode.to - 1) : null,
+								numbered: false,
+								environment: null,
+								lineLabels: [],
+								typst: inner,
+								latexOrig: latex
+							},
+							textNodes(latex)
+						);
+						// the formula stands for its bytes whole: its content is a translation, not the source
+						segs.push({ blocks: [noteSpans(equation, standsFor(1, k.from, to))], from: k.from, to });
 					} else {
 						// untranslatable: the label rides inside the raw island, still byte-exact
-						segs.push({ blocks: [rawBlock(src.slice(k.from, to))], from: k.from, to });
+						segs.push({ blocks: [rawBlock(src.slice(k.from, to), k.from)], from: k.from, to });
 					}
 					i = after - 1;
 				} else {
@@ -285,13 +286,13 @@ function includeOrRaw(hash: SyntaxNode, stmt: SyntaxNode, last: SyntaxNode, src:
 			if (/\.typ$/i.test(path)) return buildNode('includedoc', { path, command: 'typst' });
 		}
 	}
-	return rawBlock(src.slice(hash.from, last.to));
+	return rawBlock(src.slice(hash.from, last.to), hash.from);
 }
 
 /** Recreate `node` with an `orig` attr; types that don't declare it pass through unchanged. */
 function withOrig(node: PmNode, orig: Record<string, unknown>): PmNode {
 	if (!node.type.spec.attrs || !('orig' in node.type.spec.attrs)) return node;
-	return node.type.create({ ...node.attrs, orig }, node.content, node.marks);
+	return withAttrs(node, { ...node.attrs, orig });
 }
 
 export type TypstParseResult = {

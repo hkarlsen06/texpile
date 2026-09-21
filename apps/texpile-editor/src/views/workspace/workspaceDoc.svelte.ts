@@ -51,7 +51,8 @@ export class WorkspaceDoc {
 			rebuildVisual: () => this.rebuildVisualFromSource(),
 			isVisualMode: () => this.modes.mode === 'visual',
 			noteLocalEdit: () => d.visualCollab()?.noteLocalEdit(),
-			clearPendingAnchor: () => (this.modes.pendingVisualAnchor = null)
+			clearPendingAnchor: () => (this.modes.pendingVisualAnchor = null),
+			projectMacros: () => this.projectMacros
 		});
 		// view mode, scroll anchors and cross-mode history live in lib/workspace/viewModeSwitch.svelte.ts
 		this.modes = new ViewModeSwitch({
@@ -61,6 +62,7 @@ export class WorkspaceDoc {
 			setSource: (t) => (this.doc.texSource = t),
 			getDocMeta: () => this.doc.docMeta,
 			getMountedSource: () => this.doc.lastDocSource,
+			getSourceMap: () => this.doc.sourceMap,
 			getEncodingIssue: () => this.doc.encodingIssue,
 			rebuildVisual: () => this.rebuildVisualFromSource(),
 			captureDiffSnapshot: () => void this.diff.snapshot(),

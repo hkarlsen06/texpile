@@ -42,6 +42,7 @@ self.onmessage = (event: MessageEvent<ParseRequest>) => {
 			postamble: parsed.postamble,
 			hadDocumentEnv: parsed.hadDocumentEnv,
 			warnings: parsed.warnings,
+			map: parsed.map,
 			docJSON: parsed.doc.toJSON()
 		});
 	} catch (err) {

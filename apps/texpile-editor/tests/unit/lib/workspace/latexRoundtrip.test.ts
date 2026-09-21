@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Node } from 'prosemirror-model';
+import { EditorState } from 'prosemirror-state';
 import { parseLatexFile, serializeLatexFile } from '../../../../src/lib/workspace/latexRoundtrip';
 
 // workspace-level round-trip on real ProseMirror Nodes (no JSON intermediate)
@@ -33,5 +34,25 @@ describe('parseLatexFile → Node → serializeLatexFile', () => {
 		const p = parseLatexFile(wrap('x'));
 		const out = serializeLatexFile(p, p.doc);
 		expect(typeof out).toBe('string');
+	});
+
+	// the block an edit lands in regenerates; every other byte of the file must survive it, including
+	// the blank lines the body sat between and a command the deterministic rules would spell otherwise
+	it('a word changed in one block leaves every other byte of the file alone', () => {
+		const tex =
+			'\\documentclass{article}\n\\begin{document}\n\nPara one holds ordinary words.\n\nPara two holds an \\emph{emphasised span} and more words.\n\nPara three ends.\n\n\\end{document}\n';
+		const swap = (word: string, into: string) => {
+			const p = parseLatexFile(tex);
+			const state = EditorState.create({ doc: p.doc });
+			let at = -1;
+			state.doc.descendants((n, pos) => {
+				if (at < 0 && n.isText && n.text!.includes(word)) at = pos + n.text!.indexOf(word);
+				return at < 0;
+			});
+			return serializeLatexFile(p, state.apply(state.tr.insertText(into, at, at + word.length)).doc);
+		};
+		expect(swap('ordinary', 'unusual')).toBe(tex.replace('ordinary', 'unusual'));
+		expect(swap('more', 'other')).toBe(tex.replace('more', 'other'));
+		expect(swap('ends', 'stops')).toBe(tex.replace('ends', 'stops'));
 	});
 });

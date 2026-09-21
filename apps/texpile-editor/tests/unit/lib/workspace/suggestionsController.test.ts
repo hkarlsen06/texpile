@@ -22,7 +22,14 @@ vi.mock('$lib/workspace/texpileDir', () => ({
 	ensureTexpileIgnore: async () => {}
 }));
 let who = 'louis';
-vi.mock('$lib/comments/author', () => ({ resolveAuthor: async () => who, forgetAuthor: () => {} }));
+let authorCalls = 0;
+vi.mock('$lib/comments/author', () => ({
+	resolveAuthor: async () => {
+		authorCalls++;
+		return who;
+	},
+	forgetAuthor: () => {}
+}));
 
 const { CommentsController } = await import('$lib/workspace/commentsController.svelte');
 
@@ -34,7 +41,7 @@ function suggestion(id: string, text: string, words: string, restore: string, at
 	return openEvent({ id, file: 'main.tex', anchor: buildAnchor(text, at, at + words.length), body: '', by: 'mei', at: 'now', restore });
 }
 
-function make(initial: string, mode: 'editing' | 'suggesting' = 'editing') {
+function make(initial: string, mode: 'editing' | 'suggesting' = 'editing', name = 'main.tex') {
 	let text = initial;
 	const edits: { from: number; to: number; insert: string }[] = [];
 	const ctl = new CommentsController({
@@ -52,7 +59,7 @@ function make(initial: string, mode: 'editing' | 'suggesting' = 'editing') {
 	});
 	const open = async () => {
 		await ctl.load(ROOT);
-		ctl.reanchor(FILE, text);
+		ctl.reanchor(`${ROOT}/${name}`, text);
 	};
 	return { ctl, edits, open, type: (next: string) => (text = next), text: () => text };
 }
@@ -129,6 +136,31 @@ describe('a suggestion in the file', () => {
 		expect(activeSuggestions.current.map((s) => [after.slice(s.from, s.to), s.restore])).toEqual([['tight', 'sharp']]);
 	});
 
+	// resolving it spawns git, and the first comparison awaits it: anything deleted while that runs is
+	// already gone from the file with nothing drawn where it was
+	it('knows who is suggesting before the first comparison needs it', async () => {
+		const before = authorCalls;
+		const { open } = make(TEXT, 'suggesting');
+		await open();
+		await new Promise((r) => setTimeout(r, 0));
+		expect(authorCalls).toBeGreaterThan(before);
+	});
+
+	it('takes a Delete away again when the words are put back where they came from', async () => {
+		const { ctl, open, type } = make(TEXT, 'suggesting');
+		await open();
+		const cut = TEXT.replace('sharp ', '');
+		type(cut);
+		ctl.suggestions.textChanged(FILE, cut);
+		await ctl.suggestions.settle();
+		expect(activeSuggestions.current.map((s) => s.restore)).toEqual(['sharp ']);
+		// an undo, or the same thing typed back by hand
+		type(TEXT);
+		ctl.suggestions.textChanged(FILE, TEXT);
+		await ctl.suggestions.settle();
+		expect(activeSuggestions.current).toEqual([]);
+	});
+
 	it('makes one suggestion of each phrase typed a key at a time, and rejecting them gives the text back', async () => {
 		const start = 'Away from a shock a coarse grid resolves the flow.\n';
 		const { ctl, open, type, text } = make(start, 'suggesting');
@@ -149,6 +181,43 @@ describe('a suggestion in the file', () => {
 			['one fine mesh', 'a coarse grid'],
 			[' all of', '']
 		]);
+		for (const t of ctl.threads.filter((x) => !x.resolved)) expect(await ctl.suggestions.reject(t)).toBe(true);
+		expect(text()).toBe(start);
+	});
+
+	// a .bib has no dialect of its own, so it anchors as LaTeX: braces and @ everywhere, and the
+	// normalizer strips braces
+	it('suggests in a .bib, and rejecting gives the entry back', async () => {
+		const BIB = `@article{sharp2020,\n  title = {Shock capturing on coarse grids},\n  year = {2020}\n}\n`;
+		const { ctl, open, type, text } = make(BIB, 'suggesting', 'refs.bib');
+		await open();
+		const after = BIB.replace('coarse', 'fine');
+		type(after);
+		await ctl.suggestions.beforeSave('refs.bib', after);
+		expect(logged().flatMap((e) => (e.t === 'open' ? [[e.anchor.quote, e.restore]] : []))).toEqual([['fine', 'coarse']]);
+		for (const t of ctl.threads.filter((x) => !x.resolved)) expect(await ctl.suggestions.reject(t)).toBe(true);
+		expect(text()).toBe(BIB);
+	});
+
+	// one gesture should read as one card. A replacement whose first letter matches the word it
+	// replaces leaves a point deletion plus an insertion at the same spot, which used to stay apart
+	it('makes one suggestion of a replacement that starts with the same letter', async () => {
+		const start = `A coarse grid resolves the flow.\n`;
+		const { ctl, open, type, text } = make(start, 'suggesting');
+		await open();
+		let now = start;
+		const at = start.indexOf('coarse');
+		for (const [i, ch] of [...'crude'].entries()) {
+			now = i === 0 ? start.slice(0, at) + ch + start.slice(at + 'coarse'.length) : now.slice(0, at + i) + ch + now.slice(at + i);
+			type(now);
+			ctl.suggestions.textChanged(FILE, now);
+			await new Promise((r) => setTimeout(r, 5));
+		}
+		await ctl.suggestions.settle();
+		expect(now).toBe(`A crude grid resolves the flow.\n`);
+		// one card, and a replacement rather than a Delete beside an Add. The shared first letter is
+		// left out of it on purpose: that letter did not change
+		expect(activeSuggestions.current.map((s) => [s.restore, now.slice(s.from, s.to)])).toEqual([['oarse', 'rude']]);
 		for (const t of ctl.threads.filter((x) => !x.resolved)) expect(await ctl.suggestions.reject(t)).toBe(true);
 		expect(text()).toBe(start);
 	});

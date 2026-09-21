@@ -1,9 +1,7 @@
 // Which view is showing (visual / source / diff), and keeping the scroll position across a switch.
 //
-// Both directions carry two anchors expressed as source-text offsets, resolved positionally via
-// the parse-time orig.start stamps: content matching fails wholesale against an edited buffer,
-// whereas positions only drift. `scroll` is the viewport-top block; `cursor` is the caret mapped
-// proportionally within its block's orig.latex slice.
+// Both directions carry two anchors as file offsets, through the document's source map. `scroll`
+// is the viewport-top block; `cursor` is the caret.
 //
 // Diff is deliberately NOT persisted: a reload restores the last visual/source choice, never diff.
 // It is not a third view any more either - asking for it opens a comparison TAB, and visual/source
@@ -21,8 +19,8 @@ import {
 	placeSourceCaret,
 	type SourceAnchor
 } from '$lib/editor/visual/modeSwitchAnchors';
-import { bodyOffsetOf, type ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
-import { stripFor } from '$lib/editor/visual/stripFor';
+import type { ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
+import type { SourceMap } from '$lib/editor/visual/sourceSpans';
 import { createSourceHistory } from '$lib/workspace/sourceHistory';
 import { caretAfterChange } from '$lib/workspace/changeCaret';
 
@@ -40,6 +38,8 @@ export type ViewModeDeps = {
 	getDocMeta(): DocMeta;
 	/** the text the doc handed to the editor serializes to; behind getSource() while a parse is in flight */
 	getMountedSource(): string | null;
+	/** where every run of the visual doc sits in the source */
+	getSourceMap(): SourceMap;
 	getEncodingIssue(): string | null;
 	rebuildVisual(): void;
 	/** open a comparison of the open file against the last saved version. */
@@ -67,13 +67,6 @@ export class ViewModeSwitch {
 		if (browser && layout.current.viewMode === 'source') this.mode = 'source';
 	}
 
-	/** orig.start stamps are body-relative; bodyOffsetOf knows where the body begins in the FILE
-	 * (fragments synthesize a preamble that is not in the file, so theirs starts at 0) */
-	private bodyOffset(): number {
-		const meta = this.deps.getDocMeta();
-		return meta ? bodyOffsetOf(meta) : 0;
-	}
-
 	/** entering visual mode: consume the anchor once the PM view exists AND its doc matches the
 	 * current source. On the edited path the editor first mounts with the STALE doc while the
 	 * worker re-parse runs; consuming then would resolve against the wrong document. */
@@ -83,7 +76,7 @@ export class ViewModeSwitch {
 		if (!v || anchor == null || this.mode !== 'visual') return;
 		if (this.deps.getSource() !== this.deps.getMountedSource()) return; // parse in flight
 		this.pendingVisualAnchor = null;
-		resolveVisualAnchor(v, anchor, this.bodyOffset(), stripFor(this.deps.getKind()));
+		resolveVisualAnchor(v, anchor, this.deps.getSourceMap());
 	}
 
 	/** mirror into the store the editors read */
@@ -110,7 +103,7 @@ export class ViewModeSwitch {
 		if (structured) {
 			this.history.capture(d.getSource()); // flush the pre-switch state into the cross-mode history
 			// scroll sync: capture the outgoing view's anchor for the incoming one
-			if (this.mode === 'visual' && mode === 'source') this.sourceScrollAnchor = captureVisualAnchorAt(this.bodyOffset());
+			if (this.mode === 'visual' && mode === 'source') this.sourceScrollAnchor = captureVisualAnchorAt(this.deps.getSourceMap());
 			else if (this.mode === 'source' && mode === 'visual') this.pendingVisualAnchor = captureSourceAnchor();
 			this.beforeSwitch?.();
 		}

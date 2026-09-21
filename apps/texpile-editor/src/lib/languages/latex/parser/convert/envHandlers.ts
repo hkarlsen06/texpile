@@ -10,7 +10,20 @@ import { createTableWrapper, createTable } from './tableConvert';
 import { createFigureWrapper } from './figureConvert';
 import { createList } from './listConvert';
 import { createBlockMath } from './mathConvert';
-import { nodeRawSource } from './origCapture';
+import { capture, nodeRawSpan, positionSpan, rawTextNode } from './origCapture';
+import { bytesSpan, type LeafSpan } from '$lib/editor/visual/sourceSpans';
+
+/** the listing's bytes: its literal content sits inside the environment's own slice exactly once */
+function verbatimBodySpans(env: Environment, raw: string, body: string): LeafSpan[] | null {
+	const p = positionSpan(env);
+	const src = capture.rawSource;
+	if (!p || !src || !raw || !body) return null;
+	const at = src.indexOf(raw, p.from);
+	if (at < 0 || at + raw.length > p.to) return null;
+	const again = src.indexOf(raw, at + 1);
+	if (again >= 0 && again + raw.length <= p.to) return null;
+	return bytesSpan(body.length, at + (raw.length - raw.replace(/^\r?\n/, '').length));
+}
 
 export const transparentEnvironments = new Set(['document']);
 
@@ -30,7 +43,9 @@ export function codeBlockFromVerbatimEnv(env: Environment): PmNode {
 	const args = env.args && env.args.length ? printRaw(env.args) : '';
 	// the language the source already declares, so a listing opens highlighted instead of as plain
 	// text with a dropdown that has to be set by hand every time (and forgot the answer on reload)
-	return buildNode('code_block', { lang: listingLanguage(env.env, args) ?? 'text', env: env.env, args }, [textNode(body)]);
+	return buildNode('code_block', { lang: listingLanguage(env.env, args) ?? 'text', env: env.env, args }, [
+		textNode(body, null, verbatimBodySpans(env, raw, body))
+	]);
 }
 
 export const envHandlers: Record<string, EnvHandler> = {
@@ -69,7 +84,7 @@ export const envHandlers: Record<string, EnvHandler> = {
 	longtable: (env) => {
 		const LT_MARKERS = new Set(['endfirsthead', 'endhead', 'endfoot', 'endlastfoot']);
 		const hasMarkers = (env.content as Node[]).some((n) => n.type === 'macro' && LT_MARKERS.has((n as Macro).content));
-		if (hasMarkers) return [buildNode('raw_latex', null, [textNode(nodeRawSource(env) ?? nodeToLatexString(env))])];
+		if (hasMarkers) return [buildNode('raw_latex', null, [rawTextNode(nodeRawSpan(env), nodeToLatexString(env))])];
 		return createTable(env);
 	},
 	equation: (env) => createBlockMath(env, false),

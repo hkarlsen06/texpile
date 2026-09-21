@@ -5,7 +5,6 @@ import { printRaw } from '@unified-latex/unified-latex-util-print-raw';
 import { getTextContent, getMacroFirstArg } from '../ast-utils';
 import {
 	buildNode,
-	textNode,
 	nodeToLatexString,
 	createDefaultContext,
 	type PmNode,
@@ -16,7 +15,7 @@ import { SCOPED_SWITCHES, FONT_SIZE_SWITCHES } from '../macros';
 import { convertNodesToBlocks } from '../converter';
 import { convertNodesToInline } from './inlineConvert';
 import { macroHasStar } from './macroHandlers';
-import { nodeRawSource } from './origCapture';
+import { nodeRawSource, nodeRawSpan, rawTextNode } from './origCapture';
 
 function extractTableComponents(content: Node[], ctx: ConversionContext) {
 	let caption: PmNode | null = null;
@@ -217,7 +216,7 @@ export function createTableWrapper(env: Environment, ctx: ConversionContext, opt
 		}
 		// genuinely unmodellable (tabulary, tabu, ...): block-parsing would inject an illegal
 		// \par and mangle the column spec, so preserve the whole float verbatim.
-		return [buildNode('raw_latex', null, [textNode(nodeRawSource(env) ?? nodeToLatexString(env))])];
+		return [buildNode('raw_latex', null, [rawTextNode(nodeRawSpan(env), nodeToLatexString(env))])];
 	}
 
 	// the float's own placement specifier ([t], [H], or '' when the source had none), round-

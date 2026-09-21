@@ -22,8 +22,6 @@ const V1_SETTINGS_FIELDS = [
 	'mathPreview',
 	'commentPill',
 	'sourceLineWrap',
-	'visualMaxWidth',
-	'figureResizeStep',
 	'typstPreviewFollow',
 	'editorKeymap',
 	'uiLocale',

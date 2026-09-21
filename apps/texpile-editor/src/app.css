@@ -273,7 +273,7 @@ math-field {
 :root .cm-gutters {
 	background-color: var(--color-surface-50-950); /* opaque: content scrolled sideways must pass under it */
 	color: var(--muted-text);
-	border-right: var(--default-border-width) solid color-mix(in srgb, currentColor 10%, transparent);
+	border-right: none; /* off, not absent: CM's own rule underneath draws a #ddd line on every theme */
 }
 :root .cm-activeLineGutter {
 	background-color: transparent;
@@ -705,13 +705,13 @@ select.input {
 	scrollbar-width: none;
 }
 
-/* The selection toolbar (editor/selectionToolbarRow.ts), in both editors: in the source editor's left margin and
-   above the selection in the visual one. Here rather than in a CodeMirror baseTheme because the colours need a dark
-   mode branch, and it has to read as part of the app's chrome rather than as part of the document. The row is what
-   gets positioned and faded; the buttons inside it are plain chrome. */
+/* The selection toolbar (editor/selectionToolbarRow.ts), floating above the selection in both editors. Here rather
+   than in a CodeMirror baseTheme because the colours need a dark mode branch, and it has to read as part of the app's
+   chrome rather than as part of the document. The row is what gets positioned and faded; the buttons inside it are
+   plain chrome. Over CodeMirror's gutter, which paints at 200: a selection near the left edge puts the row across it. */
 .cm-comment-add-row {
 	position: fixed;
-	z-index: 5;
+	z-index: 250;
 	align-items: center;
 	gap: 2px;
 	opacity: 0;
@@ -786,6 +786,63 @@ select.input {
 .TexpileEditor .pm-suggest-old.pm-suggest-focused {
 	background-color: color-mix(in srgb, var(--diff-delete-tint) 30%, transparent);
 }
+/* The formula a change replaced, typeset beside the one that replaced it: maths has no words to
+   strike, so the two set side by side are the whole of what changed. The rule through it is PAINTED,
+   not text-decoration: mathlive builds its markup out of inline-blocks, and a decoration does not
+   cross into one, so the line would stop at the first box it met. */
+.TexpileEditor .pm-suggest-was {
+	display: inline-block;
+	margin-right: 0.3em;
+	opacity: 0.75;
+	text-decoration: none;
+	background-image: linear-gradient(
+		to bottom,
+		transparent calc(50% - 0.5px),
+		currentColor calc(50% - 0.5px),
+		currentColor calc(50% + 0.5px),
+		transparent calc(50% + 0.5px)
+	);
+}
+.TexpileEditor div.pm-suggest-was {
+	display: block;
+	margin: 0 0 0.3em;
+}
+/* Blocks a suggestion took out. They are gone from the document, so there is nothing left in it to
+   strike and no block that could be tinted without saying a paragraph changed that did not. Same
+   shape as the diff view's removed block, for the same reason: a whole block took a whole block's
+   room, and cramming it into the line beside it collapses it to a sliver. The breaks are its own,
+   which is why it keeps its whitespace. */
+.TexpileEditor .pm-suggest-gone {
+	display: block;
+	margin: 0.35em 0;
+	padding: 0.15em 0.3em;
+	white-space: pre-wrap;
+	border-radius: calc(var(--radius-base) * 0.5);
+}
+/* Where a paragraph break is being put in or taken out. A bar, the way a diff marks one, rather
+   than a pilcrow or a ↵: those are characters the document does not contain and nobody explains. */
+.TexpileEditor .pm-suggest-break,
+.cm-suggest-break {
+	display: inline-block;
+	width: 2px;
+	height: 1.05em;
+	vertical-align: text-bottom;
+	border-radius: 1px;
+	margin-inline: 0.12em;
+}
+.TexpileEditor .pm-suggest-break-added,
+.cm-suggest-break-added {
+	background-color: var(--diff-insert-tint);
+}
+.TexpileEditor .pm-suggest-break-removed,
+.cm-suggest-break-removed {
+	background-color: var(--diff-delete-tint);
+}
+/* the blank lines an added break opens, carried down their left edge like a diff's gutter */
+.cm-suggest-break-lines {
+	box-shadow: inset 2px 0 0 var(--diff-insert-tint);
+}
+
 .TexpileEditor .pm-suggest-partial {
 	background-color: color-mix(in srgb, var(--color-warning-500) 10%, transparent);
 }

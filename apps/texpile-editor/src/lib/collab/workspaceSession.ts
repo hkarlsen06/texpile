@@ -50,8 +50,8 @@ export function visualCollabBridge(deps: VisualCollabBridgeDeps) {
 		set lastParsedSource(v: string | null) {
 			parser.lastParsedSource = v;
 		},
-		get docMeta() {
-			return doc.docMeta;
+		get sourceMap() {
+			return doc.sourceMap;
 		},
 		parse: async (text: string) => (await deps.parse(text)).parsed ?? null,
 		adopt(parsed: ParsedLatexFile, liveDoc: PMNode) {

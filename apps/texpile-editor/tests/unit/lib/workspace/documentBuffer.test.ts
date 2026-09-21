@@ -12,7 +12,8 @@ function parsedWith(text: string): ParsedLatexFile {
 		preamble: '\\documentclass{article}\n\\begin{document}\n',
 		postamble: '\\end{document}\n',
 		hadDocumentEnv: true,
-		warnings: []
+		warnings: [],
+		map: { leaves: [], blocks: [] }
 	};
 }
 

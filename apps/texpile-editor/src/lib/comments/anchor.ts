@@ -13,13 +13,14 @@
 // change to the file.
 
 export { buildAnchor, resolveAnchor, type CommentAnchor, type ResolvedAnchor } from './anchorSearch';
-export { dialectOfPath, normalizeForMatch, type AnchorDialect } from './anchorNormalize';
-export {
-	blockBounds,
-	prepareLoose,
-	resolveAnchorLoose,
-	resolveAnchorLooseIn,
-	resolveFragment,
-	toSourceAnchor,
-	type LooseHaystack
-} from './anchorLoose';
+
+/** which markup family a file is written in; derived from its name, never stored */
+export type AnchorDialect = 'tex' | 'md' | 'typ';
+
+/** anything the visual editor does not render reads as LaTeX */
+export function dialectOfPath(path: string): AnchorDialect {
+	const p = path.toLowerCase();
+	if (p.endsWith('.md') || p.endsWith('.markdown')) return 'md';
+	if (p.endsWith('.typ')) return 'typ';
+	return 'tex';
+}

@@ -15,7 +15,7 @@ import {
 } from '../builders';
 import { convertNodesToInline } from './inlineConvert';
 import { plainArgText } from './plainArgText';
-import { nodeRawSource } from './origCapture';
+import { nodeRawSpan, rawTextNode } from './origCapture';
 
 export type MacroHandler = (macro: Macro, ctx: ConversionContext) => PmNode[] | null;
 
@@ -45,7 +45,7 @@ export const macroHandlers: Record<string, MacroHandler> = {
 	},
 	emph: (macro, ctx) => {
 		const content = getMacroFirstArg(macro);
-		const newCtx = { ...ctx, marks: [...ctx.marks, { type: 'em' }] };
+		const newCtx = { ...ctx, marks: [...ctx.marks, { type: 'em', attrs: { cmd: 'emph' } }] };
 		return convertNodesToInline(content, newCtx);
 	},
 	underline: (macro, ctx) => {
@@ -134,8 +134,8 @@ export const macroHandlers: Record<string, MacroHandler> = {
 	// inside \textbf{...} (\textbf{90.1\%}); without this the enclosing mark silently dropped
 	// for exactly that token.
 	// the logos stay chips: as plain text they came back as the words, not the logos
-	LaTeX: (macro, ctx) => [markChip(buildNode('inline_latex', null, [textNode(nodeRawSource(macro) ?? printRaw(macro))]), ctx)],
-	TeX: (macro, ctx) => [markChip(buildNode('inline_latex', null, [textNode(nodeRawSource(macro) ?? printRaw(macro))]), ctx)],
+	LaTeX: (macro, ctx) => [markChip(buildNode('inline_latex', null, [rawTextNode(nodeRawSpan(macro), printRaw(macro))]), ctx)],
+	TeX: (macro, ctx) => [markChip(buildNode('inline_latex', null, [rawTextNode(nodeRawSpan(macro), printRaw(macro))]), ctx)],
 	// suffix keeps \\* and \\[2ex] as written; command tells \newline from \\ (in a p{} cell
 	// \\ ends the row, \newline does not)
 	'\\': (macro) => [buildNode('hard_break', { lineBreak: true, suffix: macro.args?.length ? printRaw(macro.args) : '' })],

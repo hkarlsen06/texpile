@@ -23,7 +23,9 @@
 	import 'prosemirror-search/style/search.css';
 	import { syncPmComments } from '$lib/editor/visual/extensions/pmCommentsSync.svelte';
 	import type { CommentAnchor } from '$lib/comments/anchor';
-	import type { CommentThread } from '$lib/comments/log';
+	import type { SourceAnchorFn } from '$lib/editor/visual/extensions/pmComments';
+	import type { CommentRange } from '$lib/editor/visual/extensions/comments';
+	import type { RegionParser, SourceMap } from '$lib/editor/visual/sourceSpans';
 	import type { BiblatexReference } from '$lib/languages/bib/biblatex';
 
 	type Props = {
@@ -44,15 +46,22 @@
 		 * block on a large document, and it starts only after the dynamic import below resolves - well
 		 * after this component's own mount - so callers cannot infer it from mounting. */
 		onReady?: () => void;
-		/** review threads on this file; resolved here against the rendered text (see pmComments) */
-		commentThreads?: CommentThread[];
+		/** the file's threads as ranges of its text, placed here through the map */
+		commentRanges?: CommentRange[];
+		sourceMap?: SourceMap;
+		/** the file's text, the stretch of it the document is, and its parser: what suggestions are drawn from */
+		texSource?: string;
+		bodyRange?: { from: number; to: number };
+		regionParser?: RegionParser | null;
+		/** the selection as a range of the file; see pmComments */
+		sourceAnchor?: SourceAnchorFn;
 		/** the thread the reader is looking at, highlighted stronger than the rest */
 		selectedComment?: string | null;
 		/** commented text was clicked. Origin 'visual': unlike source mode's prose clicks, this one
 		 * OPENS the panel - the visual editor has no gutter rail, so the highlight is the only
 		 * affordance pointing at the thread, and select-only left no way in at all. */
 		onSelectComment?: (id: string) => void;
-		/** the reader asked to comment on a selection; the anchor is rendered-dialect (buildPmAnchor) */
+		/** the reader asked to comment on a selection; the anchor is a range of the file (sourceAnchor) */
 		onAddComment?: (anchor: CommentAnchor | null) => void;
 		/** pick citations from Zotero, offered in the context menu when present */
 		onInsertCitation?: () => void;
@@ -79,7 +88,12 @@
 		placeholder = 'Begin your journey here...',
 		onHistoryBoundary,
 		onReady,
-		commentThreads = [],
+		commentRanges = [],
+		sourceMap = { leaves: [], blocks: [] },
+		texSource = '',
+		bodyRange = { from: 0, to: 0 },
+		regionParser = null,
+		sourceAnchor,
 		selectedComment = null,
 		onSelectComment,
 		onAddComment,
@@ -110,6 +124,7 @@
 			onHistoryBoundary,
 			onSelectComment,
 			onAddComment,
+			sourceAnchor,
 			addCommentLabel
 		});
 
@@ -192,8 +207,11 @@
 	// the sync reads editorView.state.doc the swap has already installed the new document.
 	syncPmComments({
 		view: () => editorView,
-		threads: () => commentThreads,
-		dialect: 'tex',
+		ranges: () => commentRanges,
+		map: () => sourceMap,
+		text: () => texSource,
+		body: () => bodyRange,
+		parse: () => regionParser,
 		epoch: () => docEpoch,
 		selected: () => selectedComment,
 		onPlaced: (lost) => onCommentsPlaced?.(lost),
@@ -228,7 +246,7 @@
      nothing, so the viewport upgrades could not run until after it was already on screen -->
 <main bind:this={editor} class={BUILDING_CLASS}></main>
 
-<ContextMenu {onAddComment} {onInsertCitation} />
+<ContextMenu {onAddComment} {sourceAnchor} {onInsertCitation} />
 
 <style lang="postcss">
 	@reference "../../../../app.css";

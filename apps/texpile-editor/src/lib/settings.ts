@@ -10,7 +10,6 @@
 import { browser } from '$lib/runtime';
 import { box } from '$lib/runes/box.svelte';
 import { setLocale as setParaglideLocale } from '$lib/paraglide/runtime';
-import { trailingDebounce } from '$lib/trailingDebounce';
 import { migrateSettingsObject } from '$lib/migration/settings';
 
 export type AppSettings = {
@@ -21,8 +20,6 @@ export type AppSettings = {
 	autosave: boolean;
 	/** Harper spell-check enabled. */
 	spellcheck: boolean;
-	/** image resize snap step as a fraction of \textwidth (0.25 = 25/50/75/100%). */
-	figureResizeStep: number;
 	/** check the update feed (updates.texpile.com) for a newer version on launch; downloads stay click-only. */
 	checkForUpdates: boolean;
 	/** let an MCP client (Claude Code, Claude Desktop) read what the editor is showing. Off by
@@ -53,9 +50,6 @@ export type AppSettings = {
 	commentPill: boolean;
 	/** soft-wrap long lines in Source mode instead of scrolling horizontally. */
 	sourceLineWrap: boolean;
-	/** widest the visual editor's text column may grow, in px. Past this the window pads with
-	 *  empty space rather than stretching the measure, which is why it is adjustable. */
-	visualMaxWidth: number;
 	/** paragraphs in the visual editor fill the column edge to edge, with words split where that helps. */
 	visualJustify: boolean;
 	/** long words may split at line ends in justified text. The hyphens are drawn, never written to the file. */
@@ -108,7 +102,6 @@ const DEFAULTS: AppSettings = {
 	reopenLastFolder: true,
 	autosave: true,
 	spellcheck: false,
-	figureResizeStep: 0.25,
 	checkForUpdates: true,
 	mcpEnabled: false,
 	uiZoom: 1,
@@ -118,8 +111,6 @@ const DEFAULTS: AppSettings = {
 	mathPreview: true,
 	commentPill: true,
 	sourceLineWrap: true,
-	// 768px = the max-w-3xl the editor column was pinned to before this became adjustable
-	visualMaxWidth: 768,
 	visualJustify: true,
 	visualHyphenate: true,
 	typstPreviewFollow: false,
@@ -246,17 +237,6 @@ export async function updateSettingsSettled(partial: Partial<AppSettings>): Prom
 	const n = nativeBridge();
 	if (n?.setSettings) await n.setSettings(partial).catch(() => {});
 	else persist(partial);
-}
-
-// A dragged slider emits a value per pointer move. The STORE has to take every one of them - that
-// is what makes the editor resize under the cursor - but each persist is an IPC round trip and a
-// settings.json rewrite in main, so only the value the user settles on is worth writing.
-const persistSoon = trailingDebounce<Partial<AppSettings>>(250, persist);
-
-/** updateSettings for a continuous control: applies at once, writes to disk once it settles. */
-export function updateSettingsLive(partial: Partial<AppSettings>): void {
-	settings.current = { ...settings.current, ...partial };
-	persistSoon(partial);
 }
 
 /**

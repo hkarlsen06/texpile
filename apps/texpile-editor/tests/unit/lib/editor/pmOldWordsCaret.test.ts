@@ -15,7 +15,7 @@ function typedAfterLanding(side: 'before' | 'after'): string {
 	document.body.appendChild(place);
 	const view = new EditorView(place, { state: EditorState.create({ doc, plugins: [pmSuggestions()] }) });
 	setPmSuggestions(view, [
-		{ id: 'r', from: at, to: at + 'driven'.length, restore: 'led', old: [{ text: 'led', tags: [] }], mine: false, partial: false }
+		{ id: 'r', from: at, to: at + 'driven'.length, restore: 'led', old: [{ text: 'led', marks: [] }], mine: false, partial: false }
 	]);
 	const words = view.dom.querySelector('.pm-suggest-old')!;
 	const neighbour = side === 'before' ? words.previousSibling! : words.nextSibling!;

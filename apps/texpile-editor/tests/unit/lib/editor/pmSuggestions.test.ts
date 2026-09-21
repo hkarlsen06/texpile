@@ -2,43 +2,39 @@
 import { it, expect } from 'vitest';
 import { EditorState, TextSelection } from 'prosemirror-state';
 import { EditorView } from 'prosemirror-view';
-import { schema } from '$lib/languages/latex/schema/latexPMSchema';
 import { buildAnchor } from '$lib/comments/anchor';
-import { editMode, takeTypedSides } from '$lib/comments/activeSuggestions.svelte';
+import { editMode, takeTypedSides, type SuggestionMark } from '$lib/comments/activeSuggestions.svelte';
 import { placePmSuggestions } from '$lib/editor/visual/extensions/pmSuggestionsPlace';
 import { pmSuggestions, pmSuggestionsKey, setPmSuggestions } from '$lib/editor/visual/extensions/pmSuggestions';
+import { parseLatexFile, parseLatexRegion } from '$lib/workspace/latexRoundtrip';
 
 const SOURCE =
-	'\\begin{document}\n' +
-	'Refinement is driven by an estimator.\n\n' +
-	'On each patch we form the residual $r_j$ by inserting the reconstructed solution.\n';
+	'Refinement is driven by an estimator.\n\nOn each patch we form the residual $r_j$ by inserting the reconstructed solution.\n';
+const parsed = parseLatexFile(SOURCE);
 
-function mark(id: string, words: string, restore: string, at = SOURCE.indexOf(words)) {
+function mark(id: string, words: string, restore: string, at = SOURCE.indexOf(words)): SuggestionMark {
 	return { id, from: at, to: at + words.length, restore, mine: false, anchor: buildAnchor(SOURCE, at, at + words.length) };
 }
 
-function mount() {
-	const doc = schema.nodes.doc.create(null, [
-		schema.nodes.paragraph.create(null, schema.text('Refinement is driven by an estimator.')),
-		schema.nodes.paragraph.create(null, [
-			schema.text('On each patch we form the residual '),
-			schema.nodes.inline_math.create({ latex: 'r_j' }),
-			schema.text(' by inserting the reconstructed solution.')
-		])
-	]);
-	const place = document.createElement('div');
-	document.body.appendChild(place);
-	return new EditorView(place, { state: EditorState.create({ doc, plugins: [pmSuggestions()] }) });
+function place(marks: SuggestionMark[]) {
+	return placePmSuggestions(parsed.doc, marks, {
+		text: SOURCE,
+		map: parsed.map,
+		body: { from: 0, to: SOURCE.length },
+		parse: (src) => parseLatexRegion(src)
+	});
 }
 
-it('draws old and new words in their paragraph, and keeps a region drawn across a join', () => {
+function mount() {
+	const place = document.createElement('div');
+	document.body.appendChild(place);
+	return new EditorView(place, { state: EditorState.create({ doc: parsed.doc, plugins: [pmSuggestions()] }) });
+}
+
+it('draws old and new words in their paragraph, and a changed formula whole', () => {
 	const view = mount();
 	const end = SOURCE.indexOf('estimator.') + 'estimator.'.length;
-	const placed = placePmSuggestions(
-		view.state.doc,
-		[mark('replace', 'driven', 'led'), mark('cut', '', ' It is cheap.', end), mark('formula', 'r_j', 'R_j^n')],
-		'tex'
-	);
+	const placed = place([mark('replace', 'driven', 'led'), mark('cut', '', ' It is cheap.', end), mark('formula', 'r_j', 'R_j^n')]);
 	setPmSuggestions(view, placed.ranges);
 
 	const [first, second] = [...view.dom.querySelectorAll('p')];
@@ -46,12 +42,8 @@ it('draws old and new words in their paragraph, and keeps a region drawn across 
 	expect(drawn(first, '.pm-suggest-new')).toEqual(['driven']);
 	expect(drawn(first, '.pm-suggest-old')).toEqual(['led', ' It is cheap.']);
 	expect(first.textContent).toBe('Refinement is leddriven by an estimator. It is cheap.');
-	expect(second.classList.contains('pm-suggest-partial')).toBe(true);
-	expect(drawn(second, '.pm-suggest-old')).toEqual([]);
-
-	const boundary = view.state.doc.child(0).nodeSize;
-	view.dispatch(view.state.tr.join(boundary));
-	expect(view.dom.querySelectorAll('.pm-suggest-partial')).toHaveLength(1);
+	expect(second.querySelector('.inline-math')?.classList.contains('pm-suggest-new')).toBe(true);
+	expect(second.querySelector('.pm-suggest-was')).not.toBeNull();
 	view.destroy();
 });
 
@@ -67,7 +59,7 @@ it('tints a formula among typed words, whose source the formula keeps as content
 it('tints a format change without striking out the words it keeps', () => {
 	const view = mount();
 	const at = 1 + view.state.doc.child(0).textContent.indexOf('driven');
-	const old = [{ text: 'driven', tags: [] }];
+	const old = [{ text: 'driven', marks: [] }];
 	setPmSuggestions(view, [
 		{ id: 'f', from: at, to: at + 'driven'.length, restore: 'driven', old, mine: true, partial: false, format: true }
 	]);
@@ -82,7 +74,7 @@ it('puts what is typed in front of old words when the arrow key put the caret th
 	const text = view.state.doc.child(0).textContent;
 	const at = 1 + text.indexOf('driven');
 	setPmSuggestions(view, [
-		{ id: 'r', from: at, to: at + 'driven'.length, restore: 'led', old: [{ text: 'led', tags: [] }], mine: true, partial: false }
+		{ id: 'r', from: at, to: at + 'driven'.length, restore: 'led', old: [{ text: 'led', marks: [] }], mine: true, partial: false }
 	]);
 	view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, at)));
 	takeTypedSides();
@@ -95,5 +87,46 @@ it('puts what is typed in front of old words when the arrow key put the caret th
 	expect(view.state.doc.textBetween(r.from, r.to)).toBe('driven');
 	expect(view.dom.querySelector('p')?.textContent).toBe('Refinement is mostly leddriven by an estimator.');
 	expect(takeTypedSides()).toEqual({ r: 'before' });
+	view.destroy();
+});
+
+it('stands the caret before the words a delete has just struck out', () => {
+	editMode.current = 'suggesting';
+	const view = mount();
+	const end = 1 + 'Refinement is driven by an estimator.'.length;
+	view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, end)));
+	view.dispatch(view.state.tr.delete(end - 1, end));
+	expect(pmSuggestionsKey.getState(view.state)?.caret).toEqual({ at: end - 1, side: 'before' });
+	// typing is not a delete, and leaves the side to whatever the caret already said
+	view.dispatch(view.state.tr.insertText('x', end - 1));
+	expect(pmSuggestionsKey.getState(view.state)?.caret).toEqual({ at: end, side: 'before' });
+	view.destroy();
+});
+
+// two Deletes that land on one rendered spot (either side of a mark's edge, say) have to be drawn in
+// the order the file holds them, or the reader reads a before/after that is not the change
+it('draws two Deletes at one spot in the order the file holds them', () => {
+	const view = mount();
+	const at = SOURCE.indexOf('driven');
+	const placed = place([mark('first', '', 'one ', at), mark('second', '', 'two ', at)]);
+	setPmSuggestions(view, placed.ranges);
+	const p = view.dom.querySelector('p')!;
+	expect([...p.querySelectorAll('.pm-suggest-old')].map((e) => e.textContent)).toEqual(['one ', 'two ']);
+	expect(p.textContent).toBe('Refinement is one two driven by an estimator.');
+	view.destroy();
+});
+
+it('draws old words with the marks they had, one span a character for the line breaker', () => {
+	const view = mount();
+	const at = SOURCE.indexOf('driven');
+	const src = 'Refinement is \\textbf{led} by an estimator.\n';
+	const bold = parseLatexRegion(src).doc;
+	const strong = bold.child(0).child(1).marks;
+	setPmSuggestions(view, [
+		{ id: 'b', from: 1 + at, to: 1 + at, restore: '\\textbf{led}', old: [{ text: 'led', marks: strong }], mine: false, partial: false }
+	]);
+	const old = view.dom.querySelector('.pm-suggest-old')!;
+	expect(old.querySelector('strong')).not.toBeNull();
+	expect([...old.querySelectorAll('[data-i]')].map((e) => e.getAttribute('data-i'))).toEqual(['0', '1', '2']);
 	view.destroy();
 });

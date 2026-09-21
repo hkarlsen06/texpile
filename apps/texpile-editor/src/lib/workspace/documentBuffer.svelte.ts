@@ -5,9 +5,10 @@
 // serializes straight back into `texSource`, and source mode binds to it directly. No rival copy
 // can drift. Non-.tex text files bypass all that and edit `rawContent` directly.
 import { isDirty } from '$lib/workspace/workspaceStore';
-import { serializeLatexFile, type ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
-import { serializeMarkdownFile } from '$lib/languages/markdown/visual/roundtrip';
-import { serializeTypstFile } from '$lib/languages/typst/visual/roundtrip';
+import { parseLatexRegion, serializeLatexFileDetailed, type ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
+import { parseMarkdownRegion, serializeMarkdownFileDetailed } from '$lib/languages/markdown/visual/roundtrip';
+import { parseTypstRegion, serializeTypstFileDetailed } from '$lib/languages/typst/visual/roundtrip';
+import { emptyMap, type RegionParser, type SourceMap } from '$lib/editor/visual/sourceSpans';
 import { replacePreambleFrontmatter } from '$lib/editor/visual/extensions/raw-latex/frontmatterView';
 import { basename, relativeTo, type Eol } from '$lib/workspace/fileSystem';
 import { citationVariantsFor } from '$lib/languages/latex/visual/extensions/citation/citationVariantsFor';
@@ -66,6 +67,8 @@ export type DocumentBufferDeps = {
 	noteLocalEdit(): void;
 	/** the user is typing: a pending mode-switch scroll anchor is moot */
 	clearPendingAnchor(): void;
+	/** macro-defining text from the main file's include chain, as the parse saw it */
+	projectMacros?(): string;
 };
 
 export class DocumentBuffer {
@@ -89,6 +92,8 @@ export class DocumentBuffer {
 	lastDoc = $state<PMNode | null>(null);
 	/** the texSource `lastDoc` serializes to */
 	lastDocSource: string | null = null;
+	/** where every run and block of `lastDoc` sits in texSource; empty until a parse has landed */
+	sourceMap = $state.raw<SourceMap>(emptyMap());
 	/** a re-parse of texSource is in flight: the doc on screen predates it, so its transactions
 	 * (node views settling on mount, a keystroke) must not serialize over the newer text */
 	visualStale = false;
@@ -106,12 +111,24 @@ export class DocumentBuffer {
 		return hasVisualMode(this.kind) ? this.texSource : this.rawContent;
 	}
 
-	/** serialize the visual doc back to source in the open file's dialect */
-	private serializeFile(doc: PMNode): string {
-		if (!this.docMeta) return this.texSource;
-		if (this.kind === 'md') return serializeMarkdownFile(this.docMeta, doc);
-		if (this.kind === 'typ') return serializeTypstFile(this.docMeta, doc);
-		return serializeLatexFile(this.docMeta, doc);
+	/** parses a stretch of the body as the open file was parsed; null for a kind the visual editor does not render */
+	get regionParser(): RegionParser | null {
+		const kind = this.kind;
+		if (kind === 'md') return parseMarkdownRegion;
+		if (kind === 'typ') return parseTypstRegion;
+		if (kind !== 'tex') return null;
+		const macros = this.deps.projectMacros?.() ?? '';
+		const preamble = this.docMeta?.preamble ?? '';
+		const scan = macros ? `${macros}\n${preamble}` : preamble;
+		return (src) => parseLatexRegion(src, scan);
+	}
+
+	/** serialize the visual doc back to source in the open file's dialect, with where its runs landed */
+	private serializeFile(doc: PMNode): { text: string; map: SourceMap } {
+		if (!this.docMeta) return { text: this.texSource, map: this.sourceMap };
+		if (this.kind === 'md') return serializeMarkdownFileDetailed(this.docMeta, doc);
+		if (this.kind === 'typ') return serializeTypstFileDetailed(this.docMeta, doc);
+		return serializeLatexFileDetailed(this.docMeta, doc);
 	}
 
 	/** display name: root-relative when we have a root, else just the basename */
@@ -127,6 +144,7 @@ export class DocumentBuffer {
 		this.visualDoc = null;
 		this.lastDoc = null;
 		this.lastDocSource = null;
+		this.sourceMap = emptyMap();
 		this.visualStale = false;
 		this.rawContent = '';
 		this.path = null;
@@ -142,6 +160,7 @@ export class DocumentBuffer {
 		this.visualDoc = null;
 		this.lastDoc = null;
 		this.lastDocSource = null;
+		this.sourceMap = emptyMap();
 		this.visualStale = false;
 		this.path = path;
 		this.diskBaseline = text;
@@ -158,6 +177,7 @@ export class DocumentBuffer {
 		this.visualDoc = null;
 		this.lastDoc = null;
 		this.lastDocSource = null;
+		this.sourceMap = emptyMap();
 		this.visualStale = false;
 		this.path = path;
 		this.diskBaseline = text;
@@ -188,6 +208,7 @@ export class DocumentBuffer {
 		this.visualDoc = parsed.doc;
 		this.lastDoc = parsed.doc;
 		this.lastDocSource = source;
+		this.sourceMap = parsed.map;
 		this.visualStale = false;
 		// the citation menu offers what this document's packages define, so it cannot put an
 		// undefined command in the source. Merged, not replaced: the other features have owners.
@@ -205,7 +226,9 @@ export class DocumentBuffer {
 	onVisualChange(doc: PMNode): void {
 		if (!this.docMeta || this.visualStale) return;
 		this.lastDoc = doc;
-		this.texSource = this.serializeFile(doc);
+		const { text, map } = this.serializeFile(doc);
+		this.texSource = text;
+		this.sourceMap = map;
 		this.lastDocSource = this.texSource;
 		// nodeviews settling on load (or an edit undone back to the saved bytes) fire a docChanged
 		// transaction that serializes right back to disk: that isn't an unsaved change, so don't
@@ -226,7 +249,9 @@ export class DocumentBuffer {
 	editFrontmatter(kind: string, inner: string): void {
 		if (!this.docMeta || !this.lastDoc || this.kind !== 'tex') return; // \title/\author is LaTeX-only
 		this.docMeta = { ...this.docMeta, preamble: replacePreambleFrontmatter(this.docMeta.preamble, kind, inner) };
-		this.texSource = serializeLatexFile(this.docMeta, this.lastDoc);
+		const { text, map } = serializeLatexFileDetailed(this.docMeta, this.lastDoc);
+		this.texSource = text;
+		this.sourceMap = map;
 		this.lastDocSource = this.texSource;
 		isDirty.current = true;
 		this.queueSave(this.texSource);

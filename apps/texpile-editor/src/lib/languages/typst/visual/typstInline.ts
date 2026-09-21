@@ -2,6 +2,21 @@
 import type { Node, Mark } from 'prosemirror-model';
 import { latexToTypst } from './latexToTypst';
 import { codeEndsBefore } from './codeExtent';
+import { createShadow, markupPlaceholder } from '$lib/serializer/shadowLeaves';
+
+// nodes whose handler output is one run: their bytes come from attrs, not from text leaves
+const HANDLER_LEAVES = new Set(['raw_latex', 'code_block', 'block_math', 'includedoc', 'horizontal_rule']);
+
+export function isTypHandlerLeaf(node: Node): boolean {
+	return HANDLER_LEAVES.has(node.type.name) || (node.type.name === 'image' && node.childCount === 0);
+}
+
+/** the shadow run that finds every leaf of a regenerated block in its text; see shadowLeaves */
+export const typstShadow = createShadow({
+	placeholder: markupPlaceholder,
+	charEmissions: (ch) => [escTypst(ch), ch],
+	isHandlerLeaf: isTypHandlerLeaf
+});
 
 /** a math node's typst: the stored source while its LaTeX is untouched, else MathLive's
  *  conversion, else the stored source again. never the LaTeX: a .typ cannot hold it */
@@ -172,14 +187,14 @@ function buildRuns(parent: Node, startOfLine: boolean, extra: string, singleLine
 		if (node.isText) {
 			const text = node.text ?? '';
 			if (node.marks.some((m) => m.type.name === 'code')) {
-				runs.push({ content: codeSpan(text), marks: orderedMarks(node.marks), kind: 'other' });
+				runs.push({ content: codeSpan(typstShadow.shadowed(node, text)), marks: orderedMarks(node.marks), kind: 'other' });
 			} else {
 				// a space typed after a hard break stays on the break's line (typst drops
 				// indentation after a line end, so `\` + newline + space would lose it)
 				const prev = runs[runs.length - 1];
 				const marks = orderedMarks(node.marks);
 				if (prev?.kind === 'break' && /^[ \t]/.test(text) && marks.length === 0) prev.content = '\\';
-				runs.push({ content: escTypst(text, atLineStart, extra), marks, kind: 'text' });
+				runs.push({ content: typstShadow.shadowed(node, escTypst(text, atLineStart, extra)), marks, kind: 'text' });
 			}
 			atLineStart = false;
 			return;
@@ -187,20 +202,28 @@ function buildRuns(parent: Node, startOfLine: boolean, extra: string, singleLine
 		switch (node.type.name) {
 			case 'hard_break':
 				if (node.attrs?.lineBreak === false) return; // legacy no-op break
-				runs.push({ content: singleLine ? '\\ ' : '\\\n', marks: [], kind: 'break' });
+				runs.push({ content: typstShadow.shadowed(node, singleLine ? '\\ ' : '\\\n'), marks: [], kind: 'break' });
 				atLineStart = !singleLine;
 				return;
 			case 'inline_latex': {
 				const text = node.textContent;
-				runs.push({ content: text, marks: orderedMarks(node.marks), kind: text.startsWith('//') ? 'comment' : 'other' });
+				runs.push({
+					content: typstShadow.shadowed(node, text),
+					marks: orderedMarks(node.marks),
+					kind: text.startsWith('//') ? 'comment' : 'other'
+				});
 				break;
 			}
 			case 'typ_ref':
-				runs.push({ content: `@${String(node.attrs.target ?? '')}`, marks: orderedMarks(node.marks), kind: 'ref' });
+				runs.push({
+					content: typstShadow.shadowed(node, `@${String(node.attrs.target ?? '')}`),
+					marks: orderedMarks(node.marks),
+					kind: 'ref'
+				});
 				break;
 			case 'inline_math': {
 				const t = inlineMathTypst(node);
-				runs.push({ content: t.trim() ? `$${t}$` : '', marks: orderedMarks(node.marks), kind: 'other' });
+				runs.push({ content: t.trim() ? typstShadow.shadowed(node, `$${t}$`) : '', marks: orderedMarks(node.marks), kind: 'other' });
 				break;
 			}
 			default:

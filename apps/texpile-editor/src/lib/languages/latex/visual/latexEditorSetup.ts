@@ -54,6 +54,7 @@ import { BibliographyNodeView } from '$lib/editor/visual/extensions/bibliography
 import { environmentView } from '$lib/languages/latex/visual/extensions/environment/environmentView.svelte';
 import { IncludeDocView } from '$lib/editor/visual/extensions/includedoc/includeDocView.svelte';
 import { createBoundaryClickPlugin } from '$lib/editor/visual/extensions/boundary-click-plugin';
+import { wordSelectionTrim } from '$lib/editor/visual/extensions/wordSelectionTrim';
 import { createBlockHandlePlugin } from '$lib/editor/visual/extensions/block-handle-plugin.svelte';
 import { wholeBlockDragPlugin } from '$lib/editor/visual/extensions/wholeBlockDrag';
 import { createNodeFlashPlugin } from '$lib/editor/visual/extensions/flash-plugin';
@@ -65,6 +66,7 @@ import { createLinkPlugin } from '$lib/editor/visual/extensions/link';
 import { pmComments } from '$lib/editor/visual/extensions/pmComments';
 import { listRuleWithoutIndent } from './listItemIndent';
 import type { CommentAnchor } from '$lib/comments/anchor';
+import type { SourceAnchorFn } from '$lib/editor/visual/extensions/pmComments';
 
 export type LatexEditorSetup = {
 	/** resolved by the caller's dynamic import so mathlive stays off the critical path */
@@ -75,12 +77,23 @@ export type LatexEditorSetup = {
 	onHistoryBoundary?: (dir: 'undo' | 'redo') => boolean;
 	onSelectComment?: (id: string) => void;
 	onAddComment?: (anchor: CommentAnchor | null) => void;
+	/** the selection as a range of the file; see pmComments */
+	sourceAnchor?: SourceAnchorFn;
 	addCommentLabel: string;
 };
 
 export function latexEditorPlugins(setup: LatexEditorSetup): Plugin[] {
-	const { mathlivePlugin, mlarrowHandlers, imageDir, placeholder, onHistoryBoundary, onSelectComment, onAddComment, addCommentLabel } =
-		setup;
+	const {
+		mathlivePlugin,
+		mlarrowHandlers,
+		imageDir,
+		placeholder,
+		onHistoryBoundary,
+		onSelectComment,
+		onAddComment,
+		sourceAnchor,
+		addCommentLabel
+	} = setup;
 	return [
 		gapCursor(),
 		// drop cursor is inline-styled (not CSS-targetable) and its default black vanishes on dark
@@ -172,6 +185,7 @@ export function latexEditorPlugins(setup: LatexEditorSetup): Plugin[] {
 		proofreadPlugin,
 		spellChipPlugin,
 		createBoundaryClickPlugin(),
+		wordSelectionTrim(),
 		createBlockHandlePlugin(),
 		wholeBlockDragPlugin(),
 		footnoteNumbersPlugin(),
@@ -179,6 +193,7 @@ export function latexEditorPlugins(setup: LatexEditorSetup): Plugin[] {
 		...pmComments({
 			onSelect: (id) => onSelectComment?.(id),
 			onAdd: onAddComment,
+			sourceAnchor,
 			addLabel: addCommentLabel
 		})
 	];

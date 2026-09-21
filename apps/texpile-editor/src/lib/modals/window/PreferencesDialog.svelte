@@ -3,14 +3,14 @@
 	import { X, Languages } from '@lucide/svelte';
 	import { Switch } from '@skeletonlabs/skeleton-svelte';
 	import Modal from '../Modal.svelte';
-	import { settings, updateSettings, updateSettingsLive, type AppSettings } from '$lib/settings';
+	import { settings, updateSettings, type AppSettings } from '$lib/settings';
 	import { layout, updateLayout } from '$lib/storage/layout';
 	import { compileConfig } from '$lib/workspace/projectConfigSync.svelte';
 	import { setSpellcheckEnabled } from '$lib/editor/spellcheck/spellcheckConfig';
 	import { collabHost } from '$lib/collab/hostStore.svelte';
 	import PrefsCollaborationPanel from './PrefsCollaborationPanel.svelte';
 	import PrefsToolchainPanel from './PrefsToolchainPanel.svelte';
-	import { changeUiLocale, keymapOptions, resizeStepOptions, uiLocaleOptions } from './prefsOptions';
+	import { changeUiLocale, keymapOptions, uiLocaleOptions } from './prefsOptions';
 	import AppearanceMode from './AppearanceMode.svelte';
 	import ThemePicker from './ThemePicker.svelte';
 	import { preferencesTab } from '$lib/stores/dialogStore';
@@ -112,12 +112,11 @@
 	hint: string,
 	value: string | number,
 	options: { value: string | number; label: string }[],
-	onChange: (v: string) => void,
-	width = 'w-32'
+	onChange: (v: string) => void
 )}
 	<div class={ROW}>
 		{@render label(text, hint)}
-		<select class="select {width} shrink-0 text-sm" {value} onchange={(e) => onChange((e.currentTarget as HTMLSelectElement).value)}>
+		<select class="select w-32 shrink-0 text-sm" {value} onchange={(e) => onChange((e.currentTarget as HTMLSelectElement).value)}>
 			{#each options as o (o.value)}
 				<option value={o.value}>{o.label}</option>
 			{/each}
@@ -243,24 +242,6 @@
 				</div>
 				{@render sectionHeading(m.prefs_group_visual())}
 				<div class={SUB}>
-					<div class={ROW}>
-						{@render label(m.prefs_visual_width(), m.prefs_visual_width_note())}
-						<div class="w-48 shrink-0">
-							<div class="text-muted mb-1 text-right text-xs tabular-nums">{settings.current.visualMaxWidth ?? 768}px</div>
-							<!-- oninput, not onchange: a width slider is only useful if the column moves under
-									     the cursor. updateSettingsLive applies each value, writing only the settled one. -->
-							<input
-								class="w-full accent-current"
-								type="range"
-								min="560"
-								max="1600"
-								step="16"
-								value={settings.current.visualMaxWidth ?? 768}
-								oninput={(e) => updateSettingsLive({ visualMaxWidth: Number((e.currentTarget as HTMLInputElement).value) })}
-								aria-label={m.prefs_visual_width()}
-							/>
-						</div>
-					</div>
 					{@render toggleRow(m.prefs_visual_justify(), m.prefs_visual_justify_note(), settings.current.visualJustify !== false, (v) =>
 						updateSettings({ visualJustify: v })
 					)}
@@ -273,14 +254,6 @@
 							(v) => updateSettings({ visualHyphenate: v })
 						)}
 					{/if}
-					{@render selectRow(
-						m.prefs_image_resize_step(),
-						m.prefs_image_resize_step_note(),
-						settings.current.figureResizeStep,
-						resizeStepOptions(),
-						(v) => updateSettings({ figureResizeStep: Number(v) }),
-						'w-24'
-					)}
 				</div>
 			{:else if category === 'collaboration'}
 				<PrefsCollaborationPanel />

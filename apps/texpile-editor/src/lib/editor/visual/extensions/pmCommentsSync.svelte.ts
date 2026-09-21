@@ -5,12 +5,11 @@
 //
 // Runs $effects, so it must be called during component init.
 import type { EditorView } from 'prosemirror-view';
-import type { CommentThread } from '$lib/comments/log';
-import type { AnchorDialect } from '$lib/comments/anchor';
-import { setPmComments, focusPmComment, resolvePmComments, setPmCommentPending } from './pmComments';
-import { setPmSuggestions } from './pmSuggestions';
+import type { RegionParser, SourceMap } from '../sourceSpans';
+import type { CommentRange } from './comments';
+import { setPmComments, focusPmComment, placePmComments, setPmCommentPending, pmCommentsKey } from './pmComments';
+import { pmSuggestionsKey, setPmSuggestions } from './pmSuggestions';
 import { placePmSuggestions } from './pmSuggestionsPlace';
-import { isSuggestion } from '$lib/comments/suggest';
 import { activeSuggestions, suggestionVisibility, type SuggestionMark } from '$lib/comments/activeSuggestions.svelte';
 
 const PLACE_MS = 150;
@@ -18,13 +17,19 @@ const PLACE_MS = 150;
 export type PmCommentsSyncArgs = {
 	/** the mounted view, or null until it exists */
 	view: () => EditorView | null;
-	threads: () => CommentThread[];
-	/** the source dialect anchors are matched against; static per editor */
-	dialect: AnchorDialect;
+	/** the file's threads as ranges of its text, resolved by the controller */
+	ranges: () => CommentRange[];
+	/** the file's text, and where the document's runs sit in it */
+	text: () => string;
+	map: () => SourceMap;
+	/** the stretch of the text the document is */
+	body: () => { from: number; to: number };
+	/** parses a stretch of the text as the file was parsed; null when this file has no parser */
+	parse: () => RegionParser | null;
 	/**
 	 * Bumped by the caller when a re-parsed doc is SWAPPED onto the view (updateState rebuilds
 	 * plugin state, dropping the old ranges). Typing must not bump it: ranges map through
-	 * transactions, and re-searching mid-edit could snap a range onto another copy of its text.
+	 * transactions, and looking them up mid-edit would read a map of text the editor is ahead of.
 	 */
 	epoch: () => number;
 	selected: () => string | null;
@@ -39,24 +44,35 @@ export type PmCommentsSyncArgs = {
 };
 
 export function syncPmComments(args: PmCommentsSyncArgs): void {
-	// Re-place threads when the list changes or a swap lands. The fingerprint guard matters
-	// because the threads array usually arrives through an object literal rebuilt on every parent
-	// render - identity alone would re-resolve (a full flatten + search per thread) on every
-	// unrelated state change. An anchor changes only by re-pinning (an `anchor` event), so id +
-	// resolved + the anchor's own offsets are the whole of what the decorations depend on.
+	// Re-place threads when the list changes or a swap lands. Between those the plugin maps its
+	// ranges through every transaction, which is exact, so a thread already placed keeps that
+	// range: only a new one, or one the controller resolved afresh, is looked up in the map. The
+	// fingerprint guard matters because the ranges array usually arrives through an object literal
+	// rebuilt on every parent render.
 	let lastFp = '';
 	let lastEpoch = -1;
+	let lastById = new Map<string, string>();
 	$effect(() => {
 		const v = args.view();
-		const threads = args.threads().filter((t) => !isSuggestion(t));
+		const ranges = args.ranges();
 		const epoch = args.epoch();
 		if (!v) return;
-		const fp = threads.map((t) => `${t.id}:${t.resolved ? 1 : 0}:${t.anchor.start}-${t.anchor.end}`).join('|');
+		const byId = new Map(ranges.map((r) => [r.id, `${r.resolved ? 1 : 0}:${r.from}-${r.to}`]));
+		const fp = [...byId].map(([id, k]) => `${id}:${k}`).join('|');
 		if (fp === lastFp && epoch === lastEpoch) return;
+		const swapped = epoch !== lastEpoch;
 		lastFp = fp;
 		lastEpoch = epoch;
-		const placed = resolvePmComments(v.state.doc, threads, args.dialect);
-		setPmComments(v, placed.ranges);
+		const held = new Map((pmCommentsKey.getState(v.state)?.ranges ?? []).map((r) => [r.id, r]));
+		const keeps = (r: CommentRange) => !swapped && held.has(r.id) && lastById.get(r.id) === byId.get(r.id);
+		lastById = byId;
+		const placed = placePmComments(
+			v.state.doc,
+			ranges.filter((r) => !keeps(r)),
+			args.map()
+		);
+		const kept = ranges.filter(keeps).map((r) => ({ ...held.get(r.id)!, resolved: r.resolved }));
+		setPmComments(v, [...kept, ...placed.ranges]);
 		args.onPlaced?.(placed.lost);
 	});
 
@@ -69,8 +85,17 @@ export function syncPmComments(args: PmCommentsSyncArgs): void {
 		later = null;
 		lastMarks = marks;
 		placedAt = performance.now();
-		const placed = placePmSuggestions(v.state.doc, marks, args.dialect);
-		setPmSuggestions(v, placed.ranges);
+		const parse = args.parse();
+		if (!parse) {
+			setPmSuggestions(v, []);
+			suggestionVisibility.current = { partial: new Set(), hidden: new Set(marks.map((m) => m.id)) };
+			return;
+		}
+		const placed = placePmSuggestions(v.state.doc, marks, { text: args.text(), map: args.map(), body: args.body(), parse });
+		// a mark of a text the editor has moved past keeps its last placement, mapped through the
+		// edits since; the comparison that follows the edit places it afresh
+		const held = (pmSuggestionsKey.getState(v.state)?.ranges ?? []).filter((r) => placed.stale.has(r.id));
+		setPmSuggestions(v, [...held, ...placed.ranges]);
 		suggestionVisibility.current = { partial: placed.partial, hidden: placed.hidden };
 	}
 	$effect(() => {

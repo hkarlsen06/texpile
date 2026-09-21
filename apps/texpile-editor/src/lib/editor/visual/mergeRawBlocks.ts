@@ -13,6 +13,7 @@
 // re-emission path; a member that could not carry a source slice disqualifies its run.
 import { Fragment } from 'prosemirror-model';
 import type { Node as PMNode } from 'prosemirror-model';
+import { bytesSpan, noteSpans, withAttrs } from './sourceSpans';
 
 type Orig = {
 	latex?: string | null;
@@ -101,7 +102,7 @@ export function mergeAdjacentRawBlocks(doc: PMNode, drawn: DrawnCommand = () => 
 			const child = doc.child(i);
 			const o = origOf(child);
 			if (carry && o && typeof o.pre === 'string') {
-				out.push(child.type.create({ ...child.attrs, orig: { ...o, pre: carry + o.pre } }, child.content, child.marks));
+				out.push(withAttrs(child, { ...child.attrs, orig: { ...o, pre: carry + o.pre } }));
 				carry = '';
 			} else {
 				out.push(child);
@@ -144,7 +145,7 @@ export function mergeAdjacentRawBlocks(doc: PMNode, drawn: DrawnCommand = () => 
 				const child = doc.child(k);
 				const o = origOf(child);
 				const owes = k === i && owed && o && typeof o.pre === 'string';
-				out.push(owes ? child.type.create({ ...child.attrs, orig: { ...o, pre: owed + o.pre } }, child.content, child.marks) : child);
+				out.push(owes ? withAttrs(child, { ...child.attrs, orig: { ...o, pre: owed + o.pre } }) : child);
 			}
 			carry = '';
 			carryIntoTail = false;
@@ -157,11 +158,13 @@ export function mergeAdjacentRawBlocks(doc: PMNode, drawn: DrawnCommand = () => 
 			return doc.child(i);
 		})();
 		const type = rawMember.type;
+		const start = typeof first.start === 'number' ? first.start + lead.length : null;
 		const attrs: Record<string, unknown> = {
 			...('lang' in (type.spec.attrs ?? {}) ? { lang: rawMember.attrs.lang } : {}),
-			orig: { latex: text, pre, seq: first.seq, norm: null, start: (first.start ?? 0) + lead.length }
+			orig: { latex: text, pre, seq: first.seq, norm: null, start: start ?? lead.length }
 		};
-		out.push(type.create(attrs, type.schema.text(text)));
+		// the merged text is the source slice, so it maps byte for byte
+		out.push(type.create(attrs, noteSpans(type.schema.text(text), start === null ? null : bytesSpan(text.length, start))));
 		merged = true;
 		i = j + 1;
 	}
@@ -173,7 +176,7 @@ export function mergeAdjacentRawBlocks(doc: PMNode, drawn: DrawnCommand = () => 
 	const restamped = out.map((child, i) => {
 		const o = origOf(child);
 		if (!o || o.seq === i) return child;
-		return child.type.create({ ...child.attrs, orig: { ...o, seq: i } }, child.content, child.marks);
+		return withAttrs(child, { ...child.attrs, orig: { ...o, seq: i } });
 	});
 
 	const attrs: Record<string, unknown> = { ...doc.attrs };

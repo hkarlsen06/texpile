@@ -1,6 +1,7 @@
 // a source edit applied to the mounted visual editor as one undoable step
 import type { EditorView as PMEditorView } from 'prosemirror-view';
 import { computeBlockPatch, syncOrigAttrs } from '$lib/editor/visual/blockPatch';
+import { rememberParseMap } from '$lib/editor/visual/sourceSpans';
 import type { DocumentBuffer } from '$lib/workspace/documentBuffer.svelte';
 import type { ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
 
@@ -23,5 +24,7 @@ export async function patchVisualFromSource(
 	syncOrigAttrs(tr, parsed.doc);
 	if (!tr.steps.length) return false;
 	view.dispatch(tr);
+	// the patched document stands where the parse does, so its blocks take the parse's origins
+	if (view.state.doc.eq(parsed.doc)) rememberParseMap(view.state.doc, parsed.map);
 	return true;
 }

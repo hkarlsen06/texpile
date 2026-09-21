@@ -21,7 +21,7 @@
 	const engines = $derived(engineRows(formats));
 </script>
 
-<div class="border-surface-200-800 divide-surface-200-800 rounded-container max-w-xl divide-y border">
+<div class="border-surface-200-800 divide-surface-200-800 rounded-container divide-y border">
 	{#each engines as e (e.kind)}
 		<div class="flex items-center justify-between gap-4 px-4 py-3">
 			<div class="min-w-0">
@@ -40,7 +40,7 @@
 </div>
 
 {#if toolDirs.rows.length}
-	<div class="mt-3 max-w-xl">
+	<div class="mt-3">
 		{#each toolDirs.rows as row (row.entry)}
 			<div class="border-surface-200-800 flex items-center gap-3 border-b py-1.5">
 				<span class="min-w-0 flex-1 truncate font-mono text-xs" use:tip={row.absolute}>{row.entry}</span>
@@ -62,7 +62,7 @@
 	</div>
 {/if}
 
-<div class="mt-3.5 flex max-w-xl flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+<div class="mt-3.5 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
 	<a class="anchor" href="https://texpile.com/docs/installation" target="_blank" rel="noopener noreferrer">
 		{m.setup_toolchain_install()}
 	</a>

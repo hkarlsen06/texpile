@@ -1,8 +1,7 @@
 // Finding the text an MCP caller names, so a new anchor is built from what is really in the file.
-// Exact first, then the normalized form so a quote copied off a wrapped .tex line still lands;
-// copies that tie are reported back, never guessed between (same policy as anchorSearch)
+// The bytes as given, nothing else; copies that tie are reported back, never guessed between (same
+// policy as anchorSearch)
 import { buildAnchor, contextScore, MAX_HITS, MIN_QUOTE, occurrences, type CommentAnchor } from './anchorSearch';
-import { normalizeForMatch, type AnchorDialect } from './anchorNormalize';
 
 export type LocateRequest = {
 	quote: string;
@@ -20,12 +19,11 @@ export type LocateResult =
 
 type Hit = { from: number; to: number };
 
-export function locateQuote(text: string, req: LocateRequest, dialect: AnchorDialect = 'tex'): LocateResult {
+export function locateQuote(text: string, req: LocateRequest): LocateResult {
 	const quote = req.quote;
 	if (quote.length < MIN_QUOTE) return { ok: false, reason: `the quote is too short to place (under ${MIN_QUOTE} characters)` };
 	let hits: Hit[] = occurrences(text, quote).map((at) => ({ from: at, to: at + quote.length }));
-	if (hits.length === 0) hits = normalizedHits(text, quote, dialect);
-	if (hits.length === 0) return { ok: false, reason: 'the quote was not found in the file' };
+	if (hits.length === 0) return { ok: false, reason: 'the quote was not found in the file; quote the file byte for byte' };
 	if (hits.length >= MAX_HITS) return { ok: false, reason: 'the quote is too common in this file to pin a thread to' };
 	if (hits.length > 1 && (req.prefix || req.suffix)) hits = bestContext(text, hits, req.prefix ?? '', req.suffix ?? '');
 	if (hits.length > 1 && req.line) {
@@ -40,17 +38,6 @@ export function locateQuote(text: string, req: LocateRequest, dialect: AnchorDia
 		};
 	const [h] = hits;
 	return { ok: true, from: h.from, to: h.to, anchor: buildAnchor(text, h.from, h.to) };
-}
-
-/** the same search in canonical space, mapped back to raw offsets; see anchorLoose */
-function normalizedHits(text: string, quote: string, dialect: AnchorDialect): Hit[] {
-	const q = normalizeForMatch(quote, dialect).text;
-	if (q.length < MIN_QUOTE) return [];
-	const n = normalizeForMatch(text, dialect);
-	return occurrences(n.text, q).map((at) => ({
-		from: n.map[at],
-		to: at + q.length < n.map.length ? n.map[at + q.length] : text.length
-	}));
 }
 
 /** the copies whose surroundings match the caller's context best; all of them when they tie */

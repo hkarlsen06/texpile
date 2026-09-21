@@ -10,10 +10,10 @@
 	import { setRemoteCursors, type RemotePeerSel } from '$lib/editor/visual/extensions/remoteCursors';
 	import { applyRemotePatch } from './remotePatch';
 	import { computeBlockPatch, protectCaretBlock } from '$lib/editor/visual/blockPatch';
-	import { buildBlockMap, pmPosToSourceOffset, sourceOffsetToPmPos } from '$lib/editor/visual/sourceMap';
-	import { stripFor } from '$lib/editor/visual/stripFor';
-	import { bodyOffsetOf, type ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
-	import { spliceDiff, EDIT_ORIGIN, SEED_ORIGIN } from '$lib/collab/materialize';
+	import { offsetAtPm, pmAtOffset } from '$lib/editor/visual/sourceMap';
+	import type { SourceMap } from '$lib/editor/visual/sourceSpans';
+	import type { ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
+	import { EDIT_ORIGIN, SEED_ORIGIN } from '$lib/collab/materialize';
 	import { editorViewStore } from '$lib/stores/editorStore';
 	import type { EditSession } from '$lib/collab/editSession';
 
@@ -21,7 +21,8 @@
 		texSource: string;
 		/** null until the first parse completes */
 		lastParsedSource: string | null;
-		readonly docMeta: Pick<ParsedLatexFile, 'preamble' | 'postamble' | 'hadDocumentEnv'> | null;
+		/** where every run of the live doc sits in texSource */
+		readonly sourceMap: SourceMap;
 		/** parse in the worker; null on failure/timeout (the next change retries). */
 		parse(text: string): Promise<ParsedLatexFile | null>;
 		/** adopt a remote parse: new docMeta + the live doc reference (visualDoc/lastDoc handshake). */
@@ -39,16 +40,9 @@
 	};
 	let { session, path, kind, viewMode, api }: Props = $props();
 
-	// all visual dialects share this machinery: the orig stamps, the block map and the block patch
-	// are format-neutral, so only the markup stripper below is chosen per dialect
+	// all visual dialects share this machinery: the source map and the block patch are format-neutral
 	function active() {
 		return session.active && (kind === 'tex' || kind === 'md' || kind === 'typ') && viewMode === 'visual';
-	}
-	function bodyOffset() {
-		return api.docMeta ? bodyOffsetOf(api.docMeta) : 0;
-	}
-	function strip() {
-		return stripFor(kind);
 	}
 
 	// trace the presence pipeline: set window.texpileCursorDebug = true in DevTools
@@ -104,8 +98,8 @@
 		if (session.collabFor(p)?.ytext !== binding.ytext) return;
 		if (binding.ytext.toString() !== snapshot) return scheduleRemotePatch();
 		if (!parsed) return; // unparsable mid-edit state; the next change retries
-		const oldPreLen = bodyOffset();
 		const oldSource = api.texSource;
+		const oldMap = api.sourceMap;
 		const newDoc = parsed.doc;
 		// A pure self-restamp (no remote edit waiting) whose patch would rebuild the block the
 		// caret sits in: hold it. Applying here is what made the editor visibly jump ~1s after
@@ -126,7 +120,7 @@
 		}
 		api.texSource = snapshot;
 		api.lastParsedSource = snapshot;
-		applyRemotePatch(v, newDoc, strip(), oldSource, snapshot, oldPreLen, bodyOffsetOf(parsed));
+		applyRemotePatch(v, newDoc, oldMap, parsed.map, oldSource, snapshot);
 		api.adopt(parsed, v.state.doc);
 		origStale = false;
 		deferredRestamp = false;
@@ -205,27 +199,10 @@
 					scheduleRemotePatch(150);
 				}
 			}
-			const map = buildBlockMap(v.state.doc, bodyOffset());
+			// the map describes texSource as it is now, local edits included
 			const sel = v.state.selection;
-			let a = pmPosToSourceOffset(v.state.doc, map, sel.anchor);
-			let h = sel.head === sel.anchor ? a : pmPosToSourceOffset(v.state.doc, map, sel.head);
-			// the orig stamps describe lastParsedSource; carry the offsets across the local edits
-			// made since, so a caret inside the active edit lands at the splice end (exact while
-			// typing) and everything past it shifts by the edit's delta
-			const lastParsed = api.lastParsedSource;
-			if (lastParsed != null && api.texSource !== lastParsed) {
-				const d = spliceDiff(lastParsed, api.texSource);
-				if (d) {
-					const splice = d;
-					function carry(off: number | null): number | null {
-						if (off == null) return null;
-						if (off >= splice.index + splice.remove) return off + splice.insert.length - splice.remove;
-						return off >= splice.index ? splice.index + splice.insert.length : off;
-					}
-					a = carry(a);
-					h = sel.head === sel.anchor ? a : carry(h);
-				}
-			}
+			const a = offsetAtPm(api.sourceMap, sel.anchor);
+			const h = sel.head === sel.anchor ? a : offsetAtPm(api.sourceMap, sel.head);
 			if (a == null || h == null) return;
 			const ytext = binding.ytext;
 			function clamp(n: number) {
@@ -252,8 +229,7 @@
 	}
 
 	// map every collaborator's awareness cursor into the visual editor and hand the set to the
-	// remote-cursors plugin: relative position -> ytext index -> (carried back to the stamps'
-	// coordinates while local edits await re-stamping) -> PM position via the sourceMap
+	// remote-cursors plugin: relative position -> ytext index -> PM position through the source map
 	function renderRemoteCursors() {
 		const v = editorViewStore.current;
 		if (!v || v.isDestroyed) return;
@@ -262,13 +238,7 @@
 			setRemoteCursors(v, []);
 			return;
 		}
-		const doc = v.state.doc;
-		const map = buildBlockMap(doc, bodyOffset());
-		const lastParsed = api.lastParsedSource;
-		const d = lastParsed != null && api.texSource !== lastParsed ? spliceDiff(lastParsed, api.texSource) : null;
-		function carryBack(off: number): number {
-			return !d ? off : off >= d.index + d.insert.length ? off - d.insert.length + d.remove : off > d.index ? d.index : off;
-		}
+		const map = api.sourceMap;
 		const boundText = binding.ytext;
 		const peers: RemotePeerSel[] = [];
 		const drops: string[] = [];
@@ -294,8 +264,8 @@
 				drops.push(`${clientId}: relpos resolves off-file`);
 				return;
 			}
-			const anchorPm = sourceOffsetToPmPos(doc, map, carryBack(ai), strip());
-			const headPm = ai === hi ? anchorPm : sourceOffsetToPmPos(doc, map, carryBack(hi), strip());
+			const anchorPm = pmAtOffset(map, ai);
+			const headPm = ai === hi ? anchorPm : pmAtOffset(map, hi);
 			if (anchorPm == null || headPm == null) {
 				drops.push(`${clientId}: offset ${ai} maps to no block (preamble?)`);
 				return;

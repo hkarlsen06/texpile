@@ -10,8 +10,6 @@ export type SuggestionMark = {
 	restore: string;
 	mine: boolean;
 	anchor: CommentAnchor;
-	/** which occurrence of the quote this is in the file, asked only when the rendered text cannot tell copies apart */
-	copy?: () => number;
 };
 
 export type DrawnSuggestion = { from: number; to: number; restore: string; mine: boolean };

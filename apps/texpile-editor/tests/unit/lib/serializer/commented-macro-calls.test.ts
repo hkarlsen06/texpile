@@ -63,7 +63,7 @@ describe('frontmatter macro calls with sameline comments are preserved verbatim'
 		// one trailing comment, but it follows prose, not an interleaved arg run: unchanged behaviour
 		const out = rt(String.raw`Some text \emph{x} % trailing note
 more text`);
-		expect(out).toContain('\\textit{x}'); // \emph → \textit, still works
+		expect(out).toContain('\\emph{x}'); // through the normal path, and keeping the command the file wrote
 	});
 
 	// regression guard: a commented macro call nested inside a RAW_WHOLESALE_ARG_MACROS macro's

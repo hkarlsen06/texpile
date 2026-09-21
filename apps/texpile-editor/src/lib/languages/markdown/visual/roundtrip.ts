@@ -7,6 +7,7 @@ import { markdownToProseMirror } from './converter';
 import { serializeToMarkdownDetailed, serializeMdNode } from './serializer';
 import { fillOrigNorms } from '$lib/serializer/blockAssembly';
 import { padTables } from '$lib/editor/visual/padTables';
+import { collectMap, mapToCrlf, rememberParseMap, shiftMap, type RegionParse, type SourceMap } from '$lib/editor/visual/sourceSpans';
 import type { Node } from 'prosemirror-model';
 import type { ParsedLatexFile, ParsePhase } from '$lib/workspace/latexRoundtrip';
 
@@ -51,21 +52,46 @@ export function parseMarkdownFile(markdown: string, _projectMacros = '', onPhase
 		}
 	}
 
-	return { preamble, postamble: '', doc, hadDocumentEnv: preamble.length > 0, warnings: [] };
+	const map = collectMap(doc, preamble.length);
+	rememberParseMap(doc, map);
+	return { preamble, postamble: '', doc, hadDocumentEnv: preamble.length > 0, warnings: [], map };
+}
+
+/** a stretch of the body parsed as the file is, for a comparison; the map's offsets are the stretch's own */
+export function parseMarkdownRegion(body: string): RegionParse {
+	const doc = padTables(markdownToProseMirror(body).doc);
+	return { doc, map: collectMap(doc, 0) };
 }
 
 /** Serializes back to .md, preserving the frontmatter and regenerating only the body. */
 export function serializeMarkdownFile(parsed: Pick<ParsedLatexFile, 'preamble' | 'postamble' | 'hadDocumentEnv'>, doc: Node): string {
-	const { text: body, leadProtected, tailProtected } = serializeToMarkdownDetailed(doc);
+	return serializeMarkdownFileDetailed(parsed, doc).text;
+}
+
+/** the file text and where every run of `doc` landed in it */
+export function serializeMarkdownFileDetailed(
+	parsed: Pick<ParsedLatexFile, 'preamble' | 'postamble' | 'hadDocumentEnv'>,
+	doc: Node
+): { text: string; map: SourceMap } {
+	const { text: body, leadProtected, tailProtected, map } = serializeToMarkdownDetailed(doc);
 	const tail = tailProtected ? '' : '\n';
 	const bom = parsed.preamble.startsWith(BOM) ? BOM : '';
 	const frontmatter = parsed.preamble.slice(bom.length);
 	let out: string;
+	let prefix: string;
 	// no frontmatter: the body IS the file (a protected tail reproduces the exact original
 	// trailing bytes, including a missing final newline)
-	if (!frontmatter) out = bom + body + tail;
-	else if (!body)
+	if (!frontmatter) {
+		prefix = bom;
+		out = bom + body + tail;
+	} else if (!body) {
+		prefix = parsed.preamble;
 		out = parsed.preamble + '\n'; // frontmatter-only file: don't grow blank lines per save
-	else out = `${parsed.preamble}${leadProtected ? '' : '\n\n'}${body}${tail}`;
-	return doc.attrs.eol === '\r\n' ? out.replace(/\r?\n/g, '\r\n') : out;
+	} else {
+		prefix = `${parsed.preamble}${leadProtected ? '' : '\n\n'}`;
+		out = `${prefix}${body}${tail}`;
+	}
+	const shifted = shiftMap(map, prefix.length, prefix.length + body.length);
+	if (doc.attrs.eol !== '\r\n') return { text: out, map: shifted };
+	return { text: out.replace(/\r?\n/g, '\r\n'), map: mapToCrlf(shifted, out) };
 }

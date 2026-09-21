@@ -114,7 +114,42 @@ describe('an edit meeting a suggestion', () => {
 			[['n1', 'dog', 'cat', 'me']],
 			['open:n1']
 		],
-		['a new suggestion takes whole words', 'the cats sat', 'the cat sat', [], 'suggesting', [['n1', 'cat', 'cats', 'me']], ['open:n1']],
+		[
+			'letters put inside a word are added on their own',
+			'you can click it',
+			'you can cliaack it',
+			[],
+			'suggesting',
+			[['n1', 'aa', '', 'me']],
+			['open:n1']
+		],
+		[
+			'letters taken out of a word go on their own too',
+			'the cats sat',
+			'the cat sat',
+			[],
+			'suggesting',
+			[['n1', '', 's', 'me']],
+			['open:n1']
+		],
+		[
+			'a word swapped for another takes whole words',
+			'you can click it',
+			'you can clack it',
+			[],
+			'suggesting',
+			[['n1', 'clack', 'click', 'me']],
+			['open:n1']
+		],
+		[
+			'a space put inside a word takes the whole word',
+			'you can click it',
+			'you can cli ck it',
+			[],
+			'suggesting',
+			[['n1', 'cli ck', 'click', 'me']],
+			['open:n1']
+		],
 		[
 			'a phrase typed over is one suggestion',
 			'it beats all baselines here',
@@ -177,15 +212,6 @@ describe('an edit meeting a suggestion', () => {
 			['open:n1', 'revise:s1']
 		],
 		[
-			'a Delete of yours joins typing at it',
-			'It is sharp.',
-			'It is really sharp.',
-			[point('It is sharp.', 'sharp', 'very ', 'me')],
-			'suggesting',
-			[['s1', 'really ', 'very ', 'me']],
-			['revise:s1']
-		],
-		[
 			'putting the old words back withdraws it',
 			'the dog sat',
 			'the cat sat',
@@ -221,6 +247,15 @@ describe('an edit meeting a suggestion', () => {
 				['n1', 'really ', '', 'me'],
 				['s1', '', 'very ', 'me']
 			]
+		],
+		[
+			'behind your own Delete, the typing joins it into one replacement',
+			'It is sharp.',
+			'It is really sharp.',
+			point('It is sharp.', 'sharp', 'very ', 'me'),
+			'suggesting',
+			'after',
+			[['s1', 'really ', 'very ', 'me']]
 		],
 		[
 			'in front of your own Replace, the typing is a suggestion of its own',
@@ -339,21 +374,28 @@ describe('an edit meeting a suggestion', () => {
 		expect(r.placed).toHaveLength(100);
 	});
 
-	it('keeps a command whole when it is removed, added or renamed', () => {
+	it('diffs a command like any other text: the name changes, the backslash before it stays', () => {
 		const text = 'Text.\n\n\\clearpage\n\n\\appendix\n';
-		const removed = run(text, 'Text.\n\n\\appendix\n', [], 'suggesting');
-		expect(removed.placed.map((s) => s.restore)).toEqual(['\\clearpage\n\n']);
-		const added = run('Text.\n\n\\appendix\n', text, [], 'suggesting');
-		expect(added.placed.map((s) => text.slice(s.from, s.to))).toEqual(['\\clearpage\n\n']);
 		const renamed = 'Text.\n\n\\newpage\n\n\\appendix\n';
 		const kind = run(text, renamed, [], 'suggesting');
-		expect(kind.placed.map((s) => [s.restore, renamed.slice(s.from, s.to)])).toEqual([['\\clearpage', '\\newpage']]);
+		expect(kind.placed.map((s) => [s.restore, renamed.slice(s.from, s.to)])).toEqual([['clearpage', 'newpage']]);
+		const gone = 'Text.\n\n\\appendix\n';
+		const removed = run(text, gone, [], 'suggesting');
+		expect(removed.placed.map((s) => [s.restore, gone.slice(s.from, s.to)])).toEqual([['clearpage\n\n\\', '']]);
+		const added = run(gone, text, [], 'suggesting');
+		expect(added.placed.map((s) => [s.restore, text.slice(s.from, s.to)])).toEqual([['', 'clearpage\n\n\\']]);
 	});
 
-	it('runs a change to what opens a group on to where the group closes', () => {
+	it('leaves a group swap as the word changes it is made of', () => {
+		const before = 'Some {\\it words} and {\\bf bold words}, then more.';
 		const after = 'Some {\\it words} and \\textbf{bold words}, then more.';
-		const { placed } = run('Some {\\it words} and {\\bf bold words}, then more.', after, [], 'suggesting');
-		expect(placed.map((s) => [s.restore, after.slice(s.from, s.to)])).toEqual([['{\\bf bold words}', '\\textbf{bold words}']]);
+		const { placed } = run(before, after, [], 'suggesting');
+		expect(placed.map((s) => [s.restore, after.slice(s.from, s.to)])).toEqual([
+			['{', ''],
+			['bf ', 'textbf{']
+		]);
+		const rejected = placed.reduceRight((t, s) => t.slice(0, s.from) + s.restore + t.slice(s.to), after);
+		expect(rejected).toBe(before);
 	});
 
 	it('suggests by word in text with no spaces', () => {

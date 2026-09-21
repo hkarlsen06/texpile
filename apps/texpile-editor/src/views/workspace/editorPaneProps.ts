@@ -10,6 +10,7 @@ import type { FileKind } from '$lib/workspace/documentBuffer.svelte';
 import type { Tab, CompareRef } from '$lib/workspace/tabs.svelte';
 import type { CommentAnchor } from '$lib/comments/anchor';
 import type { CommentsController } from '$lib/workspace/commentsController.svelte';
+import type { RegionParser, SourceMap } from '$lib/editor/visual/sourceSpans';
 
 export type EditorPaneProps = {
 	loadedPath: string | null;
@@ -37,6 +38,10 @@ export type EditorPaneProps = {
 	onOpenAsText?: (path: string) => void;
 	applyingStarter: boolean;
 	texSource: string;
+	/** where every run of the visual doc sits in texSource */
+	sourceMap: SourceMap;
+	/** parses a stretch of texSource as the file was parsed, for drawing suggestions in the visual editor */
+	regionParser?: RegionParser | null;
 	rawContent: string;
 	visualDoc: PMNode | null;
 	/** stage of the in-flight parse, for the visual-mode loading bar; null = idle */
@@ -94,6 +99,8 @@ export type EditorPaneProps = {
 	commentThreads?: import('$lib/comments/log').CommentThread[];
 	selectedComment?: string | null;
 	onAddComment?: (from: number, to: number) => void;
+	/** a .bib's own view cannot draw a suggestion, so it offers the way to the one that can */
+	onSetViewMode?: (m: 'visual' | 'source') => void;
 	/** pick citations from Zotero and insert them at the caret (host + desktop only) */
 	onInsertCitation?: () => void;
 	/** the visual editor's add: it hands a finished rendered-dialect anchor, not source offsets */

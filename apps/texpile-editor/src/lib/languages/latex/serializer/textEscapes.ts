@@ -47,10 +47,10 @@ export function esc(value: string, mode: EscMode = 'text'): string {
 	return mode === 'text' ? sanitizeText(value) : value;
 }
 
-// em is \textit (not \emph); highlight is soul's \hl. href is NOT escaped.
+// em is \textit unless the file said \emph; highlight is soul's \hl. href is NOT escaped.
 const MARKS: Record<string, (attrs: Record<string, unknown>) => { open: string; close: string }> = {
 	strong: () => ({ open: '\\textbf{', close: '}' }),
-	em: () => ({ open: '\\textit{', close: '}' }),
+	em: (a) => (a.cmd === 'emph' ? { open: '\\emph{', close: '}' } : { open: '\\textit{', close: '}' }),
 	u: () => ({ open: '\\underline{', close: '}' }),
 	sup: () => ({ open: '\\textsuperscript{', close: '}' }),
 	sub: () => ({ open: '\\textsubscript{', close: '}' }),
@@ -63,18 +63,34 @@ const MARKS: Record<string, (attrs: Record<string, unknown>) => { open: string; 
 	highlight: (a) => (a.color == null ? { open: '\\hl{', close: '}' } : { open: `{\\sethlcolor{${esc(String(a.color))}}\\hl{`, close: '}}' })
 };
 
+/**
+ * a bare \url{href} parses to a link whose text IS the href; if unedited, round-trip \url back
+ * instead of widening to \href{href}{href} (a visible styling change under most hyperref setups).
+ * compares against the esc()'d href: `text` is already text-escaped, but \url's own argument must
+ * stay RAW. Returns the call, or null when the text no longer says the href
+ */
+export type BareUrl = (text: string, href: string) => string | null;
+
+const plainBareUrl: BareUrl = (text, href) => (text === esc(href, 'text') ? `\\url{${href}}` : null);
+
+let bareUrl: BareUrl = plainBareUrl;
+
+/** the source map's shadow run stands in for the text; it decides the same way on what the text stood for */
+export function setBareUrl(fn: BareUrl | null): void {
+	bareUrl = fn ?? plainBareUrl;
+}
+
 /** Wrap `result` in each mark's open/close pair, inner to outer. shared with non-text leaves
  * that carry marks (an unknown macro chip under \textbf has no text node to carry the bold). */
 export function applyMarks(text: string, marks: readonly Mark[]): string {
 	let result = text;
 	for (const mark of marks) {
-		// a bare \url{href} parses to a link whose text IS the href; if unedited, round-trip
-		// \url back instead of widening to \href{href}{href} (a visible styling change under
-		// most hyperref setups). compare against the esc()'d href: `result` is already
-		// text-escaped, but \url's own argument must stay RAW.
-		if (mark.type.name === 'link' && mark.attrs?.bare && result === esc(String(mark.attrs.href ?? ''), 'text')) {
-			result = `\\url{${String(mark.attrs.href ?? '')}}`;
-			continue;
+		if (mark.type.name === 'link' && mark.attrs?.bare) {
+			const url = bareUrl(result, String(mark.attrs.href ?? ''));
+			if (url !== null) {
+				result = url;
+				continue;
+			}
 		}
 		const make = MARKS[mark.type.name];
 		if (!make) continue;

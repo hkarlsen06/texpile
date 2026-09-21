@@ -146,6 +146,8 @@
 			onOpenAsText={actions.openAsText}
 			applyingStarter={panes.applyingStarter}
 			texSource={doc.texSource}
+			sourceMap={doc.sourceMap}
+			regionParser={doc.regionParser}
 			rawContent={doc.rawContent}
 			visualDoc={doc.visualDoc}
 			parseProgress={parser.progress}
@@ -193,6 +195,7 @@
 			onCommentsPlaced={actions.visualCommentsPlaced}
 			onSelectComment={actions.selectComment}
 			commentsCtl={fileMode.current ? undefined : commentsCtl}
+			onSetViewMode={actions.setViewMode}
 		/>
 		{#if !fileMode.current && layout.pdfPaneOpen && !layout.pdfPopout}
 			<PreviewPane

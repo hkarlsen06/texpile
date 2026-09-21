@@ -19,7 +19,7 @@ import {
 
 export type { PmNode, PmMark, ConversionOptions };
 
-import { capture, extentOf, nodeExtent, withOrig, repairExtentTail } from './convert/origCapture';
+import { capture, extentOf, nodeExtent, withOrig, repairExtentTail, prefixSpans, startOf } from './convert/origCapture';
 import { macroHandlers } from './convert/macroHandlers';
 import { TABLE_RULE_MACROS } from './convert/tableConvert';
 import { isBlockNode } from './convert/blockKinds';
@@ -201,7 +201,10 @@ export function convertNodesToBlocks(nodes: Node[], options: ConversionOptions):
 			// already buffered it falls through (TeX's % doesn't break a paragraph, so block-
 			// ifying it would split the paragraph).
 			const text = '%' + ((node as { content?: string }).content ?? '');
-			pushBlocks([buildNode('raw_latex', null, [textNode(text)])], nodeExtent(node, cap?.prevEnd ?? 0));
+			pushBlocks(
+				[buildNode('raw_latex', null, [textNode(text, null, prefixSpans(text, startOf(node)))])],
+				nodeExtent(node, cap?.prevEnd ?? 0)
+			);
 		} else if (
 			node.type === 'macro' &&
 			((node as Macro).content === 'indent' || (node as Macro).content === 'noindent') &&
@@ -241,7 +244,8 @@ export function convertNodesToBlocks(nodes: Node[], options: ConversionOptions):
 	if (raw !== null) {
 		// the promoted block covers exactly the paragraph's source, so its orig transfers
 		const porig = (sole!.attrs as { orig?: Record<string, unknown> | null }).orig;
-		const rawBlock = buildNode('raw_latex', null, [textNode(raw)]);
+		const start = typeof porig?.start === 'number' ? porig.start : undefined;
+		const rawBlock = buildNode('raw_latex', null, [textNode(raw, null, prefixSpans(raw, start))]);
 		return [porig ? withOrig(rawBlock, porig) : rawBlock];
 	}
 	return result;

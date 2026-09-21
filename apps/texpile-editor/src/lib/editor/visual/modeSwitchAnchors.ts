@@ -1,11 +1,11 @@
-// mode-switch scroll + cursor sync (visual/source, both structured dialects): both directions carry two anchors
-// as texSource offsets, resolved positionally via the parse-time orig.start stamps (content
-// matching fails wholesale against an edited buffer; positions only drift). scroll = the
-// viewport-top block, cursor = the caret mapped proportionally within its block's orig.latex slice.
+// mode-switch scroll + cursor sync (visual/source, every structured dialect): both directions
+// carry two anchors as file offsets through the source map. scroll = the viewport-top block,
+// cursor = the caret
 import { TextSelection } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
 import { editorViewStore, sourceCmView } from '$lib/stores/editorStore';
-import { buildBlockMap, blockAtPm, blockAtSource, sourceStartAt, pmPosToSourceOffset, sourceOffsetToPmPos } from './sourceMap';
+import type { SourceMap } from './sourceSpans';
+import { blockAtOrBefore, blockAtPm, offsetAtPm, pmAtOffset } from './sourceMap';
 import { flashNodeAt } from './extensions/flash-plugin';
 
 export type VisualAnchor = {
@@ -30,26 +30,22 @@ function findScrollParent(el: HTMLElement | null): HTMLElement | null {
 }
 
 /**
- * Leaving visual mode: viewport-top block offset (scroll) plus the PM caret's source offset
- * (cursor), the exact inverse of the source-to-visual mapping. An off-screen caret is ignored:
- * flashing a line the user wasn't looking at would read as a wrong jump.
- * `bodyOffset` is where the body begins in the FILE (orig.start stamps are body-relative).
+ * Leaving visual mode: the viewport-top block's offset (scroll) plus the caret's (cursor). An
+ * off-screen caret is ignored: flashing a line the user wasn't looking at would read as a wrong jump.
  */
-export function captureVisualAnchor(bodyOffset: number): VisualAnchor | null {
+export function captureVisualAnchor(map: SourceMap): VisualAnchor | null {
 	const v = editorViewStore.current;
 	if (!v) return null;
-	const doc = v.state.doc;
-	const map = buildBlockMap(doc, bodyOffset);
 	const scRect = findScrollParent(v.dom)?.getBoundingClientRect();
 	const scTop = (scRect?.top ?? 0) + 4;
 	const scBottom = scRect?.bottom ?? Number.POSITIVE_INFINITY;
 
 	// scroll anchor: the topmost visible block
 	let scroll: number | null = null;
-	for (const b of map) {
-		const dom = v.nodeDOM(b.pmPos);
+	for (const b of map.blocks) {
+		const dom = v.nodeDOM(b.pmFrom);
 		if (dom instanceof HTMLElement && dom.getBoundingClientRect().bottom > scTop) {
-			scroll = sourceStartAt(map, b.index);
+			scroll = b.srcFrom;
 			break;
 		}
 	}
@@ -60,11 +56,9 @@ export function captureVisualAnchor(bodyOffset: number): VisualAnchor | null {
 	const head = v.state.selection.head;
 	const cb = blockAtPm(map, head);
 	if (cb) {
-		const dom = v.nodeDOM(cb.pmPos);
+		const dom = v.nodeDOM(cb.pmFrom);
 		const r = dom instanceof HTMLElement ? dom.getBoundingClientRect() : null;
-		if (r && r.bottom > scTop && r.top < scBottom) {
-			cursor = pmPosToSourceOffset(doc, map, head) ?? sourceStartAt(map, cb.index);
-		}
+		if (r && r.bottom > scTop && r.top < scBottom) cursor = offsetAtPm(map, head);
 	}
 
 	return scroll == null && cursor == null ? null : { scroll, cursor };
@@ -97,36 +91,25 @@ export function placeSourceCaret(offset: number): void {
  * EditorView's doc-swap effect restores its saved scrollTop in a single rAF registered in this
  * same flush; ours must land after it or the anchor scroll gets overwritten.
  */
-export function resolveVisualAnchor(
-	v: EditorView & { isDestroyed?: boolean },
-	anchor: SourceAnchor,
-	bodyOffset: number,
-	strip?: (s: string) => string
-): void {
+export function resolveVisualAnchor(v: EditorView & { isDestroyed?: boolean }, anchor: SourceAnchor, map: SourceMap): void {
 	requestAnimationFrame(() =>
 		requestAnimationFrame(() => {
 			try {
 				if (v.isDestroyed) return; // the view can be torn down between consume and resolve
-				const doc = v.state.doc; // live doc (includes normalization blocks, which carry no orig)
-				const map = buildBlockMap(doc, bodyOffset);
-				// blockAtSource clamps past the END of the document but returns null before the START,
-				// and every srcStart is at least bodyOffset - so a viewport-top offset of 0, or a caret
-				// anywhere in the preamble, resolved to nothing and the switch became a silent no-op.
-				// On a near-empty file that is EVERY offset in it, which is why creating a .tex and
-				// toggling modes never moved the caret at all. Clamp in both directions.
-				const firstBlock = map.find((b) => b.srcStart != null) ?? map[0] ?? null;
-				// scroll: restore the reading position (the block that topped the source viewport)
-				const scrollHit = blockAtSource(map, anchor.scroll) ?? firstBlock;
+				// an offset in the preamble, or past the end, still lands on a block: the switch must move
+				const scrollHit = blockAtOrBefore(map, anchor.scroll);
 				if (scrollHit && !anchor.caretOnly) {
-					const dom = v.nodeDOM(scrollHit.pmPos);
+					const dom = v.nodeDOM(scrollHit.pmFrom);
 					if (dom instanceof HTMLElement) dom.scrollIntoView({ block: 'start' });
 				}
-				// caret: text-anchored inside the block containing the source cursor, falling back
-				// to the scroll block. no scrollIntoView on a switch: the scroll anchor owns the viewport.
-				const caretPos =
-					(anchor.cursor != null ? sourceOffsetToPmPos(doc, map, anchor.cursor, strip) : null) ?? (scrollHit ? scrollHit.pmPos + 1 : null);
+				// caret: the source cursor's own position, falling back to the scroll block. no
+				// scrollIntoView on a switch: the scroll anchor owns the viewport.
+				const caretPos = (anchor.cursor != null ? pmAtOffset(map, anchor.cursor) : null) ?? (scrollHit ? scrollHit.pmFrom + 1 : null);
 				if (caretPos == null) return; // an empty doc: nothing to place a caret in at all
-				const tr = v.state.tr.setSelection(TextSelection.near(v.state.doc.resolve(caretPos))).setMeta('addToHistory', false);
+				const doc = v.state.doc;
+				const tr = v.state.tr
+					.setSelection(TextSelection.near(doc.resolve(Math.min(caretPos, doc.content.size))))
+					.setMeta('addToHistory', false);
 				v.dispatch(anchor.caretOnly ? tr.scrollIntoView() : tr);
 				// reclaim DOM focus for PM: the mount-time selection can sit inside a CM-backed
 				// nodeview that focuses its inner CodeMirror; PM then never syncs the DOM caret
@@ -136,7 +119,7 @@ export function resolveVisualAnchor(
 				// (flash-plugin) because a bare classList.add doesn't survive PM redraws.
 				if (anchor.caretOnly) return;
 				const flashBlock = blockAtPm(map, caretPos);
-				if (flashBlock) flashNodeAt(v, flashBlock.pmPos);
+				if (flashBlock) flashNodeAt(v, flashBlock.pmFrom);
 			} catch {
 				/* best-effort; never break the mode switch over a scroll */
 			}

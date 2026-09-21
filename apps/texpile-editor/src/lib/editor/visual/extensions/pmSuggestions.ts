@@ -1,11 +1,13 @@
 // suggestions drawn in the visual editor
-import { Plugin, type EditorState } from 'prosemirror-state';
+import { Plugin, type EditorState, type Transaction } from 'prosemirror-state';
+import { ReplaceStep } from 'prosemirror-transform';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import type { PmSuggestionRange } from './pmSuggestionsPlace';
-import type { WordRun } from '$lib/comments/renderedWords';
 import { editMode, mapSuggestionEdges, noteTypedSide, typingSide } from '$lib/comments/activeSuggestions.svelte';
 import type { CaretSide } from '$lib/comments/oldWordsCaret';
+import { breakMark, goneBlocksElement, oldNodeElement, oldWordsElement } from './pmSuggestionWidgets';
+import { isSelfRendered } from '../diff/selfRendered';
 import { caretSideWhereItLanded, oldWordsClick, oldWordsKeyDown } from './pmOldWordsCaret';
 import { hasOldWords, pmSuggestionsKey, type PmSuggestionsMeta, type PmSuggestionsState } from './pmSuggestionsState';
 
@@ -21,74 +23,110 @@ export function focusPmSuggestionMeta(id: string | null): PmSuggestionsMeta {
 	return { type: 'focus', id };
 }
 
-let graphemes: Intl.Segmenter | undefined;
+// a delete and nothing else: the steps take content out and put none back. Its caret ends at the start
+// of what it took out, so the strikethrough stands to its right whatever shape the suggestion there
+// ends up: typing at one makes it a replacement, whose old words would otherwise go back to the far
+// side of the caret. Not when the reader has already put the caret on the other side of some
+function onlyRemoved(tr: Transaction): boolean {
+	return tr.docChanged && tr.selection.empty && tr.steps.every((s) => s instanceof ReplaceStep && s.slice.size === 0);
+}
 
-// one span a character, named by its offset in the words: the line breaker ends lines inside them by marking these
-// (lineBreakPlugin), which no decoration could reach
-function oldWords(runs: WordRun[], id: string, focused: boolean): HTMLElement {
-	graphemes ??= new Intl.Segmenter(undefined, { granularity: 'grapheme' });
-	const span = document.createElement('span');
-	span.className = `pm-suggest-old${focused ? ' pm-suggest-focused' : ''}`;
-	span.dataset.comment = id;
-	let offset = 0;
-	for (const run of runs) {
-		const characters = document.createDocumentFragment();
-		for (const { segment } of graphemes.segment(run.text)) {
-			const character = document.createElement('span');
-			character.dataset.i = String(offset);
-			character.textContent = segment;
-			characters.appendChild(character);
-			offset += segment.length;
-		}
-		const node = run.tags.reduceRight<Node>((inner, tag) => {
-			const outer = document.createElement(tag);
-			// dressed like the link mark, without its target: these words are gone from the document
-			if (tag === 'a') outer.className = 'anchor';
-			outer.appendChild(inner);
-			return outer;
-		}, characters);
-		span.appendChild(node);
-	}
-	return span;
+function oldKey(r: PmSuggestionRange): string {
+	return r.old.map((run) => `${run.text}|${run.marks.map((m) => m.type.name).join(',')}`).join('\n');
 }
 
 function build(doc: PMNode, ranges: PmSuggestionRange[], focused: string | null, caret: CaretSide | null): DecorationSet {
 	const size = doc.content.size;
+	const schema = doc.type.schema;
 	const decos: Decoration[] = [];
 	for (const r of ranges) {
 		if (r.from < 0 || r.to > size || r.to < r.from) continue;
 		const on = r.id === focused;
 		const focus = on ? ' pm-suggest-focused' : '';
-		if (r.chip) {
-			if (doc.nodeAt(r.from)?.nodeSize === r.to - r.from)
-				decos.push(Decoration.node(r.from, r.to, { class: `pm-suggest-new${focus}`, 'data-comment': r.id }));
+		const { id } = r;
+		if (r.node) {
+			if (doc.nodeAt(r.from)?.nodeSize !== r.to - r.from) continue;
+			const { was, old } = r;
+			if (was)
+				decos.push(
+					Decoration.widget(r.from, () => oldNodeElement(was, id, on), {
+						side: -1,
+						ignoreSelection: true,
+						key: `was-${id}-${on}-${was.toString()}`
+					})
+				);
+			// the words the node replaced, struck out before it
+			if (old.length)
+				decos.push(
+					Decoration.widget(r.from, () => oldWordsElement(schema, old, id, on), {
+						side: -1,
+						ignoreSelection: true,
+						key: `old-${id}-${on}-node-${oldKey(r)}`
+					})
+				);
+			decos.push(Decoration.node(r.from, r.to, { class: `pm-suggest-new${focus}`, 'data-comment': id }));
 			continue;
 		}
 		if (r.partial) {
 			doc.nodesBetween(r.from, r.to, (node, pos) => {
-				decos.push(Decoration.node(pos, pos + node.nodeSize, { class: `pm-suggest-partial${focus}`, 'data-comment': r.id }));
+				decos.push(Decoration.node(pos, pos + node.nodeSize, { class: `pm-suggest-partial${focus}`, 'data-comment': id }));
 				return false;
 			});
 			continue;
 		}
+		if (r.gone) {
+			const { gone } = r;
+			// side 1 so it hangs below the caret's own line rather than pushing it down: the caret sits
+			// where the blocks were taken from, which is the join the reader is standing on
+			decos.push(
+				Decoration.widget(r.from, () => goneBlocksElement(schema, gone, id, on), {
+					side: 1,
+					ignoreSelection: true,
+					key: `gone-${id}-${on}-${gone.head.map((r) => r.text).join('')}|${gone.blocks.map((b) => b.toString()).join('')}|${gone.tail.map((r) => r.text).join('')}`
+				})
+			);
+			continue;
+		}
+		if (r.brk) {
+			const { brk, old } = r;
+			decos.push(
+				Decoration.widget(r.from, () => breakMark(brk, id, on), {
+					side: brk === 'added' ? 1 : -1,
+					ignoreSelection: true,
+					key: `brk-${id}-${on}-${brk}`
+				})
+			);
+			if (old.length)
+				decos.push(
+					Decoration.widget(r.from, () => oldWordsElement(schema, old, id, on), {
+						side: 1,
+						ignoreSelection: true,
+						key: `old-${id}-${on}-brk-${oldKey(r)}`
+					})
+				);
+			if (r.to > r.from) decos.push(Decoration.inline(r.from, r.to, { class: `pm-suggest-new${focus}`, 'data-comment': id }));
+			continue;
+		}
 		if (hasOldWords(r)) {
-			const { old, id } = r;
+			const { old } = r;
 			const side = caret?.at === r.from ? caret.side : typingSide(r);
 			decos.push(
-				Decoration.widget(r.from, () => oldWords(old, id, on), {
+				Decoration.widget(r.from, () => oldWordsElement(schema, old, id, on), {
 					side: side === 'after' ? -1 : 1,
 					ignoreSelection: true,
-					key: `old-${id}-${on}-${side}-${JSON.stringify(old)}`
+					key: `old-${id}-${on}-${side}-${oldKey(r)}`
 				})
 			);
 		}
 		if (r.to > r.from) {
-			decos.push(Decoration.inline(r.from, r.to, { class: `pm-suggest-new${focus}`, 'data-comment': r.id }));
-			// an inline formula keeps its source as content, so an inline decoration lands on text nobody draws
+			decos.push(Decoration.inline(r.from, r.to, { class: `pm-suggest-new${focus}`, 'data-comment': id }));
+			// a formula or a chip keeps its source as content, so an inline decoration lands on text nobody draws
 			doc.nodesBetween(r.from, r.to, (node, pos) => {
-				if (node.isInline && node.isAtom && !node.isLeaf)
+				if (!node.isLeaf && isSelfRendered(node)) {
 					decos.push(Decoration.node(pos, pos + node.nodeSize, { class: `pm-suggest-new${focus}` }));
-				return !node.isAtom;
+					return false;
+				}
+				return true;
 			});
 		}
 	}
@@ -120,6 +158,7 @@ export function pmSuggestions(): Plugin<PmSuggestionsState> {
 					const at = tr.mapping.map(caret.at, caret.side === 'before' ? 1 : -1);
 					caret = tr.selection.empty && tr.selection.head === at ? (at === caret.at ? caret : { ...caret, at }) : null;
 				}
+				if (!caret && onlyRemoved(tr)) caret = { at: tr.selection.head, side: 'before' };
 				if (!tr.docChanged) {
 					if (value.mode === mode && caret === was) return value;
 					return { ...value, caret, deco: build(tr.doc, value.ranges, value.focused, caret), mode };

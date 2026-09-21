@@ -25,7 +25,7 @@
 	}
 </script>
 
-<div class="flex max-w-md flex-col gap-2.5">
+<div class="flex flex-col gap-2.5">
 	<SetupChoice kind="radio" checked={picked === ''} label={m.prefs_ai_agent_off()} onpick={() => pick('')} />
 	{#each here as a (a)}
 		<SetupChoice kind="radio" checked={picked === a} label={LABELS[a]()} aside={m.prefs_ai_agent_installed()} onpick={() => pick(a)} />
@@ -34,18 +34,18 @@
 </div>
 
 {#if isPresetAgent(picked) && installed?.[picked]}
-	<div class="border-surface-200-800 mt-4 flex max-w-xl items-start justify-between gap-6 border-t pt-4">
+	<div class="border-surface-200-800 mt-4 flex items-start justify-between gap-6 border-t pt-4">
 		<AgentModelChoice agent={picked} />
 	</div>
 {/if}
 
 {#if picked === 'custom'}
 	<input
-		class="input mt-2.5 max-w-md text-sm"
+		class="input mt-2.5 text-sm"
 		placeholder={m.prefs_ai_agent_command_placeholder()}
 		spellcheck="false"
 		value={settings.current.aiAgentCommand}
 		oninput={(e) => updateSettings({ aiAgentCommand: e.currentTarget.value.trim() })}
 	/>
-	<p class="text-muted mt-1.5 max-w-md text-xs">{m.prefs_ai_agent_command_note()}</p>
+	<p class="text-muted mt-1.5 text-xs">{m.prefs_ai_agent_command_note()}</p>
 {/if}

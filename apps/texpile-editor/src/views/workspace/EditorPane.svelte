@@ -22,8 +22,6 @@
 	import { noteVisualMount, visualMounted } from '$lib/workspace/visualMountGuard';
 	import type { Node as PMNode } from 'prosemirror-model';
 	import { openWorkspaceLink } from '$lib/workspace/openWorkspaceLink';
-	import { stripFor } from '$lib/editor/visual/stripFor';
-	import { bodyOffsetOf } from '$lib/workspace/latexRoundtrip';
 	import TabBar from './TabBar.svelte';
 	import EditorToolbarStrip from './EditorToolbarStrip.svelte';
 	import VisualEditorHost from './VisualEditorHost.svelte';
@@ -56,6 +54,8 @@
 		onOpenAsText,
 		applyingStarter,
 		texSource,
+		sourceMap,
+		regionParser = null,
 		rawContent,
 		visualDoc,
 		parseProgress = null,
@@ -95,6 +95,7 @@
 		commentThreads = [],
 		selectedComment = null,
 		onAddComment,
+		onSetViewMode,
 		onInsertCitation,
 		onAddCommentAnchored,
 		onCommentsPlaced,
@@ -137,6 +138,12 @@
 	const structured = $derived(kind === 'tex' || kind === 'md' || kind === 'typ');
 
 	const viewMode = $derived(requestedViewMode === 'visual' && encodingIssue ? 'source' : requestedViewMode);
+
+	/** kinds edited as raw text, which is every text file that is not one of those */
+	const rawText = $derived(kind === 'text' || (kind === 'bib' && (viewMode === 'source' || session.isGuest)));
+
+	/** a .bib's own view draws none of these, so it says they are there instead */
+	const bibSuggested = $derived(commentThreads.filter((t) => !t.resolved && t.restore !== undefined).length);
 
 	/** independent of viewMode, which says whether the diff is rendered or in source */
 	const comparing = $derived(!!compare);
@@ -195,7 +202,7 @@
 		if (loadedPath) visualMounted(loadedPath);
 		const v = editorViewStore.current;
 		if (!v || !loadedPath || session.collabFor(loadedPath)) return;
-		restoreVisualPosition(v, loadedPath, texSource, docMeta ? bodyOffsetOf(docMeta) : 0, stripFor(kind));
+		restoreVisualPosition(v, loadedPath, texSource, sourceMap);
 	}
 </script>
 
@@ -401,7 +408,9 @@
 							{onVisualReady}
 							{onMdLink}
 							{onEditFrontmatter}
-							{commentThreads}
+							{commentRanges}
+							{sourceMap}
+							{regionParser}
 							{selectedComment}
 							{onSelectComment}
 							{onAddCommentAnchored}
@@ -419,38 +428,39 @@
 			{:else if visualPending}
 				<!-- doc not here yet: the parse runs in a worker and fills this in when it lands -->
 				<VisualLoading phase={parseProgress} format={kind} sizeBytes={texSource.length} {onUseSource} />
-			{:else if loadedPath && kind === 'bib' && (viewMode === 'source' || session.isGuest)}
-				<!-- guests always co-edit .bib through the Y-bound source editor; BibManager isn't
-				     CRDT-bound and would desync or clobber remote edits -->
-				{#key sourceKey}
-					<SourceEditor
-						docPath={loadedPath}
-						value={rawContent}
-						onInput={onRawInput}
-						readOnly={!!encodingIssue}
-						filename={loadedPath}
-						gotoLine={sourceGotoLine}
-						collab={session.collabFor(loadedPath)}
-					/>
-				{/key}
-			{:else if loadedPath && kind === 'bib'}
-				{#key loadedPath}
-					<BibManager value={rawContent} onInput={onRawInput} />
-				{/key}
-			{:else if loadedPath && kind === 'text'}
+			{:else if loadedPath && rawText}
 				<!-- .typ no longer lands here: it is structured now (typSchema), so its source mode
 				     is the texSource branch above, which carries onCaretMove/onSyncToPdf for the
 				     Typst preview's follow and "Show in preview" -->
-				{#key sourceKey}
-					<SourceEditor
-						docPath={loadedPath}
-						value={rawContent}
-						onInput={onRawInput}
-						readOnly={!!encodingIssue}
-						filename={loadedPath}
-						gotoLine={sourceGotoLine}
-						collab={session.collabFor(loadedPath)}
-					/>
+				<!-- guests always co-edit .bib through the Y-bound source editor; BibManager isn't
+				     CRDT-bound and would desync or clobber remote edits -->
+				<!-- the rail and the comment props are what make suggest mode real here: without them an
+				     edit in suggesting mode still stages a suggestion, drawn nowhere -->
+				<div class="flex h-full">
+					<div class="isolate h-full min-w-0 flex-1">
+						{#key sourceKey}
+							<SourceEditor
+								docPath={loadedPath}
+								value={rawContent}
+								onInput={onRawInput}
+								readOnly={!!encodingIssue}
+								filename={loadedPath}
+								gotoLine={sourceGotoLine}
+								collab={session.collabFor(loadedPath)}
+								{commentRanges}
+								{selectedComment}
+								{onAddComment}
+								{onSelectComment}
+							/>
+						{/key}
+					</div>
+					{#if commentsCtl}
+						<CommentRail ctl={commentsCtl} threads={commentThreads} mode="source" onSelect={(id) => onSelectComment?.(id)} />
+					{/if}
+				</div>
+			{:else if loadedPath && kind === 'bib'}
+				{#key loadedPath}
+					<BibManager value={rawContent} onInput={onRawInput} suggested={bibSuggested} onShowSource={() => onSetViewMode?.('source')} />
 				{/key}
 			{:else if loadedPath && kind === 'pdf'}
 				<!-- a .pdf opened directly: its own src, independent of the compile-output pane -->

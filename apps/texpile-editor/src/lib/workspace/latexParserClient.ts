@@ -5,6 +5,7 @@ import { mdSchema } from '$lib/languages/markdown/visual/schema';
 import type { Node as PMNode } from 'prosemirror-model';
 import { latexParserWorker, resetLatexParserWorker } from './latexParserWorker';
 import type { ParsedLatexFile, ParsePhase } from './latexRoundtrip';
+import { rememberParseMap, type SourceMap } from '$lib/editor/visual/sourceSpans';
 
 type PendingRequest = {
 	resolve: (value: ParsedLatexFile) => void;
@@ -34,6 +35,7 @@ type ResultMessage = {
 	postamble: string;
 	hadDocumentEnv: boolean;
 	warnings: string[];
+	map: SourceMap;
 	docJSON: Record<string, unknown>;
 };
 
@@ -76,12 +78,15 @@ function ensureWorker(): Worker {
 		if (msg.type === 'result') {
 			try {
 				const doc: PMNode = (pend.format === 'md' ? mdSchema : schema).nodeFromJSON(msg.docJSON);
+				// the map crossed as data; the nodes it describes are these, not the worker's
+				rememberParseMap(doc, msg.map);
 				pend.resolve({
 					doc,
 					preamble: msg.preamble,
 					postamble: msg.postamble,
 					hadDocumentEnv: msg.hadDocumentEnv,
-					warnings: msg.warnings
+					warnings: msg.warnings,
+					map: msg.map
 				});
 			} catch (err) {
 				pend.reject(err instanceof Error ? err : new Error(String(err)));

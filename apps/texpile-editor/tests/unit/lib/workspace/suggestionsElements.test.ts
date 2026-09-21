@@ -7,7 +7,7 @@ import type { Node as PMNode, Schema } from 'prosemirror-model';
 import { activeSuggestions } from '$lib/comments/activeSuggestions.svelte';
 import { placePmSuggestions } from '$lib/editor/visual/extensions/pmSuggestionsPlace';
 import { createTableNode } from '$lib/editor/visual/tableUtils';
-import { FORMATS, renderedText } from './visualEditsFuzz';
+import { FORMATS, drawnReading, oldWordsOf, renderedText, suggestionSource } from './visualEditsFuzz';
 
 let disk: Record<string, string> = {};
 
@@ -69,19 +69,35 @@ async function suggest(edits: ((s: EditorState) => Transaction)[]): Promise<Outc
 		await ctl.suggestions.settle();
 	}
 	const marks = activeSuggestions.current;
-	const shown = tex.parse(text).doc;
-	const placed = placePmSuggestions(shown, marks, 'tex');
-	const drawn = placed.ranges.filter((r) => !r.partial && !r.chip);
+	const parsed = tex.parse(text);
+	const shown = parsed.doc;
+	const placed = placePmSuggestions(shown, marks, suggestionSource(tex, parsed, text));
+	const shownMarks = marks.filter((m) => !placed.partial.has(m.id) && placed.ranges.some((r) => r.id === m.id));
+	const drawn = placed.ranges.filter((r) => shownMarks.some((m) => m.id === r.id));
 	let rejected = text;
-	for (const m of marks.filter((x) => drawn.some((r) => r.id === x.id)).sort((a, b) => b.from - a.from))
-		rejected = rejected.slice(0, m.from) + m.restore + rejected.slice(m.to);
-	const faithful =
-		renderedText(tex.parse(rejected).doc) ===
-		renderedText(
-			shown,
-			drawn.map((r) => ({ from: r.from, to: r.to, words: r.old.map((x) => x.text).join('') }))
-		);
+	for (const m of [...shownMarks].sort((a, b) => b.from - a.from)) rejected = rejected.slice(0, m.from) + m.restore + rejected.slice(m.to);
+	const want = renderedText(tex.parse(rejected).doc);
+	const got = renderedText(
+		shown,
+		drawn.flatMap((r) => drawnReading(r) ?? [])
+	);
+	const faithful = want === got;
+	if (process.env.SUGGEST_DEBUG && !faithful) console.log(`WANT ${JSON.stringify(want)}\nGOT  ${JSON.stringify(got)}`);
 	const tier: Tier = placed.hidden.size ? 'hidden' : placed.partial.size ? 'region' : 'words';
+	if (process.env.SUGGEST_DEBUG)
+		console.log(
+			'PLACED ' +
+				JSON.stringify({
+					marks: marks.map((m) => ({ from: m.from, to: m.to, quote: m.anchor.quote, restore: m.restore })),
+					ranges: placed.ranges.map((r) => ({
+						...r,
+						old: oldWordsOf(r),
+						gone: undefined,
+						was: r.was?.type.name,
+						text: shown.textBetween(r.from, r.to, '|')
+					}))
+				})
+		);
 	return {
 		tier,
 		tracked: marks.some((m) => m.anchor.quote.includes('after words')),
@@ -155,7 +171,7 @@ const CASES: Record<string, { edits: ((s: EditorState) => Transaction)[]; want: 
 	reference: { edits: [type(' see '), inline((s) => s.nodes.ref.create({}, s.text('sec:intro'))), typeAfter], want: 'words' },
 	label: { edits: [type(' here'), inline((s) => s.nodes.label.create({ name: 'sec:here' })), typeAfter], want: 'words' },
 	'line break': { edits: [type(' first'), inline((s) => s.nodes.hard_break.create()), typeAfter], want: 'words' },
-	'raw chip': { edits: [type(' see '), inline((s) => s.nodes.inline_latex.create(null, s.text('\\foo{x}'))), typeAfter], want: 'region' },
+	'raw chip': { edits: [type(' see '), inline((s) => s.nodes.inline_latex.create(null, s.text('\\foo{x}'))), typeAfter], want: 'words' },
 	heading: { edits: block((s) => s.nodes.heading.create({ level: 1 })), want: 'words' },
 	'bullet list': {
 		edits: block((s) => s.nodes.list.create({ kind: 'bullet', order: null, checked: null, collapsed: false }, s.nodes.paragraph.create())),
@@ -168,12 +184,12 @@ const CASES: Record<string, { edits: ((s: EditorState) => Transaction)[]; want: 
 	quote: { edits: block((s) => s.nodes.blockquote.create(null, s.nodes.paragraph.create())), want: 'words' },
 	abstract: { edits: block((s) => s.nodes.abstract.create({ sourceForm: 'env' }, s.nodes.paragraph.create())), want: 'words' },
 	environment: { edits: block((s) => s.nodes.environment.create({ name: 'center' }, s.nodes.paragraph.create())), want: 'words' },
-	table: { edits: block((s) => createTableNode(s, 2, 2, true)!, ''), want: 'region' },
-	'block math': { edits: block((s) => s.nodes.block_math.create({}, s.text('x^2')), ''), want: 'region' },
-	'code block': { edits: block((s) => s.nodes.code_block.create(null, s.text('let x = 1;')), ''), want: 'region' },
-	'raw block': { edits: block((s) => s.nodes.raw_latex.create(null, s.text('\\vspace{1em}')), ''), want: 'region' },
-	rule: { edits: block((s) => s.nodes.horizontal_rule.create(), ''), want: 'region' },
-	figure: { edits: block((s) => s.nodes.image.create({ src: 'fig.png' }), ''), want: 'region' }
+	table: { edits: block((s) => createTableNode(s, 2, 2, true)!, ''), want: 'words' },
+	'block math': { edits: block((s) => s.nodes.block_math.create({}, s.text('x^2')), ''), want: 'words' },
+	'code block': { edits: block((s) => s.nodes.code_block.create(null, s.text('let x = 1;')), ''), want: 'words' },
+	'raw block': { edits: block((s) => s.nodes.raw_latex.create(null, s.text('\\vspace{1em}')), ''), want: 'words' },
+	rule: { edits: block((s) => s.nodes.horizontal_rule.create(), ''), want: 'words' },
+	figure: { edits: block((s) => s.nodes.image.create({ src: 'fig.png' }), ''), want: 'words' }
 };
 
 describe('suggestions holding each element of the visual editor', () => {

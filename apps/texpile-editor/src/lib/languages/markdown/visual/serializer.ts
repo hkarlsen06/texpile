@@ -9,7 +9,7 @@ import type { Node } from 'prosemirror-model';
 import { createBlockAssembly, type DocSerializeResult } from '$lib/serializer/blockAssembly';
 import type { Ctx } from '$lib/serializer/types';
 import { escMd } from './inlineSyntax';
-import { imageMarkdown, renderInline } from './markdownInline';
+import { imageMarkdown, renderInline, mdShadow, isMdHandlerLeaf } from './markdownInline';
 import { listFamily, listMarker, sameList } from './listAttrs';
 
 function indentAfterFirstLine(text: string, indent: string): string {
@@ -214,7 +214,10 @@ const NODES: Record<string, NodeHandler> = {
 /** Serialize one node to Markdown. Unknown types preserve their content rather than dropping it. */
 export function serializeMdNode(node: Node, ctx: Ctx): string {
 	const handler = NODES[node.type.name];
-	if (handler) return handler(node, ctx);
+	if (handler) {
+		const out = handler(node, ctx);
+		return isMdHandlerLeaf(node) ? mdShadow.shadowed(node, out) : out;
+	}
 	if (node.isText) return escMd(node.text ?? '');
 	if (node.isInline) {
 		// inline strays (should have come through renderInline) degrade to leafText/plain text
@@ -225,7 +228,9 @@ export function serializeMdNode(node: Node, ctx: Ctx): string {
 	return inner ? inner + '\n\n' : '';
 }
 
-const assembly = createBlockAssembly((node, ctx) => serializeMdNode(node, ctx));
+const assembly = createBlockAssembly((node, ctx) => serializeMdNode(node, ctx), {
+	mapLeaves: (node, ctx, text) => mdShadow.mapBlockLeaves(serializeMdNode, node, ctx, text)
+});
 
 export function serializeToMarkdown(doc: Node): string {
 	return assembly.serializeDocChildrenDetailed(doc).text;

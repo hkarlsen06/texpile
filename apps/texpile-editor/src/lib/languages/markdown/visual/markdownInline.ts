@@ -1,6 +1,21 @@
 // markdown inline serialization: marks, runs and emphasis delimiters
 import type { Node, Mark } from 'prosemirror-model';
 import { escMd, codeSpan, formatLinkDest, formatLinkTitle, formatImage } from './inlineSyntax';
+import { createShadow, markupPlaceholder } from '$lib/serializer/shadowLeaves';
+
+// nodes whose handler output is one run: their bytes come from attrs, not from text leaves
+const HANDLER_LEAVES = new Set(['raw_latex', 'code_block', 'block_math', 'horizontal_rule', 'includedoc']);
+
+export function isMdHandlerLeaf(node: Node): boolean {
+	return HANDLER_LEAVES.has(node.type.name) || (node.type.name === 'image' && node.childCount === 0);
+}
+
+/** the shadow run that finds every leaf of a regenerated block in its text; see shadowLeaves */
+export const mdShadow = createShadow({
+	placeholder: markupPlaceholder,
+	charEmissions: (ch) => [escMd(ch), '\\' + ch, ch],
+	isHandlerLeaf: isMdHandlerLeaf
+});
 
 type MarkDelims = {
 	open: string;
@@ -107,11 +122,15 @@ function buildRuns(parent: Node, opts: InlineOptions): InlineRun[] {
 			const text = node.text ?? '';
 			const bare = bareLinkRun(node);
 			if (bare != null) {
-				runs.push({ content: bare, marks: [], isText: false });
+				runs.push({ content: mdShadow.shadowed(node, bare), marks: [], isText: false });
 			} else if (node.marks.some((m) => m.type.name === 'code')) {
-				runs.push({ content: codeSpan(text, inTableCell), marks: orderedMarks(node.marks), isText: false });
+				runs.push({ content: codeSpan(mdShadow.shadowed(node, text), inTableCell), marks: orderedMarks(node.marks), isText: false });
 			} else {
-				runs.push({ content: escMd(text, atLineStart, inTableCell), marks: orderedMarks(node.marks), isText: true });
+				runs.push({
+					content: mdShadow.shadowed(node, escMd(text, atLineStart, inTableCell)),
+					marks: orderedMarks(node.marks),
+					isText: true
+				});
 			}
 			atLineStart = false;
 			return;
@@ -121,24 +140,30 @@ function buildRuns(parent: Node, opts: InlineOptions): InlineRun[] {
 				if (node.attrs?.lineBreak === false) return;
 				{
 					const br = singleLine || inTableCell || node.attrs?.command === 'br';
-					runs.push({ content: br ? '<br>' : HARD_BREAK, marks: [], isText: false });
+					runs.push({ content: mdShadow.shadowed(node, br ? '<br>' : HARD_BREAK), marks: [], isText: false });
 					atLineStart = !br;
 				}
 				return;
-			case 'inline_math':
-				runs.push({ content: inlineMath(node, inTableCell), marks: orderedMarks(node.marks), isText: false });
+			case 'inline_math': {
+				const math = inlineMath(node, inTableCell);
+				runs.push({ content: math ? mdShadow.shadowed(node, math) : '', marks: orderedMarks(node.marks), isText: false });
 				break;
+			}
 			case 'inline_latex':
-				runs.push({ content: inTableCell ? cellSafe(node.textContent) : node.textContent, marks: orderedMarks(node.marks), isText: false });
+				runs.push({
+					content: mdShadow.shadowed(node, inTableCell ? cellSafe(node.textContent) : node.textContent),
+					marks: orderedMarks(node.marks),
+					isText: false
+				});
 				break;
 			case 'citation':
-				runs.push({ content: node.textContent ? `[@${node.textContent}]` : '', marks: [], isText: false });
+				runs.push({ content: node.textContent ? mdShadow.shadowed(node, `[@${node.textContent}]`) : '', marks: [], isText: false });
 				break;
 			case 'ref':
-				runs.push({ content: node.textContent, marks: [], isText: false });
+				runs.push({ content: mdShadow.shadowed(node, node.textContent), marks: [], isText: false });
 				break;
 			case 'image':
-				runs.push({ content: imageMarkdown(node, inTableCell), marks: [], isText: false });
+				runs.push({ content: mdShadow.shadowed(node, imageMarkdown(node, inTableCell)), marks: [], isText: false });
 				break;
 			default:
 				runs.push({ content: node.isLeaf ? '' : renderInline(node, { inTableCell }), marks: orderedMarks(node.marks), isText: false });

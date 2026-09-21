@@ -2,7 +2,7 @@
   every change re-serialises and flows back through onInput -->
 <script lang="ts">
 	import { tip } from '$lib/components/tooltip.svelte';
-	import { Pencil, Code } from '@lucide/svelte';
+	import { Pencil, Code, Info } from '@lucide/svelte';
 	import { generateLabel } from '$lib/editor/visual/label';
 	import {
 		type BiblatexReference,
@@ -22,7 +22,17 @@
 	import BibEntryForm from './BibEntryForm.svelte';
 	import BibReferenceList from './BibReferenceList.svelte';
 
-	let { value = '', onInput }: { value?: string; onInput?: (v: string) => void } = $props();
+	let {
+		value = '',
+		onInput,
+		suggested = 0,
+		onShowSource
+	}: {
+		value?: string;
+		onInput?: (v: string) => void;
+		/** unresolved suggestions on this file, which this view draws none of */ suggested?: number;
+		onShowSource?: () => void;
+	} = $props();
 
 	// refs = entries, tokens = file-order stream for round-trip, parseError switches to whole-file raw mode
 	let refs = $state<BiblatexReference[]>([]);
@@ -264,8 +274,20 @@
 	</div>
 {:else}
 	<!-- list above form until the pane is @xl wide: with the PDF preview open two half columns cram the cards -->
-	<div class="@container h-full">
-		<div class="mx-auto flex h-full max-w-7xl flex-col gap-4 p-4 @xl:flex-row">
+	<div class="@container flex h-full flex-col">
+		{#if suggested && onShowSource}
+			<!-- a suggestion lives in the file's text, which this view never shows: it reads the entries
+			     out and writes them back, so the old words have nowhere to stand. Say so rather than
+			     letting the reader edit over changes they cannot see -->
+			<div class="border-warning-wash bg-warning-tint flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b px-3 py-2 text-xs">
+				<Info class="text-warning-ink size-4 shrink-0" />
+				<span>{m.bib_suggestions_hidden()}</span>
+				<button type="button" class="btn btn-xs hover:preset-tonal ml-auto shrink-0" onclick={onShowSource}
+					>{m.bib_suggestions_open_source()}</button
+				>
+			</div>
+		{/if}
+		<div class="mx-auto flex w-full max-w-7xl min-h-0 flex-1 flex-col gap-4 p-4 @xl:flex-row">
 			<div class="max-h-[40%] min-h-0 shrink-0 overflow-y-auto [scrollbar-gutter:stable] pr-3 @xl:max-h-none @xl:w-1/2">
 				<button class="btn preset-outlined-surface-200-800 hover:preset-tonal mb-3 w-full" type="button" onclick={resetForm}
 					>{m.bib_new_reference_button()}</button

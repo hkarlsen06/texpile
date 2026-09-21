@@ -361,6 +361,12 @@
 	.source-editor :global(.cm-content) {
 		padding: calc(var(--spacing) * 4) 0;
 	}
+	/* CodeMirror indents every line 6px off the gutter, which reads as a stray space in front of the
+	   first character. Not to zero though: the caret is drawn centred on its position, so column 0
+	   needs half a caret of room or the sticky gutter paints over it on a blank line */
+	.source-editor :global(.cm-line) {
+		padding-left: 2px;
+	}
 	.source-editor :global(.cm-focused) {
 		outline: none;
 	}

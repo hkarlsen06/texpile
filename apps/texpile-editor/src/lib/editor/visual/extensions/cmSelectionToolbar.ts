@@ -1,24 +1,28 @@
-// The selection toolbar in the source editor: the shared row of buttons, placed in the left margin
+// The selection toolbar in the source editor: the shared row of buttons, floating above the selection
 import { type EditorView, ViewPlugin } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
 import { settings } from '$lib/settings';
 import { observe } from '$lib/runes/observe.svelte';
 import { selectionToolbarRow, type SelectionToolbarRow } from '$lib/editor/selectionToolbarRow';
+import { visibleBox } from '../visibleBox';
 
 /** the row fades in rather than flashing under the pointer for every drag it passes through */
 const SHOW_DELAY = 120;
+const HEIGHT = 26;
 
 /**
- * The row for a non-empty selection, in the LEFT margin, vertically centred on the cursor's line.
+ * The row for a non-empty selection, floating ABOVE it, exactly as the visual editor places it.
  *
- * This is Overleaf's editor-floating-menu, whose measure is `right: window.innerWidth -
- * contentDOM.left` - the row's right edge flush against the left edge of the text, so it lands in
- * the gutter and covers nothing. A tooltip above the selection sits ON the line you are reading to
- * decide, and the right margin is already spoken for here by the preview divider and its lozenge.
+ * It used to sit in the left margin, right edge flush against the text, which is what Overleaf's
+ * editor-floating-menu does. That put it on top of the line numbers: CodeMirror's gutter paints at
+ * z-index 200, so the numbers showed through the row, and a click that missed one of the small
+ * buttons landed on the gutter instead and selected that line, throwing away the selection the row
+ * was offering to comment on.
  *
- * `position: fixed` with a measured `right`, not `absolute` inside the editor: the gutter's width
- * changes with the line count and the pane's own left edge moves when the sidebar resizes, and
- * fixed coordinates read off contentDOM track both without a second source of truth.
+ * Measuring has to go through requestMeasure. coordsAtPos reads DOM layout, and CodeMirror forbids
+ * that inside update() - it throws "Reading the editor layout isn't allowed during an update" and
+ * disables the plugin, which is why calling it directly meant the row never appeared at all. The
+ * read phase runs once the update has settled; write is where the style goes.
  */
 export function cmSelectionToolbar(onAdd: (from: number, to: number) => void, label: string): Extension {
 	return ViewPlugin.fromClass(
@@ -45,7 +49,7 @@ export function cmSelectionToolbar(onAdd: (from: number, to: number) => void, la
 				view.dom.appendChild(this.row.dom);
 				// scrolling moves the line without changing the viewport, so update() alone would
 				// leave the row behind; the observer catches pane and window resizes, which move
-				// contentDOM's left edge without any editor update at all
+				// the text without any editor update at all
 				view.scrollDOM.addEventListener('scroll', this.schedule);
 				this.resize = new ResizeObserver(this.schedule);
 				this.resize.observe(view.scrollDOM);
@@ -69,32 +73,33 @@ export function cmSelectionToolbar(onAdd: (from: number, to: number) => void, la
 				this.row.dom.remove();
 			}
 
-			/**
-			 * Measuring has to go through requestMeasure.
-			 *
-			 * coordsAtPos reads DOM layout, and CodeMirror forbids that inside update() - it throws
-			 * "Reading the editor layout isn't allowed during an update" and disables the plugin,
-			 * which is why calling it directly meant the row never appeared at all. The read phase
-			 * runs once the update has settled; write is where the style goes.
-			 */
 			private schedule = () => {
-				this.view.requestMeasure<{ top: number; right: number } | null>({
+				this.view.requestMeasure<{ top: number; cx: number; width: number; left: number; right: number } | null>({
 					key: 'cm-comment-add',
 					read: (view) => {
 						const sel = view.state.selection.main;
 						// turned off in Preferences: the row never appears
 						if (settings.current.commentPill === false || sel.empty) return null;
 						if (this.added && this.added.from === sel.from && this.added.to === sel.to) return null;
-						const coords = view.coordsAtPos(sel.head);
-						if (!coords) return null;
-						const scroller = view.scrollDOM.getBoundingClientRect();
-						// scrolled out of the pane: hide rather than park the row at the edge
-						if (coords.top < scroller.top || coords.top > scroller.bottom) return null;
-						if (view.contentDOM.getBoundingClientRect().left < scroller.left) return null;
-						const height = this.row.dom.getBoundingClientRect().height;
+						const a = view.coordsAtPos(sel.from);
+						const b = view.coordsAtPos(sel.to);
+						if (!a || !b) return null;
+						const head = sel.head === sel.from ? a : b;
+						const oneLine = Math.abs(a.top - b.top) < 2;
+						const cx = oneLine ? (a.left + b.right) / 2 : (head.left + head.right) / 2;
+						const anchor = oneLine ? a : head;
+						// the PANE, not the window: the row is fixed, so nothing clips it, and a selection
+						// scrolled out of the pane would otherwise park the row over the sidebar
+						const pane = visibleBox(view.contentDOM);
+						if (head.bottom < pane.top || head.top > pane.bottom || cx < pane.left || cx > pane.right) return null;
 						return {
-							top: (coords.top + coords.bottom) / 2 - height / 2,
-							right: window.innerWidth - view.contentDOM.getBoundingClientRect().left
+							// above the line, else below it when the selection starts at the top of the pane
+							top: anchor.top - HEIGHT - 6 >= pane.top + 4 ? anchor.top - HEIGHT - 6 : anchor.bottom + 6,
+							cx,
+							// 0 while the row is hidden, which is the one frame write has to measure for itself
+							width: this.row.dom.getBoundingClientRect().width,
+							left: pane.left,
+							right: pane.right
 						};
 					},
 					// written straight to the DOM: this runs on every scroll frame, and routing it
@@ -106,8 +111,9 @@ export function cmSelectionToolbar(onAdd: (from: number, to: number) => void, la
 						}
 						this.row.sync();
 						this.row.dom.style.display = 'flex';
+						const half = (box.width || this.row.dom.offsetWidth || 48) / 2;
 						this.row.dom.style.top = `${box.top}px`;
-						this.row.dom.style.right = `${box.right}px`;
+						this.row.dom.style.left = `${Math.min(Math.max(box.cx - half, box.left + 4), box.right - half * 2 - 4)}px`;
 						if (!this.shown && !this.timer) {
 							this.timer = setTimeout(() => {
 								this.timer = null;

@@ -1,7 +1,8 @@
 // verbatim `orig` capture: source extents, raw-slice recovery, and the capture state the
 // top-level block pass consumes (armed by latexToProseMirror)
 import type { Node, Macro, Environment } from '@unified-latex/unified-latex-types';
-import { type PmNode } from '../builders';
+import { textNode, type PmNode } from '../builders';
+import { bytesSpan, type LeafSpan, withAttrs } from '$lib/editor/visual/sourceSpans';
 
 export type CaptureHolder = {
 	pending: CaptureState | null;
@@ -67,7 +68,7 @@ export function nodeExtent(node: Node, floor = 0): { min: number; max: number } 
  *  (fail-safe: such a block simply always regenerates). */
 export function withOrig(node: PmNode, orig: Record<string, unknown>): PmNode {
 	if (!node.type.spec.attrs || !('orig' in node.type.spec.attrs)) return node;
-	return node.type.create({ ...node.attrs, orig }, node.content, node.marks);
+	return withAttrs(node, { ...node.attrs, orig });
 }
 
 // byte-faithful raw fallback: raw preservation slices the ORIGINAL bytes via source offsets
@@ -189,8 +190,11 @@ export function envArgsRawSource(env: Environment): string | null {
 	return src.slice(begin, end).trim();
 }
 
-/** The node's exact original source slice, or null when no trustworthy span exists. */
-export function nodeRawSource(node: Node): string | null {
+/** a slice of the original source and where it sits */
+export type RawSpan = { text: string; from: number; to: number };
+
+/** The node's exact original source slice and its offsets, or null when no trustworthy span exists. */
+export function nodeRawSpan(node: Node): RawSpan | null {
 	if (!capture.rawSource) return null;
 	const ext = nodeExtent(node);
 	if (!ext || !Number.isFinite(ext.min) || ext.min < 0 || ext.max > capture.rawSource.length || ext.min >= ext.max) return null;
@@ -205,7 +209,46 @@ export function nodeRawSource(node: Node): string | null {
 	// every construct sliced here starts with \ or {, and a faithful slice must be
 	// brace-balanced: refuse corrupt extents that landed mid-prose.
 	if (!/^[\\{]/.test(slice) || braceDebt(slice) !== 0) return null;
-	return slice;
+	return { text: slice, from: ext.min, to: end };
+}
+
+export function nodeRawSource(node: Node): string | null {
+	return nodeRawSpan(node)?.text ?? null;
+}
+
+/** the text node for a raw slice, mapped byte for byte; the fallback text maps to nothing */
+export function rawTextNode(raw: RawSpan | null, fallback: string): PmNode | null {
+	return raw ? textNode(raw.text, null, bytesSpan(raw.text.length, raw.from)) : textNode(fallback);
+}
+
+/** `text` mapped byte for byte when the source holds exactly it at `from`, else nothing */
+export function prefixSpans(text: string, from: number | undefined): LeafSpan[] | null {
+	const src = capture.rawSource;
+	return src && typeof from === 'number' && from >= 0 && src.startsWith(text, from) ? bytesSpan(text.length, from) : null;
+}
+
+/** the bytes an AST node's own position covers, when the parse recorded one */
+export function positionSpan(node: unknown): { from: number; to: number } | null {
+	const src = capture.rawSource;
+	const p = (node as { position?: { start?: { offset?: number }; end?: { offset?: number } } } | null)?.position;
+	const from = p?.start?.offset;
+	const to = p?.end?.offset;
+	if (!src || typeof from !== 'number' || typeof to !== 'number' || from < 0 || to > src.length || from >= to) return null;
+	return { from, to };
+}
+
+export function startOf(node: unknown): number | undefined {
+	return (node as { position?: { start?: { offset?: number } } } | null)?.position?.start?.offset;
+}
+
+/** the bytes a macro call covers, attached arguments included; the call itself must be there */
+export function macroSpan(macro: Macro): { from: number; to: number } | null {
+	const src = capture.rawSource;
+	const from = startOf(macro);
+	if (!src || typeof from !== 'number' || !src.startsWith('\\' + macro.content, from)) return null;
+	const ext = repairExtentTail(macro, nodeExtent(macro, from));
+	if (!ext || !Number.isFinite(ext.max) || ext.max > src.length || ext.max <= from) return null;
+	return { from, to: ext.max };
 }
 
 /**
@@ -217,7 +260,7 @@ export function nodeRawSource(node: Node): string | null {
  * its trailing argument (`y_\history{i}` becomes `y_{\history}{i}`, a fatal extra-} error).
  * null unless both delimiters match; caller falls back to printRaw.
  */
-export function mathBodyRawSource(node: Node, opens: string[], closes: string[]): string | null {
+export function mathBodyRawSpan(node: Node, opens: string[], closes: string[]): RawSpan | null {
 	if (!capture.rawSource) return null;
 	const src = capture.rawSource;
 	const pos = (node as { position?: { start?: { offset?: number }; end?: { offset?: number } } }).position;
@@ -228,7 +271,18 @@ export function mathBodyRawSource(node: Node, opens: string[], closes: string[])
 	const close = closes.find((c) => end - c.length >= start && src.startsWith(c, end - c.length));
 	if (!open || !close || start + open.length > end - close.length) return null;
 	const slice = src.slice(start + open.length, end - close.length);
-	return braceDebt(slice) === 0 ? slice : null;
+	return braceDebt(slice) === 0 ? { text: slice, from: start + open.length, to: end - close.length } : null;
+}
+
+export function mathBodyRawSource(node: Node, opens: string[], closes: string[]): string | null {
+	return mathBodyRawSpan(node, opens, closes)?.text ?? null;
+}
+
+/** `raw` with the whitespace at its ends dropped, still mapped */
+export function trimmedRaw(raw: RawSpan): RawSpan {
+	const lead = raw.text.length - raw.text.trimStart().length;
+	const text = raw.text.trim();
+	return { text, from: raw.from + lead, to: raw.from + lead + text.length };
 }
 
 /**

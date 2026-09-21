@@ -4,6 +4,7 @@ import * as LatexParser from '$lib/languages/latex/parser/latexParser';
 import { dropParagraphEnd, serializeToLatexDetailed, serializeNode } from '$lib/languages/latex/serializer/latexSerializer';
 import { fillOrigNorms } from '$lib/serializer/blockAssembly';
 import { padTables } from '$lib/editor/visual/padTables';
+import { collectMap, rememberParseMap, shiftMap, type RegionParse, type SourceMap } from '$lib/editor/visual/sourceSpans';
 import type { Node } from 'prosemirror-model';
 
 // the importer runs in max-fidelity mode: unrecognized constructs are preserved as raw/inline LaTeX
@@ -65,6 +66,8 @@ export type ParsedLatexFile = {
 	hadDocumentEnv: boolean;
 	/** Non-fatal notes (e.g. raw LaTeX that could not be converted). */
 	warnings: string[];
+	/** where each run and block of the document came from in the file */
+	map: SourceMap;
 };
 
 /** counts raw_latex / inline_latex nodes (constructs the parser couldn't model). */
@@ -136,7 +139,15 @@ export function parseLatexFile(latex: string, projectMacros = '', onPhase?: (pha
 		);
 	}
 
-	return { preamble, postamble, doc, hadDocumentEnv, warnings };
+	const map = collectMap(doc, hadDocumentEnv ? preamble.length : 0);
+	rememberParseMap(doc, map);
+	return { preamble, postamble, doc, hadDocumentEnv, warnings, map };
+}
+
+/** a stretch of the body parsed as the file is, for a comparison; the map's offsets are the stretch's own */
+export function parseLatexRegion(body: string, scanPreamble = ''): RegionParse {
+	const doc = padTables(LatexParser.latexToProseMirror(body, { preamble: scanPreamble }).doc);
+	return { doc, map: collectMap(doc, 0) };
 }
 
 /** file offset where the body (what orig.start counts from) begins: after the preamble for a
@@ -151,15 +162,27 @@ export function bodyOffsetOf(p: Pick<ParsedLatexFile, 'preamble' | 'hadDocumentE
  * padding is added; an unprotected edge gets the conventional single \n.
  */
 export function serializeLatexFile(parsed: Pick<ParsedLatexFile, 'preamble' | 'postamble' | 'hadDocumentEnv'>, doc: Node): string {
-	const { text, leadProtected, tailProtected, trailingRegenerated } = serializeToLatexDetailed(doc);
+	return serializeLatexFileDetailed(parsed, doc).text;
+}
+
+/** the file text and where every run of `doc` landed in it */
+export function serializeLatexFileDetailed(
+	parsed: Pick<ParsedLatexFile, 'preamble' | 'postamble' | 'hadDocumentEnv'>,
+	doc: Node
+): { text: string; map: SourceMap } {
+	const { text, leadProtected, tailProtected, leadGap, tailGap, trailingRegenerated, map } = serializeToLatexDetailed(doc);
 	// fragment file: body IS the entire file, no synthesized wrapper written back. a protected
 	// tail reproduces the original bytes through EOF, including a missing trailing newline.
-	if (parsed.hadDocumentEnv === false) return tailProtected ? text : text + '\n';
+	if (parsed.hadDocumentEnv === false) return { text: tailProtected ? text : text + '\n', map: shiftMap(map, 0, text.length) };
 	const lastSeq = (doc.attrs.docTail as { afterSeq?: unknown } | null)?.afterSeq;
 	const body = dropParagraphEnd(text, trailingRegenerated, typeof lastSeq === 'number' ? lastSeq + 1 : undefined);
-	const leadSep = leadProtected ? '' : '\n';
-	const tailSep = tailProtected ? '' : '\n';
-	return `${parsed.preamble}${leadSep}${body}${tailSep}${parsed.postamble}`;
+	// the gap the file had, not a separator of our own: editing the first or the last block would
+	// otherwise swallow the blank line it sat behind, and that shows up as a suggestion covering the
+	// whole block rather than the words that changed
+	const leadSep = leadProtected ? '' : (leadGap ?? '\n');
+	const tailSep = tailProtected ? '' : (tailGap ?? '\n');
+	const prefix = parsed.preamble.length + leadSep.length;
+	return { text: `${parsed.preamble}${leadSep}${body}${tailSep}${parsed.postamble}`, map: shiftMap(map, prefix, prefix + body.length) };
 }
 
 /** minimal skeleton for a brand-new .tex, no template system. */

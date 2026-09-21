@@ -3,7 +3,7 @@ import { visualDocCache } from '$lib/workspace/visualDocCache';
 import type { ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
 
 function parsed(marker: string): ParsedLatexFile {
-	return { preamble: marker, postamble: '', doc: { marker } as never, hadDocumentEnv: true, warnings: [] };
+	return { preamble: marker, postamble: '', doc: { marker } as never, hadDocumentEnv: true, warnings: [], map: { leaves: [], blocks: [] } };
 }
 
 beforeEach(() => {

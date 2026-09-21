@@ -7,8 +7,9 @@
 import type { Node } from 'prosemirror-model';
 import { createBlockAssembly, type DocSerializeResult } from '$lib/serializer/blockAssembly';
 import type { Ctx } from '$lib/serializer/types';
-import { escTypst, renderInline, renderHeadingLine, renderBody, mathTypstOf, typStr } from './typstInline';
+import { escTypst, renderInline, renderHeadingLine, renderBody, mathTypstOf, typStr, typstShadow, isTypHandlerLeaf } from './typstInline';
 import { tableBody } from './tableSerializer';
+import { mapToCrlf } from '$lib/editor/visual/sourceSpans';
 export { escTypst, renderInline } from './typstInline';
 
 function indentAfterFirstLine(text: string, indent: string): string {
@@ -220,7 +221,10 @@ const NODES: Record<string, NodeHandler> = {
 /** Serialize one node to Typst. Unknown types preserve their content rather than dropping it. */
 export function serializeTypNode(node: Node, ctx: Ctx): string {
 	const handler = NODES[node.type.name];
-	if (handler) return handler(node, ctx);
+	if (handler) {
+		const out = handler(node, ctx);
+		return isTypHandlerLeaf(node) ? typstShadow.shadowed(node, out) : out;
+	}
 	if (node.isText) return escTypst(node.text ?? '');
 	if (node.isInline) {
 		// inline strays (should have come through renderInline) degrade to leafText/plain text
@@ -232,7 +236,8 @@ export function serializeTypNode(node: Node, ctx: Ctx): string {
 }
 
 const assembly = createBlockAssembly((node, ctx) => serializeTypNode(node, ctx), {
-	boundary: (prev, next, contiguous) => blockGap(prev, next, contiguous, false)
+	boundary: (prev, next, contiguous) => blockGap(prev, next, contiguous, false),
+	mapLeaves: (node, ctx, text) => typstShadow.mapBlockLeaves(serializeTypNode, node, ctx, text)
 });
 
 export function serializeToTypst(doc: Node): string {
@@ -243,5 +248,6 @@ export function serializeToTypstDetailed(doc: Node): DocSerializeResult {
 	const result = assembly.serializeDocChildrenDetailed(doc);
 	// a CRLF file stays CRLF: verbatim slices already are, regenerated text is not
 	const file = doc.attrs.typFile as { eol?: string } | null;
-	return file?.eol === '\r\n' ? { ...result, text: result.text.replace(/\r?\n/g, '\r\n') } : result;
+	if (file?.eol !== '\r\n') return result;
+	return { ...result, text: result.text.replace(/\r?\n/g, '\r\n'), map: mapToCrlf(result.map, result.text) };
 }

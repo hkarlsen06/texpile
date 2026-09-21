@@ -3,34 +3,32 @@
 // the panel, the log and the anchors are all shared, so this file is only "turn threads into
 // decorations for THIS representation".
 //
-// Anchors are stored in SOURCE dialect and are never rewritten here (resolution is read-only; an
-// anchor rewritten to visual text would stop describing the file on disk). Resolution happens
-// against the flat text of the rendered document: prose survives the LaTeX -> visual round trip
-// verbatim, so the same quote search that places a thread in CodeMirror places it here. What does
-// NOT survive - quotes containing markup, math, line-wrap whitespace - fails to resolve and the
-// thread simply draws nothing in this view; the panel still lists it, and the source editor still
-// places it. Honest absence over a guessed highlight, same policy as anchor.ts.
+// A thread is a range of the FILE, resolved once by the controller; here it is a lookup through the
+// document's source map, both ways: a placed thread is its bytes' characters, a selection to
+// comment on is its characters' bytes.
 //
-// Once resolved, ranges are MAPPED through every transaction rather than re-searched (the same
-// discipline as the CodeMirror field, for the same reason: mapping is exact, re-searching mid-edit
-// can snap a range onto another copy of the text). Re-resolution happens only when the thread list
-// changes or a re-parsed document replaces the current one.
+// Once placed, ranges are MAPPED through every transaction rather than looked up again (the same
+// discipline as the CodeMirror field, for the same reason: mapping is exact, and a lookup mid-edit
+// would read a map of text the editor is still ahead of). Re-placement happens only when the
+// thread list changes or a re-parsed document replaces the current one.
 import { Plugin, PluginKey, TextSelection, type EditorState } from 'prosemirror-state';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
 import { buildAnchor, type CommentAnchor } from '$lib/comments/anchor';
+import { indexStartingBy, pmToSource, type Segment, type SourceMap } from '../sourceSpans';
 
-import { flattenDoc } from './pmCommentsResolve';
 import { focusPmSuggestionMeta, pmSuggestionAt, pmSuggestions, pmSuggestionsKey } from './pmSuggestions';
 import { pmSelectionToolbar } from './pmSelectionToolbar';
 
-export { flattenDoc, resolvePmComments, type FlatDoc } from './pmCommentsResolve';
+export { flattenDoc, placePmComments, pmRangeOf, type FlatDoc } from './pmCommentsResolve';
 
 export type PmCommentRange = {
 	id: string;
 	from: number;
 	to: number;
 	resolved: boolean;
+	/** a node that draws its own content, tinted whole */
+	node?: boolean;
 };
 
 type PmCommentsState = {
@@ -123,42 +121,58 @@ export function pmCommentAt(state: EditorState, pos: number): PmCommentRange | n
 }
 
 function build(doc: PMNode, ranges: PmCommentRange[], focused: string | null, pending: { from: number; to: number } | null): DecorationSet {
-	const decos = ranges
+	const size = doc.content.size;
+	const decos: Decoration[] = [];
+	for (const r of ranges) {
 		// resolved threads draw nothing, same as the source editor: the argument is over
-		.filter((r) => !r.resolved && r.to > r.from)
-		.map((r) =>
-			Decoration.inline(r.from, r.to, {
-				class: `pm-comment${r.id === focused ? ' pm-comment-focused' : ''}`,
-				'data-comment': r.id
-			})
-		);
+		if (r.resolved || r.to <= r.from || r.to > size) continue;
+		const attrs = { class: `pm-comment${r.id === focused ? ' pm-comment-focused' : ''}`, 'data-comment': r.id };
+		if (r.node) {
+			decos.push(Decoration.node(r.from, r.to, attrs));
+			continue;
+		}
+		decos.push(Decoration.inline(r.from, r.to, attrs));
+		// an inline formula keeps its source as content, so an inline decoration lands on text nobody draws
+		doc.nodesBetween(r.from, r.to, (node, pos) => {
+			if (node.isInline && node.isAtom && !node.isLeaf) decos.push(Decoration.node(pos, pos + node.nodeSize, attrs));
+			return !node.isAtom;
+		});
+	}
 	if (pending && pending.to > pending.from) decos.push(Decoration.inline(pending.from, pending.to, { class: 'pm-comment-pending' }));
 	return DecorationSet.create(doc, decos);
 }
 
-/**
- * An anchor for a selection in the rendered document, built against the FLAT text.
- *
- * Rendered-dialect on purpose: the selection is rendered text, so this is the one dialect the
- * anchor is certain to be faithful in. Resolving it back in source mode goes through the same
- * normalize-and-search fallback that carries source anchors the other way.
- */
-export function buildPmAnchor(doc: PMNode, from: number, to: number): CommentAnchor | null {
-	const { text, index } = flattenDoc(doc);
-	// pm -> flat: first flat char at or after `from`, last flat char before `to`
-	let f = 0;
-	while (f < index.length && index[f] < from) f++;
-	let t = f;
-	while (t < index.length && index[t] < to) t++;
-	if (t <= f) return null;
-	return buildAnchor(text, f, t);
+/** the selection as a range of the file; see sourceAnchorFor */
+export type SourceAnchorFn = (doc: PMNode, from: number, to: number) => CommentAnchor | null;
+
+/** the byte on the side named of a position, or the nearest run's edge when nothing is drawn between */
+function drawnByte(doc: PMNode, leaves: Segment[], pos: number, assoc: -1 | 1): number | null {
+	const exact = pmToSource(leaves, pos, assoc);
+	if (exact !== null) return exact;
+	const i = indexStartingBy(leaves, 'pmFrom', pos);
+	const run = assoc < 0 ? (i >= 0 ? leaves[i] : null) : i + 1 < leaves.length ? leaves[i + 1] : null;
+	if (!run) return null;
+	const edge = assoc < 0 ? run.pmTo : run.pmFrom;
+	const drawn = assoc < 0 ? doc.textBetween(edge, pos, '', '\uFFFC') : doc.textBetween(pos, edge, '', '\uFFFC');
+	if (drawn !== '') return null;
+	return assoc < 0 ? run.srcTo : run.srcFrom;
 }
 
-export function buildPmPoint(doc: PMNode, pos: number): CommentAnchor {
-	const { text, index } = flattenDoc(doc);
-	let f = 0;
-	while (f < index.length && index[f] < pos) f++;
-	return buildAnchor(text, f, f);
+/**
+ * The anchor for a selection in the rendered document: the range of the FILE its characters are,
+ * through the source map. Exact at both ends or nothing, since a comment pinned to a guess would
+ * describe text the reader never chose; an end between blocks, with nothing drawn between it and
+ * the last character, is that character's. A point takes the character before it.
+ */
+export function sourceAnchorFor(doc: PMNode, map: SourceMap, text: string, from: number, to: number): CommentAnchor | null {
+	if (from === to) {
+		const at = pmToSource(map.leaves, from, -1) ?? pmToSource(map.leaves, from, 1);
+		return at === null || at > text.length ? null : buildAnchor(text, at, at);
+	}
+	const a = drawnByte(doc, map.leaves, from, 1);
+	const b = drawnByte(doc, map.leaves, to, -1);
+	if (a === null || b === null || b <= a || b > text.length) return null;
+	return buildAnchor(text, a, b);
 }
 
 type PmCommentsConfig = {
@@ -166,11 +180,12 @@ type PmCommentsConfig = {
 	onSelect?: (id: string) => void;
 	/** the reader asked to comment on the current selection; null when it spans no real text */
 	onAdd?: (anchor: CommentAnchor | null) => void;
+	sourceAnchor?: SourceAnchorFn;
 	/** label for the pill, so the caller owns translation */
 	addLabel?: string;
 };
 
-export function pmComments({ onSelect, onAdd, addLabel = 'Comment' }: PmCommentsConfig = {}): Plugin[] {
+export function pmComments({ onSelect, onAdd, sourceAnchor, addLabel = 'Comment' }: PmCommentsConfig = {}): Plugin[] {
 	const state = new Plugin<PmCommentsState>({
 		key: pmCommentsKey,
 		state: {
@@ -223,5 +238,5 @@ export function pmComments({ onSelect, onAdd, addLabel = 'Comment' }: PmComments
 			}
 		}
 	});
-	return [state, pmSuggestions(), ...(onAdd ? [pmSelectionToolbar(onAdd, addLabel)] : [])];
+	return [state, pmSuggestions(), ...(onAdd && sourceAnchor ? [pmSelectionToolbar(onAdd, addLabel, sourceAnchor)] : [])];
 }

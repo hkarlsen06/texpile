@@ -19,7 +19,9 @@
 	import ContextMenu from '$lib/editor/visual/toolbar/ContextMenu.svelte';
 	import { syncPmComments } from '$lib/editor/visual/extensions/pmCommentsSync.svelte';
 	import type { CommentAnchor } from '$lib/comments/anchor';
-	import type { CommentThread } from '$lib/comments/log';
+	import type { SourceAnchorFn } from '$lib/editor/visual/extensions/pmComments';
+	import type { CommentRange } from '$lib/editor/visual/extensions/comments';
+	import type { RegionParser, SourceMap } from '$lib/editor/visual/sourceSpans';
 	import 'prosemirror-view/style/prosemirror.css';
 	import 'prosemirror-tables/style/tables.css';
 	import 'prosemirror-gapcursor/style/gapcursor.css';
@@ -43,7 +45,14 @@
 		/** the project's bibliography; @target chips resolve against it for display */
 		localReferences?: BiblatexReference[];
 		/** review comments, same contract as the latex EditorView; see extensions/pmComments */
-		commentThreads?: CommentThread[];
+		commentRanges?: CommentRange[];
+		sourceMap?: SourceMap;
+		/** the file's text, the stretch of it the document is, and its parser: what suggestions are drawn from */
+		texSource?: string;
+		bodyRange?: { from: number; to: number };
+		regionParser?: RegionParser | null;
+		/** the selection as a range of the file; see pmComments */
+		sourceAnchor?: SourceAnchorFn;
 		selectedComment?: string | null;
 		onSelectComment?: (id: string) => void;
 		onAddComment?: (anchor: CommentAnchor | null) => void;
@@ -66,7 +75,12 @@
 		docDir = '',
 		docPath = null,
 		localReferences = [],
-		commentThreads = [],
+		commentRanges = [],
+		sourceMap = { leaves: [], blocks: [] },
+		texSource = '',
+		bodyRange = { from: 0, to: 0 },
+		regionParser = null,
+		sourceAnchor,
 		selectedComment = null,
 		onSelectComment,
 		onAddComment,
@@ -97,6 +111,7 @@
 			onOpenLink,
 			onSelectComment,
 			onAddComment,
+			sourceAnchor,
 			addCommentLabel
 		});
 
@@ -155,8 +170,11 @@
 	// after the swap effect, so the sync reads the newly-installed document
 	syncPmComments({
 		view: () => editorView,
-		threads: () => commentThreads,
-		dialect: 'typ',
+		ranges: () => commentRanges,
+		map: () => sourceMap,
+		text: () => texSource,
+		body: () => bodyRange,
+		parse: () => regionParser,
 		epoch: () => docEpoch,
 		selected: () => selectedComment,
 		onPlaced: (lost) => onCommentsPlaced?.(lost),
@@ -179,7 +197,7 @@
      nothing, so the viewport upgrades could not run until after it was already on screen -->
 <main bind:this={editor} class={BUILDING_CLASS}></main>
 
-<ContextMenu dialect="typst" {onAddComment} {onInsertCitation} />
+<ContextMenu dialect="typst" {onAddComment} {sourceAnchor} {onInsertCitation} />
 
 <style lang="postcss">
 	@reference "../../../../app.css";

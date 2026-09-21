@@ -42,7 +42,7 @@ export function selectionToolbarRow(commentLabel: string, comment: () => void, h
 		return b;
 	}
 	button(commentLabel, COMMENT_ICON, '', comment);
-	const refine = button('', REFINE_ICON, '', openRefineCard);
+	const refine = button('', REFINE_ICON, '', (b) => openRefineCard(b.getBoundingClientRect()));
 	button(m.comments_pill_off(), X_ICON, ' cm-comment-add-off', () => {
 		updateSettings({ commentPill: false });
 		hide(); // the setting keeps it off; this is only so it leaves under the pointer
