@@ -265,7 +265,8 @@ function chain(f: Format, source: string, seed: number, failures: Failure[]) {
 		}
 		const states = [EditorState.create({ doc: opened })];
 		const labels: string[] = [];
-		const steps = 1 + Math.floor(rnd() * 8);
+		// VISUAL_FUZZ_STEPS raises the most edits a round makes, for a heavier session
+		const steps = 1 + Math.floor(rnd() * Number(process.env.VISUAL_FUZZ_STEPS ?? 8));
 		for (let i = 0; i < steps; i++) {
 			const edit = randomEdit(states[states.length - 1], rnd);
 			if (!edit) continue;
