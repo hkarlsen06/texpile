@@ -338,7 +338,12 @@ function render(parent: Node, startOfLine: boolean, extra: string, singleLine: b
 		if (!s) return;
 		let piece = s;
 		if (refAt >= 0) {
-			if (extendsRef(piece)) out = out.slice(0, refAt) + `#ref(<${refTarget}>)`;
+			// the call form ends a code expression: `.`, `(` or `[` straight after it would go on with it
+			if (extendsRef(piece)) {
+				out = out.slice(0, refAt) + `#ref(<${refTarget}>)`;
+				codeEnd = out.length;
+				code = '#ref()';
+			}
 			refAt = -1;
 		}
 		const escapable = text && !piece.startsWith('u{');
@@ -347,6 +352,8 @@ function render(parent: Node, startOfLine: boolean, extra: string, singleLine: b
 			else {
 				const start = out.search(/https?:\/\/\S*$/);
 				out = out.slice(0, start) + `#link(${typStr(out.slice(start))})`;
+				codeEnd = out.length;
+				code = '#link()';
 			}
 		}
 		urlEnd = -1;

@@ -142,8 +142,12 @@ export function listSeg(kids: SyntaxNode[], i: number, src: string): { seg: Seg;
 		const inner = markup ? notedBlocks(convertMarkup(children(markup), src)) : [];
 		// an item with nothing typed yet: its paragraph has no bytes, and stands where they would go
 		const body = ensureBlocks(inner);
-		if (inner.length === 0)
-			noteBlockSpan(body[0], { srcFrom: markup ? markup.from : item.to, srcTo: markup ? markup.from : item.to, size: 1 });
+		if (inner.length === 0) {
+			// past the marker and the space after it, so what is typed does not fuse with the marker
+			let at = markup ? markup.from : item.to;
+			while (src[at] === ' ' || src[at] === '\t') at++;
+			noteBlockSpan(body[0], { srcFrom: at, srcTo: at, size: 1 });
+		}
 		const node = buildNode(
 			'list',
 			{

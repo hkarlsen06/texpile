@@ -122,7 +122,12 @@ function buildRuns(parent: Node, opts: InlineOptions): InlineRun[] {
 			const text = node.text ?? '';
 			const bare = bareLinkRun(node);
 			if (bare != null) {
-				runs.push({ content: mdShadow.shadowed(node, bare), marks: [], isText: false });
+				// the autolink is the link; emphasis around it wraps the angle brackets
+				runs.push({
+					content: mdShadow.shadowed(node, bare),
+					marks: orderedMarks(node.marks.filter((m) => m.type.name !== 'link')),
+					isText: false
+				});
 			} else if (node.marks.some((m) => m.type.name === 'code')) {
 				runs.push({ content: codeSpan(mdShadow.shadowed(node, text), inTableCell), marks: orderedMarks(node.marks), isText: false });
 			} else {
@@ -256,7 +261,9 @@ export function renderInline(parent: Node, opts: InlineOptions = {}): string {
 		const closing = active.slice(keep).reverse();
 		let content = run.content;
 		const opensEmphasis = marks.slice(keep).filter((m) => markDelims(m, inTableCell)?.expel);
-		const afterWord = WORD_CHAR.test(out.charAt(out.length - 1));
+		// a closing link puts its `](..)` between the word and the emphasis, which then opens on
+		// its own rather than inside the word
+		const afterWord = WORD_CHAR.test(out.charAt(out.length - 1)) && !closing.some((m) => m.type.name === 'link');
 		const intraword = expels(closing) && afterWord && WORD_CHAR.test(content.charAt(0));
 		const punctuation = run.isText && afterWord && PUNCT_HEAD.exec(content)?.[0] === content;
 		if (opensEmphasis.length && ((run.isText && !content.trim()) || intraword || punctuation)) {

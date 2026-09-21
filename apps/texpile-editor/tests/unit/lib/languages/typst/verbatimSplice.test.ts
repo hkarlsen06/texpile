@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Fragment, type Node } from 'prosemirror-model';
+import { Transform } from 'prosemirror-transform';
 import { parseTypstFile, serializeTypstFile, serializeTypstFileDetailed } from '$lib/languages/typst/visual/roundtrip';
 import { pmToSource } from '$lib/editor/visual/sourceSpans';
 
@@ -395,5 +396,57 @@ describe('typst: bytes written beside the bytes the file keeps', () => {
 		);
 		expect(out).not.toContain('ca*strong*');
 		expect(parseTypstFile(out).doc.child(1).textContent).toBe('Text castrong, and plain after it.');
+	});
+});
+
+describe('typst: markup that a seam would open', () => {
+	const WRAPPED = 'Intro line.\n\nA reference to a section works the\nsame way: @sec:basics.\n\nTail line.\n';
+
+	it('a list marker typed at the start of a wrapped line is escaped', () => {
+		const parsed = parseTypstFile(WRAPPED);
+		const at = posOf(parsed.doc, 'same way');
+		const doc = new Transform(parsed.doc).replaceWith(at, at, parsed.doc.type.schema.text('+ ')).doc;
+		const out = serializeTypstFile(parsed, doc);
+		expect(out).toContain('works the\n\\+ same way');
+		expect(parseTypstFile(out).doc.child(1).textContent).toBe(doc.child(1).textContent);
+	});
+
+	it('text typed straight after a reference takes the call form, and a dot after that is escaped', () => {
+		const parsed = parseTypstFile(WRAPPED);
+		// the full stop after the reference atom
+		const at = posOf(parsed.doc, 'same way: ') + 'same way: '.length + 1;
+		const doc = new Transform(parsed.doc).replaceWith(at, at + 1, parsed.doc.type.schema.text('.word')).doc;
+		const out = serializeTypstFile(parsed, doc);
+		expect(out).toContain('#ref(<sec:basics>)\\.word');
+		expect(parseTypstFile(out).doc.child(1).toString()).toBe(doc.child(1).toString());
+	});
+
+	const SNAKE = 'Intro line.\n\n== Raw blocks snake_case_words\n<sec:raw>\n\nTail line.\n';
+
+	it('bytes put after an underscore the file keeps inside a word write the block afresh, the underscore escaped', () => {
+		const parsed = parseTypstFile(SNAKE);
+		const at = posOf(parsed.doc, 'case_') + 'case_'.length;
+		const doc = new Transform(parsed.doc).replaceWith(at, at, parsed.doc.type.schema.text('/* ')).doc;
+		const out = serializeTypstFile(parsed, doc);
+		expect(out).toContain('snake_case\\_/\\* words');
+		expect(parseTypstFile(out).doc.child(1).toString()).toBe(doc.child(1).toString());
+	});
+
+	const EMPTY = 'Intro line.\n\n+ \n+ The numbering is automatic.\n';
+
+	it('what is typed into an empty item lands after the marker and its space', () => {
+		const parsed = parseTypstFile(EMPTY);
+		const item = parsed.doc.child(1);
+		const doc = new Transform(parsed.doc).insert(parsed.doc.child(0).nodeSize + 2, parsed.doc.type.schema.text("'?")).doc;
+		expect(doc.child(1).textContent).toBe("'?");
+		expect(item.childCount).toBe(1);
+		const out = serializeTypstFile(parsed, doc);
+		expect(out).toBe("Intro line.\n\n+ '?\n+ The numbering is automatic.\n");
+	});
+
+	it('a bare url written as a bodiless link call reads back as the url', () => {
+		const parsed = parseTypstFile('See #link("https://github.com/typst/typst") here.\n');
+		expect(parsed.doc.child(0).toString()).toBe('paragraph("See ", inline_latex("https://github.com/typst/typst"), " here.")');
+		expect(serializeTypstFile(parsed, parsed.doc)).toBe('See #link("https://github.com/typst/typst") here.\n');
 	});
 });

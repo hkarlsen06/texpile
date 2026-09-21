@@ -123,6 +123,15 @@ export function rawCallText(call: SyntaxNode, src: string): string | null {
 	return unquote(src.slice(parts.arg.from, parts.arg.to));
 }
 
+/** `#link("https://...")` with no body, which the serializer writes for a bare url that the text
+ *  after it would otherwise extend: the url chip a bare url is, standing for the call's bytes */
+export function bareLinkHref(call: SyntaxNode, src: string): string | null {
+	const parts = singleArgCall(call, src, 'link');
+	if (!parts || parts.content || parts.arg.name !== 'Str') return null;
+	const href = unquote(src.slice(parts.arg.from, parts.arg.to));
+	return /^https?:\/\/\S+$/.test(href) ? href : null;
+}
+
 /** `#link("...")[...]` and nothing fancier; any other shape stays a chip. */
 export function linkParts(call: SyntaxNode, src: string): { href: string; markup: SyntaxNode } | null {
 	if (call.name !== 'FuncCall') return null;
@@ -302,7 +311,15 @@ export function convertInline(nodes: SyntaxNode[], src: string, marks: PmMark[])
 				const markCall = link ? null : markCallParts(next, src);
 				const refTarget = link || markCall ? null : refCallTarget(next, src);
 				const rawText = link || markCall || refTarget != null ? null : rawCallText(next, src);
-				if (link) {
+				const bareHref = link || markCall || refTarget != null || rawText != null ? null : bareLinkHref(next, src);
+				if (bareHref != null) {
+					out.push(
+						withMarks(
+							noteSpans(buildNode('inline_latex', { lang: 'typst' }, textNodes(bareHref)), standsFor(bareHref.length, k.from, next.to)),
+							marks
+						)
+					);
+				} else if (link) {
 					const linkMark: PmMark = { type: 'link', attrs: { href: link.href, title: null, bare: false } };
 					out.push(...convertInline(children(link.markup), src, [...marks, linkMark]));
 				} else if (markCall) {

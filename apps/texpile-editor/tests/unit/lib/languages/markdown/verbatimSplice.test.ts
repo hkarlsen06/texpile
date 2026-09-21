@@ -334,3 +334,31 @@ describe('the bytes beside a change stay readable', () => {
 		expect(out).toBe(src);
 	});
 });
+
+describe('emphasis beside a link', () => {
+	it('strong reaching out of a link reopens after the link, not inside the word after it', () => {
+		const src = '- [the shared bibliography](../latex/refs.bib)A short checklist\n';
+		const parsed = parseMarkdownFile(src);
+		const s = parsed.doc.type.schema;
+		const from = posOf(parsed.doc, 'shared');
+		const to = posOf(parsed.doc, 'A short ') + 'A short '.length;
+		const doc = new Transform(parsed.doc).addMark(from, to, s.marks.strong.create()).doc;
+		const out = serializeMarkdownFile(parsed, doc);
+		expect(out).toBe('- [the **shared bibliography**](../latex/refs.bib)**A short** checklist\n');
+		const again = parseMarkdownFile(out).doc;
+		expect(again.textContent).toBe(doc.textContent);
+		expect(again.toString()).toContain('link(strong("shared bibliography")), strong("A short"), " checklist"');
+	});
+
+	it('strong over an autolink wraps its angle brackets', () => {
+		const src = 'a URL with parentheses <https://en.wikipedia.org/wiki/Bracket_(disambiguation)>, an underscore\n';
+		const parsed = parseMarkdownFile(src);
+		const s = parsed.doc.type.schema;
+		const from = posOf(parsed.doc, 'parentheses');
+		const to = posOf(parsed.doc, ', an') + 4;
+		const doc = new Transform(parsed.doc).addMark(from, to, s.marks.strong.create()).doc;
+		const out = serializeMarkdownFile(parsed, doc);
+		expect(out).toBe('a URL with **parentheses <https://en.wikipedia.org/wiki/Bracket_(disambiguation)>, an** underscore\n');
+		expect(parseMarkdownFile(out).doc.toString()).toBe(doc.toString());
+	});
+});

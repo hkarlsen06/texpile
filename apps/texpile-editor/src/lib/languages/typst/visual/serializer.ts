@@ -8,7 +8,17 @@ import { Fragment, type Node } from 'prosemirror-model';
 import { createBlockAssembly, type DocSerializeResult } from '$lib/serializer/blockAssembly';
 import type { ParseOrigins, Segment } from '$lib/editor/visual/sourceSpans';
 import type { Ctx } from '$lib/serializer/types';
-import { escTypst, renderInline, renderHeadingLine, renderBody, mathTypstOf, typStr, typstShadow, isTypHandlerLeaf } from './typstInline';
+import {
+	escLineStart,
+	escTypst,
+	renderInline,
+	renderHeadingLine,
+	renderBody,
+	mathTypstOf,
+	typStr,
+	typstShadow,
+	isTypHandlerLeaf
+} from './typstInline';
 import { cellCall, rowCells, tableBody } from './tableSerializer';
 import { mapToCrlf } from '$lib/editor/visual/sourceSpans';
 export { escTypst, renderInline } from './typstInline';
@@ -309,6 +319,26 @@ function seam(before: string, after: string): boolean {
 	return fuses(before, after) || tight(before, after);
 }
 
+// an underscore the file keeps as text, inside a word (`snake_case`), opens emphasis once the
+// seam takes the word away from one of its sides
+function unbound(head: string, bytes: string, tail: string): boolean {
+	const word = /[\p{L}\p{N}]$/u;
+	const wordStart = /^[\p{L}\p{N}]/u;
+	const after = bytes === '' ? tail : bytes;
+	const before = bytes === '' ? head : bytes;
+	if (/[\p{L}\p{N}]_$/u.test(head) && wordStart.test(tail) && !wordStart.test(after)) return true;
+	if (word.test(head) && /^_[\p{L}\p{N}]/u.test(tail) && !word.test(before)) return true;
+	return false;
+}
+
+// a marker at the start of a line opens a list, a heading or a term item; fresh bytes put at a
+// line start of the kept ones are escaped as the inline renderer escapes a line start, and
+// kept bytes that a fresh line end moves to a line start give the splice up
+function atLineStart(head: string, bytes: string, tail: string): string | null {
+	const out = /(^|\n)[ \t]*$/.test(head) && head !== '' ? escLineStart(bytes) : bytes;
+	return /\n[ \t]*$/.test(out) && /^(?:[-+/=]|\d+\.)/.test(tail) ? null : out;
+}
+
 /** what continues a child's lines inside its container: the indentation the file gave its second
  *  line, else the width of what stood before its first (a marker becomes spaces) */
 function continuation(_parent: Node, text: string, head: string): string {
@@ -324,7 +354,11 @@ const assembly = createBlockAssembly((node, ctx) => serializeTypNode(node, ctx),
 	leafBytes,
 	inlineBytes,
 	mapInlineLeaves,
-	keepApart: (bytes, tail, head) => ((bytes === '' ? seam(head, tail) : seam(head, bytes) || seam(bytes, tail)) ? null : bytes)
+	keepApart: (bytes, tail, head) => {
+		if (bytes === '' ? seam(head, tail) : seam(head, bytes) || seam(bytes, tail)) return null;
+		if (unbound(head, bytes, tail)) return null;
+		return bytes === '' ? bytes : atLineStart(head, bytes, tail);
+	}
 });
 
 export function serializeToTypst(doc: Node): string {
