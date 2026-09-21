@@ -367,7 +367,15 @@ function render(parent: Node, startOfLine: boolean, extra: string, singleLine: b
 				stolen = ws[1];
 			}
 		}
-		for (const a of closing) emit(a.close);
+		for (const a of closing) {
+			emit(a.close);
+			// a mark written as a call (`#text(fill: ..)[..]`) ends a code expression: text going
+			// straight on from its `]` with `.`, `(` or `[` would read as more of the call
+			if (a.close.endsWith(']') && MARK_DELIMS[a.mark.type.name]?.(a.mark.attrs)?.open.startsWith('#')) {
+				codeEnd = out.length;
+				code = '#';
+			}
+		}
 		emit(stolen);
 	}
 

@@ -111,7 +111,15 @@ function convertInline(children: Token[], marks: PmMark[], src: Src): PmNode[] {
 
 		switch (tok.type) {
 			case 'text':
-				out.push(...textNodes(tok.content, marks, leafSpans(src, tok, tok.content)));
+				// an entity's characters stand for the whole of it: `&` is the first byte of `&amp;`
+				// too, which is not the same as being written as it
+				out.push(
+					...textNodes(
+						tok.content,
+						marks,
+						tok.info === 'entity' ? standingFor(src, tok, tok.content.length) : leafSpans(src, tok, tok.content)
+					)
+				);
 				break;
 			case 'softbreak':
 				out.push(...textNodes(' ', marks, standingFor(src, tok, 1))); // a source line-wrap is semantically a space

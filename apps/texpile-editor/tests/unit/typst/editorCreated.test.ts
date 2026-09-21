@@ -112,6 +112,17 @@ describe('small editor-created drifts (T21)', () => {
 		expect(typstToProseMirror(src + '\n').doc.child(0).textContent).toBe('a b');
 	});
 
+	it('text running straight on from a coloured word does not read as more of the call', () => {
+		const src = out(para(text('and '), text('coloured', ['textcolor']), text('.term (x) [y]')));
+		expect(src).toBe('and #text(fill: black)[coloured]\\.term (x) \\[y\\]');
+		expect(reread(src + '\n')).toEqual([
+			['', 'and '],
+			['textcolor', 'coloured'],
+			['', '.term (x) [y]']
+		]);
+		expect(out(para(text('and '), text('coloured', ['textcolor']), text('(x)')))).toBe('and #text(fill: black)[coloured]\\(x)');
+	});
+
 	it('an unnumbered heading has a typst form', () => {
 		const src = out(n.heading.create({ level: 2, numbered: false }, text('Intro')));
 		expect(src).toBe('#heading(level: 2, numbering: none)[Intro]');

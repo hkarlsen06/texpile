@@ -101,7 +101,7 @@ export type BlockAssemblyOptions = {
 	 *  it: the dialect's escaping for prose, the text itself inside a formula or a chip. Null
 	 *  when the leaf cannot be written on its own. `atStart` says the bytes begin the block's
 	 *  content, where a dialect's line-start markup binds */
-	leafBytes?: (leaf: Node, parent: Node, atStart: boolean, block: Node) => string | null;
+	leafBytes?: (leaf: Node, parent: Node, atStart: boolean, block: Node, ctx?: Ctx) => string | null;
 	/** inline `nodes` of a textblock, written as the dialect writes a run of inline content, with
 	 *  no block-level decoration; null when they cannot be written on their own (a comment chip,
 	 *  which owns its line) */
@@ -180,7 +180,9 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 		// a block that changed in its text alone keeps everything but the leaves that changed
 		const was = neighbours[i].was;
 		const spliced = was
-			? (frameSplice(node, was, ctxFor(doc, i, n)) ?? leafSplice(node, was) ?? segmentSplice(node, was, ctxFor(doc, i, n)))
+			? (frameSplice(node, was, ctxFor(doc, i, n)) ??
+				leafSplice(node, was, ctxFor(doc, i, n)) ??
+				segmentSplice(node, was, ctxFor(doc, i, n)))
 			: null;
 		if (spliced) {
 			const lead = /^[ \t\r\n]*/.exec(entry.text)![0];
@@ -314,11 +316,19 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 				let groupPm = 0;
 				for (const g of group) groupPm += g.nodeSize;
 				const ref = slot.ref;
+				const childCtx: Ctx = {
+					parent: node,
+					index: slot.k,
+					isLastChild: slot.k + slot.size === n,
+					inTableCell: ctx.inTableCell || inCell(node)
+				};
 				// the gap before: the file's own between a pair still the file's, else the usual one
-				if (emitted > 0) text += ref && ref.index > 0 && prevRef === parsed[ref.index - 1] ? gapBefore(ref.index) : gapFor(group[0]);
+				const gap =
+					emitted > 0 ? (ref && ref.index > 0 && prevRef === parsed[ref.index - 1] ? gapBefore(ref.index) : gapFor(group[0])) : '';
 				prevRef = ref ? parsed[ref.index + slot.size - 1] : null;
-				const at = text.length;
 				if (ref && slot.kept) {
+					text += gap;
+					const at = text.length;
 					text += ref.text!;
 					for (let t = 0; t < slot.size; t++) {
 						const co = parsed[ref.index + t];
@@ -332,7 +342,6 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 					const k = slot.k;
 					const child = group[0];
 					if (ref && options.spliceChild && !options.spliceChild(node, k, ref.node)) return null;
-					const childCtx: Ctx = { parent: node, index: k, isLastChild: k + slot.size === n, inTableCell: ctx.inTableCell || inCell(node) };
 					// what stood on the child's line before it: a marker, a quote prefix, indentation; for a
 					// fresh child, what the nearest parsed child had
 					// a fresh child continues its lines as the nearest parsed child did
@@ -341,14 +350,25 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 					const prefix = options.continuation ? (options.continuation(node, guide.text!, head) ?? '') : '';
 					const nested = ref
 						? slot.size === 1
-							? (frameSplice(child, ref, childCtx, head) ?? leafSplice(child, ref, prefix) ?? segmentSplice(child, ref, childCtx, prefix))
+							? (frameSplice(child, ref, childCtx, head) ??
+								leafSplice(child, ref, childCtx, prefix) ??
+								segmentSplice(child, ref, childCtx, prefix))
 							: spliceMembers(group, parsed.slice(ref.index, ref.index + slot.size), childCtx, head)
 						: null;
 					if (!nested && slot.size > 1) return null;
 					const part = nested ? nested.text : serializeNode(child, childCtx);
-					const partLeaves = nested ? nested.leaves : (options.mapLeaves?.(child, childCtx, part) ?? []);
 					const lead = nested ? 0 : WS.exec(part)![0].length;
 					let core = nested ? part : part.slice(lead, part.length - WS_END.exec(part)![0].length);
+					// a child that writes nothing (an emptied paragraph) takes no gap of its own either,
+					// unless the file's bytes around it are its frame (a caption's braces), which stays
+					if (core.trim() === '') {
+						const before = ref && ref.index > 0 ? gapBefore(ref.index) : '';
+						const after = ref ? gapAfter(ref.index + slot.size - 1) : '';
+						if (!ref || (/^\s*$/.test(before) && /^\s*$/.test(after))) continue;
+					}
+					text += gap;
+					const at = text.length;
+					const partLeaves = nested ? nested.leaves : (options.mapLeaves?.(child, childCtx, part) ?? []);
 					const prefixing = !nested && prefix !== '' && core.includes('\n');
 					if (prefixing) core = core.replace(/\n(?!\n|$)/g, '\n' + prefix);
 					// the gap after the child is what separates it from the next; a paragraph ending rule
@@ -496,7 +516,7 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 	 * leaf the parse could not place, leaves the block to the dialect's handler. Null when the
 	 * trees differ in anything but leaf text. The runs are relative to the block node and its text.
 	 */
-	function leafSplice(node: Node, origin: BlockOrigin, prefix = ''): Spliced | null {
+	function leafSplice(node: Node, origin: BlockOrigin, ctx: Ctx, prefix = ''): Spliced | null {
 		if (!options.leafBytes || !origin.parse.verbatim || origin.text === undefined || origin.size !== 1) return null;
 		if (node === origin.node) return null;
 		const pairs: LeafPair[] = [];
@@ -564,7 +584,13 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 			// at the leaf's own start there is no character before it, and the markup of the block and
 			// the escape of the first character cannot be told apart: the block is written afresh
 			if (cut === 0 && x.length > 0) {
-				const head = options.leafBytes(p.then.type.schema.text(x[0], p.then.marks), p.parent, p.parent === node && p.nowPm === 1, node);
+				const head = options.leafBytes(
+					p.then.type.schema.text(x[0], p.then.marks),
+					p.parent,
+					p.parent === node && p.nowPm === 1,
+					node,
+					ctx
+				);
 				if (head === null || head !== x[0]) return null;
 			}
 			const from = cut > 0 ? charEdge(byteAt(cut)!) : runs[0].srcFrom;
@@ -573,7 +599,13 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 			let bytes =
 				middle === ''
 					? ''
-					: options.leafBytes(p.now.type.schema.text(middle, p.now.marks), p.parent, p.parent === node && p.nowPm === 1 && cut === 0, node);
+					: options.leafBytes(
+							p.now.type.schema.text(middle, p.now.marks),
+							p.parent,
+							p.parent === node && p.nowPm === 1 && cut === 0,
+							node,
+							ctx
+						);
 			if (bytes === null) return null;
 			// fresh bytes that would fuse with the bytes kept beside them are kept apart
 			if (options.keepApart) {
@@ -603,6 +635,14 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 			cursor = c.srcTo;
 		}
 		text += origin.text.slice(cursor - base);
+		// each change was kept apart from the file's bytes beside it; where another change moved
+		// those, the seam is read again against what is written now
+		if (options.keepApart && changes.length > 1) {
+			for (const c of changes) {
+				const at = shifted(c.srcFrom) - base;
+				if (options.keepApart(c.bytes, text.slice(at + c.bytes.length), text.slice(0, at)) !== c.bytes) return null;
+			}
+		}
 		// the runs: an untouched leaf's, moved to where its bytes and its node now are; a changed
 		// leaf's is its new bytes whole
 		const leaves: Segment[] = [];
@@ -1027,7 +1067,7 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 				const spliced =
 					!opts.keep?.(i) && was[i]
 						? (frameSplice(parent.child(i), was[i]!, cellCtx(i)) ??
-							leafSplice(parent.child(i), was[i]!) ??
+							leafSplice(parent.child(i), was[i]!, cellCtx(i)) ??
 							segmentSplice(parent.child(i), was[i]!, cellCtx(i)))
 						: null;
 				if (spliced) {

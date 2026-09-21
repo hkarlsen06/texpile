@@ -1007,3 +1007,154 @@ Column goal & column box \\\\
 		expect(parseLatexFile(out).doc.child(0).textContent).toContain('umn goal');
 	});
 });
+
+describe('what is typed at the head of an item stays text', () => {
+	const FILE14 = `${PREAMBLE}
+\\begin{itemize}
+\\item First bullet.
+\\item Middle bullet.
+\\item Last bullet.
+\\end{itemize}
+\\end{document}
+`;
+
+	it('a body beginning with < or [ gets an empty group in front, so it is not read as an overlay or a label', () => {
+		for (const typed of ['<lab>,', '[x] ']) {
+			const parsed = parseLatexFile(FILE14);
+			const at = posOf(parsed.doc, 'Middle');
+			const doc = new Transform(parsed.doc).replaceWith(at, at, schema.text(typed)).doc;
+			const out = serializeLatexFile(parsed, doc);
+			expect(out).toContain(`\\item {}${typed}Middle bullet.`);
+			expect(parseLatexFile(out).doc.toString()).toBe(doc.toString());
+		}
+	});
+
+	it('the same when the whole item is written afresh', () => {
+		const parsed = parseLatexFile(FILE14);
+		const out = serializeLatexFile(parsed, withoutOrigins(parsed.doc));
+		expect(out).toContain('\\item Middle bullet.');
+		const at = posOf(parsed.doc, 'Middle');
+		const doc = new Transform(parsed.doc).replaceWith(at, at, schema.text('<lab>,')).doc;
+		expect(serializeLatexFile(parsed, withoutOrigins(doc))).toContain('\\item {}<lab>,Middle bullet.');
+	});
+});
+
+describe('a list run ends where the environment changes', () => {
+	const FILE15 = `${PREAMBLE}
+\\begin{itemize}
+	\\item A bullet.
+	\\item Another one.
+	\\begin{itemize}
+		\\item A nested bullet.
+	\\end{itemize}
+\\end{itemize}
+
+\\begin{enumerate}
+	\\item First.
+	\\item Second.
+	\\begin{enumerate}
+		\\item Nested and renumbered.
+	\\end{enumerate}
+\\end{enumerate}
+
+\\begin{description}
+	\\item[Term] its definition.
+\\end{description}
+\\end{document}
+`;
+
+	it('an itemize written afresh before a description closes itself', () => {
+		const parsed = parseLatexFile(FILE15);
+		const from = posOf(parsed.doc, 'A bullet.') + 'A bullet'.length;
+		const to = posOf(parsed.doc, 'Second.') + 'Se'.length;
+		const doc = new Transform(parsed.doc).delete(from, to).doc;
+		const out = serializeLatexFile(parsed, doc);
+		expect(out).toMatch(/\\end\{enumerate\}\n\\end\{itemize\}\n\n\\begin\{description\}/);
+		expect(parseLatexFile(out).doc.toString()).toBe(doc.toString());
+	});
+});
+
+describe('a character written as a call owns the empty group closing it', () => {
+	const FILE16 = `${PREAMBLE}
+\\begin{table}
+\\centering
+\\begin{tabular}{ll}
+a & b \\\\
+\\end{tabular}
+\\caption{Caption ]\\textasciicircum{}"\\{x here.}
+\\end{table}
+\\end{document}
+`;
+
+	it('typing after the character lands after the group, not inside the call', () => {
+		const parsed = parseLatexFile(FILE16);
+		const at = posOf(parsed.doc, '^') + 1;
+		const doc = new Transform(padTables(parsed.doc)).replaceWith(at, at, schema.text('the')).doc;
+		const out = serializeLatexFile(parsed, doc);
+		expect(out).toContain('\\caption{Caption ]\\textasciicircum{}the"\\{x here.}');
+		expect(parseLatexFile(out).doc.toString()).toBe(doc.toString());
+	});
+});
+
+describe('a file ending in a comment', () => {
+	it('is written back without a line end it never had', () => {
+		for (const src of ['\\section{A}\n\n\\foo{bar}%', '\\section{A}\n\n\\foo{%\nbar\n}%']) {
+			const parsed = parseLatexFile(src);
+			expect(serializeLatexFile(parsed, parsed.doc)).toBe(src);
+		}
+	});
+});
+
+describe("the whitespace between an item label and its body is the file's", () => {
+	const FILE17 = `${PREAMBLE}
+\\begin{description}
+	\\item[Term] its definition.
+	\\item[Another term]a second definition.
+\\end{description}
+\\end{document}
+`;
+
+	it('a body glued to its bracket opens with no space, and stays glued when written afresh', () => {
+		const parsed = parseLatexFile(FILE17);
+		expect(parsed.doc.child(1).textContent).toBe('Another terma second definition.');
+		expect(serializeLatexFile(parsed, withoutOrigins(parsed.doc))).toContain('\\item[Another term]a second definition.');
+	});
+
+	it("deleting the space after the bracket takes the file's space out", () => {
+		const parsed = parseLatexFile(FILE17);
+		const at = posOf(parsed.doc, ' its definition');
+		const doc = new Transform(parsed.doc).delete(at, at + 1).doc;
+		const out = serializeLatexFile(parsed, doc);
+		expect(out).toContain('\\item[Term]its definition.');
+		expect(parseLatexFile(out).doc.toString()).toBe(doc.toString());
+	});
+
+	it("typing at the bracket lands after the file's space", () => {
+		const parsed = parseLatexFile(FILE17);
+		const at = posOf(parsed.doc, ' its definition') + 1;
+		const doc = new Transform(parsed.doc).replaceWith(at, at, schema.text('all ')).doc;
+		expect(serializeLatexFile(parsed, doc)).toContain('\\item[Term] all its definition.');
+	});
+});
+
+describe('a caption emptied in the editor keeps its braces', () => {
+	const FILE18 = `${PREAMBLE}
+\\begin{table}[h]
+\\centering
+\\caption{Words here.}\\vspace{2mm}
+\\begin{tabular}{ll}
+a & b \\\\
+\\end{tabular}
+\\end{table}
+\\end{document}
+`;
+
+	it('the frame around the caption is not a gap that goes with it', () => {
+		const parsed = parseLatexFile(FILE18);
+		const at = posOf(parsed.doc, 'Words here.');
+		const doc = new Transform(padTables(parsed.doc)).delete(at, at + 'Words here.'.length).doc;
+		const out = serializeLatexFile(parsed, doc);
+		expect(out).toContain('\\caption{}\\vspace{2mm}\n\\begin{tabular}{ll}');
+		expect(parseLatexFile(out).doc.toString()).toBe(doc.toString());
+	});
+});

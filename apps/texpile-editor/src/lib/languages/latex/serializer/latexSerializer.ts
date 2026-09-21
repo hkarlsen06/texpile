@@ -129,14 +129,16 @@ function inlineRun(block: Node, nodes: Node[]): Node {
 	return block.type.create(block.attrs, Fragment.fromArray(nodes), block.marks);
 }
 
-function inlineBytes(block: Node, nodes: Node[], _atStart: boolean, ctx: Ctx): string | null {
+function inlineBytes(block: Node, nodes: Node[], atStart: boolean, ctx: Ctx): string | null {
 	const run = inlineRun(block, nodes);
 	// a comment chip owns its line: it cannot stand mid-line between kept bytes
 	let comment = false;
 	run.forEach((c) => {
 		if (c.type.name === 'inline_latex' && c.textContent.startsWith('%')) comment = true;
 	});
-	return comment ? null : renderChildren(run, ctx.inTableCell);
+	if (comment) return null;
+	const bytes = renderChildren(run, ctx.inTableCell);
+	return atStart && headsItem(ctx) ? guardItemBody(bytes) : bytes;
 }
 
 function mapInlineLeaves(block: Node, nodes: Node[], text: string, _atStart: boolean, ctx: Ctx): Segment[] | null {
@@ -350,6 +352,11 @@ function sameSourceList(a: Node, b: Node): boolean {
 	return !oa || !ob || (oa.parse === ob.parse && oa.index - oa.member === ob.index - ob.member);
 }
 
+/** the environment name a list node carries itself, if any */
+function ownEnvName(node: Node): string | null {
+	return typeof node.attrs.envName === 'string' && node.attrs.envName ? node.attrs.envName : null;
+}
+
 /** the environment name the first node of this run of list nodes carries, if any */
 function runEnvName(node: Node, ctx: Ctx): string | null {
 	if (!ctx.parent) return typeof node.attrs.envName === 'string' ? node.attrs.envName : null;
@@ -385,7 +392,18 @@ function labelKey(s: string): string {
  * label is not the label. `latex` is the run re-serialized, which is what an edited label has
  * to be written back as; the caller prefers the untouched source when the two still agree.
  */
-function splitLeadingLabel(item: Node): { latex: string; body: Node } | null {
+/** an item body beginning with `[` reads as the item's label, and one beginning with `<` as a
+ *  beamer overlay: an empty group in front keeps the bytes text */
+function guardItemBody(body: string): string {
+	return /^[[<]/.test(body) ? '{}' + body : body;
+}
+
+/** whether `ctx` is the first block of a list item, whose bytes follow \item directly */
+function headsItem(ctx: Ctx | undefined): boolean {
+	return !!ctx && ctx.parent?.type.name === 'list' && ctx.index === 0;
+}
+
+function splitLeadingLabel(item: Node): { latex: string; body: Node; glued: boolean } | null {
 	if (item.type.name !== 'paragraph') return null;
 	// through the LAST marked node, not the first unmarked one: an atom in the middle of a label
 	// (`\item[A $x$ B]` puts inline math there) carries no marks of its own
@@ -407,10 +425,12 @@ function splitLeadingLabel(item: Node): { latex: string; body: Node } | null {
 	);
 	let rest = item.content.cut(size);
 	const next = rest.firstChild;
+	// the body runs straight on from the bracket when no whitespace stands between them
+	const glued = !!next && !(next.isText && /^\s/.test(next.text ?? ''));
 	if (next?.isText && next.text && /^\s+$/.test(next.text)) rest = rest.cut(next.nodeSize);
 	else if (next?.isText && next.text && /^\s/.test(next.text))
 		rest = rest.replaceChild(0, next.type.schema.text(next.text.replace(/^\s+/, ''), next.marks));
-	return { latex: renderChildren(bare, false).trim(), body: item.copy(rest) };
+	return { latex: renderChildren(bare, false).trim(), body: item.copy(rest), glued };
 }
 
 const HEADING_CMD: Record<number, string> = {
@@ -499,13 +519,14 @@ const assembly = createBlockAssembly((node, ctx) => serializeNode(node, ctx), {
 	spliceChild: (parent, index, was) =>
 		!(parent.type.name === 'list' && index === 0 && (splitLeadingLabel(parent.child(0)) !== null || splitLeadingLabel(was) !== null)),
 	// inside a formula, a chip or a code block the text is the source; prose is escaped the way the text handler does
-	leafBytes: (leaf, parent) =>
-		parent.type.spec.leafText || parent.type.spec.code
-			? (leaf.text ?? '')
-			: bareTextString(
-					leaf.text ?? '',
-					leaf.marks.some((m) => m.type.name === 'code')
-				),
+	leafBytes: (leaf, parent, atStart, _block, ctx) => {
+		if (parent.type.spec.leafText || parent.type.spec.code) return leaf.text ?? '';
+		const bytes = bareTextString(
+			leaf.text ?? '',
+			leaf.marks.some((m) => m.type.name === 'code')
+		);
+		return atStart && headsItem(ctx) ? guardItemBody(bytes) : bytes;
+	},
 	inlineBytes,
 	mapInlineLeaves,
 	// a control word ending the fresh bytes would fuse with a letter beginning the kept tail
@@ -751,11 +772,19 @@ const NODES: Record<string, NodeHandler> = {
 		const kind = String(node.attrs.kind ?? 'bullet');
 		const prev = prevSibling(ctx);
 		const next = nextSibling(ctx);
-		const prevSame = prev?.type.name === 'list' && prev.attrs.kind === kind && sameSourceList(prev, node);
-		const nextSame = next?.type.name === 'list' && next.attrs.kind === kind && sameSourceList(node, next);
-		// a description environment is remembered on the run's first node; the rest inherit it
+		const defaultEnv = kind === 'ordered' ? 'enumerate' : 'itemize';
+		// a description environment is remembered on the run's first node; the rest inherit it. A
+		// node naming an environment of its own opens a new run: a description after an itemize
+		// is not its continuation, whatever the kinds say
 		const envName = runEnvName(node, ctx);
-		const env = envName ?? (kind === 'ordered' ? 'enumerate' : 'itemize');
+		const env = envName ?? defaultEnv;
+		const own = ownEnvName(node);
+		const prevEnv = prev?.type.name === 'list' ? (runEnvName(prev, { ...ctx, index: ctx.index - 1 }) ?? defaultEnv) : null;
+		const prevSame =
+			prev?.type.name === 'list' && prev.attrs.kind === kind && sameSourceList(prev, node) && (own === null || own === prevEnv);
+		const nextOwn = next?.type.name === 'list' ? ownEnvName(next) : null;
+		const nextSame =
+			next?.type.name === 'list' && next.attrs.kind === kind && sameSourceList(node, next) && (nextOwn === null || nextOwn === env);
 		// \item[label]: the editor shows it as leading bold text, so it is taken back out of the
 		// body before the bracket is rewritten. The SOURCE label is preferred while the run still
 		// says the same thing, since re-serializing turns a tie into a no-break space and a `--`
@@ -797,7 +826,7 @@ const NODES: Record<string, NodeHandler> = {
 				parts.push(continues ? `\n${inner}` : afterBody ? inner.replace(/^\n/, '') : `\\item[] ${inner}`);
 			} else if (i === 0) {
 				const alone = labelled && !inner.trim() && node.childCount > 1 && node.child(1).type.name !== 'list';
-				parts.push(alone ? `${itemCmd} \\par` : `${itemCmd} ${inner}`);
+				parts.push(alone ? `${itemCmd} \\par` : `${itemCmd}${labelled?.glued ? '' : ' '}${guardItemBody(inner)}`);
 			} else parts.push('\n' + inner); // continuation block within the same item
 		});
 

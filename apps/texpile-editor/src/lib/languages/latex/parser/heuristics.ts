@@ -67,8 +67,9 @@ export function heuristicMarkCommentedMacroCalls(nodes: Node[] | undefined, sour
 			const text = source.slice(start, lastEnd);
 			// if the span ends inside a % comment, bake in a newline: a dangling comment marker
 			// would eat whatever the serializer puts next on that line and compound every save.
-			// (lexical tail check: comments don't nest or span lines.)
-			node._raw = /(^|[^\\])%[^\n]*$/.test(text) ? text + '\n' : text;
+			// (lexical tail check: comments don't nest or span lines.) At the end of the file
+			// there is no line end to take, and the span must stay the file's bytes
+			node._raw = lastEnd < source.length && /(^|[^\\])%[^\n]*$/.test(text) ? text + '\n' : text;
 			nodes.splice(i + 1, j - (i + 1)); // drop the consumed run; the span lives on `_raw` now
 		}
 	}

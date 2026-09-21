@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { Fragment, type Node } from 'prosemirror-model';
+import { Transform } from 'prosemirror-transform';
+import { padTables } from '$lib/editor/visual/padTables';
 import { parseMarkdownFile, serializeMarkdownFile, serializeMarkdownFileDetailed } from '$lib/languages/markdown/visual/roundtrip';
 import { pmToSource } from '$lib/editor/visual/sourceSpans';
 
@@ -296,5 +298,39 @@ describe('markdown: a block joined onto the one before it', () => {
 			parsed.doc.marks
 		);
 		expect(serializeMarkdownFile(parsed, joined)).toContain('`tlmgr`.[a link](');
+	});
+});
+
+describe('the bytes beside a change stay readable', () => {
+	it('typing after an entity lands after the whole of it', () => {
+		const src = 'Entities: &amp; &lt; end.\n';
+		const parsed = parseMarkdownFile(src);
+		const at = posOf(parsed.doc, '&') + 1;
+		const doc = new Transform(parsed.doc).replaceWith(at, at, parsed.doc.type.schema.text(',# é')).doc;
+		const out = serializeMarkdownFile(parsed, doc);
+		expect(out).toBe('Entities: &amp;,# é &lt; end.\n');
+		expect(parseMarkdownFile(out).doc.toString()).toBe(doc.toString());
+	});
+
+	it('a deletion that would leave an emphasis opening after a letter writes the run afresh, the punctuation outside', () => {
+		for (const src of ['Op*en any .typ* file\n', '| A | B |\n| --- | --- |\n| x | Op*en any .typ* file |\n']) {
+			const parsed = parseMarkdownFile(src);
+			const opened = padTables(parsed.doc);
+			const from = posOf(opened, 'Op') + 1;
+			const to = posOf(opened, 'en any .typ') + 'en any '.length;
+			const doc = new Transform(opened).delete(from, to).doc;
+			const out = serializeMarkdownFile(parsed, doc);
+			expect(out).toBe(src.replace('Op*en any .typ*', 'O.*typ*'));
+			expect(parseMarkdownFile(out).doc.textContent).toBe(doc.textContent);
+		}
+	});
+
+	it('an item paragraph split at its start keeps the item one, the empty half written as nothing', () => {
+		const src = '## Settings\n\n- [Themes](themes.md)\n- [Markdown](markdown.md)\n';
+		const parsed = parseMarkdownFile(src);
+		const doc = new Transform(parsed.doc).split(posOf(parsed.doc, 'Themes')).doc;
+		expect(doc.child(1).childCount).toBe(2);
+		const out = serializeMarkdownFile(parsed, doc);
+		expect(out).toBe(src);
 	});
 });

@@ -114,11 +114,30 @@ export function convertNodesToInline(nodes: Node[], ctx: ConversionContext): PmN
 			prevAst = node;
 			continue;
 		}
+		if (closesSymbol(node, prevAst, result[result.length - 1])) {
+			prevAst = node;
+			continue;
+		}
 		const converted = convertNodeToInline(node, ctx);
 		if (converted) result.push(...converted);
 		prevAst = node;
 	}
 	return applyLigaturesToNodes(bindTextToChips(collapseTextNodes(result)));
+}
+
+/**
+ * The empty group closing a symbol macro (`\textasciicircum{}`, `\ss{}`) is part of what the
+ * character was written as: the character's bytes grow over it, so a cut after the character
+ * lands after the group rather than inside the call
+ */
+function closesSymbol(node: Node, prevAst: Node | null, last: PmNode | undefined): boolean {
+	if (node.type !== 'group' || (node.content ?? []).length > 0 || prevAst?.type !== 'macro' || !last?.isText) return false;
+	const at = positionSpan(node);
+	const spans = spansOf(last);
+	const tail = spans?.[spans.length - 1];
+	if (!at || !tail || tail.srcTo !== at.from || tail.to !== last.text!.length) return false;
+	noteSpans(last, [...spans!.slice(0, -1), { ...tail, srcTo: at.to, kind: 'sub' }]);
+	return true;
 }
 
 export function convertNodeToInline(node: Node, ctx: ConversionContext): PmNode[] | null {

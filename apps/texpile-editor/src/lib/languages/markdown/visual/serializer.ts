@@ -276,6 +276,18 @@ function continuation(_parent: Node, text: string, head: string): string {
 	return text.startsWith('>') ? prefix.replace(/>[ \t]*$/, '') : prefix;
 }
 
+// an emphasis delimiter opens only where it can flank: not after a letter when punctuation
+// follows it, and `_` never inside a word; likewise a closing one before a letter. The inline
+// renderer moves such punctuation out of the emphasis when it sees the whole run, so a seam
+// that would leave a delimiter unable to flank gives the splice up
+function delimSeam(before: string, after: string): boolean {
+	const opening = /^([*_])(.)/su.exec(after);
+	if (opening && /[\p{L}\p{N}]$/u.test(before) && (opening[1] === '_' || /[\p{P}\p{S}]/u.test(opening[2]))) return true;
+	const closing = /(.)([*_])$/su.exec(before);
+	if (closing && /^[\p{L}\p{N}]/u.test(after) && (closing[2] === '_' || /[\p{P}\p{S}]/u.test(closing[1]))) return true;
+	return false;
+}
+
 const assembly = createBlockAssembly((node, ctx) => serializeMdNode(node, ctx), {
 	mapLeaves: (node, ctx, text) => mdShadow.mapBlockLeaves(serializeMdNode, node, ctx, text),
 	// a task item's box is written with its marker, from the item's attrs: the first block of the
@@ -284,7 +296,9 @@ const assembly = createBlockAssembly((node, ctx) => serializeMdNode(node, ctx), 
 	continuation,
 	leafBytes,
 	inlineBytes,
-	mapInlineLeaves
+	mapInlineLeaves,
+	keepApart: (bytes, tail, head) =>
+		(bytes === '' ? delimSeam(head, tail) : delimSeam(head, bytes) || delimSeam(bytes, tail)) ? null : bytes
 });
 
 export function serializeToMarkdown(doc: Node): string {

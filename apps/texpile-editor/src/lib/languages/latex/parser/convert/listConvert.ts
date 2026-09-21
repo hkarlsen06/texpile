@@ -5,7 +5,7 @@ import { printRaw } from '@unified-latex/unified-latex-util-print-raw';
 import { buildNode, type PmNode, type ConversionOptions } from '../builders';
 import { convertNodesToBlocks } from '../converter';
 import { isBlankCellNode } from './tableConvert';
-import { envArgsRawSource } from './origCapture';
+import { capture, envArgsRawSource, startOf } from './origCapture';
 
 export function createList(env: Environment, kind: 'bullet' | 'ordered', options: ConversionOptions): PmNode[] {
 	const result: PmNode[] = [];
@@ -73,7 +73,7 @@ export function createList(env: Environment, kind: 'bullet' | 'ordered', options
 				// the parser puts the item body in an argument with no delimiters
 				for (const arg of macro.args) {
 					if (arg.openMark === '' && arg.closeMark === '' && arg.content.length > 0) {
-						currentItemContent.push(...arg.content);
+						currentItemContent.push(...(optionalArg ? bodyAfterLabel(optionalArg.content, arg.content) : arg.content));
 					}
 				}
 			}
@@ -95,6 +95,35 @@ export function createList(env: Environment, kind: 'bullet' | 'ordered', options
 	}
 
 	return result;
+}
+
+/**
+ * The parser puts a whitespace node between an item's `[label]` and its body whether or not the
+ * file has any: with none, the body starts right after the bracket and the node goes; with some,
+ * the node takes the bytes, so the space the editor shows is the file's and edits to it reach it
+ */
+function bodyAfterLabel(label: Node[], body: Node[]): Node[] {
+	const first = body[0];
+	const src = capture.rawSource;
+	if (!src || first.type !== 'whitespace' || first.position) return body;
+	let labelEnd = -1;
+	for (const n of label) {
+		const end = (n as { position?: { end?: { offset?: number } } }).position?.end?.offset;
+		if (end != null) labelEnd = Math.max(labelEnd, end);
+	}
+	const close = labelEnd < 0 ? -1 : src.indexOf(']', labelEnd);
+	const bodyStart = body
+		.slice(1)
+		.map(startOf)
+		.find((at) => at != null);
+	if (close < 0 || bodyStart == null || bodyStart < close + 1) return body;
+	const gap = src.slice(close + 1, bodyStart);
+	if (gap === '') return body.slice(1);
+	if (!/^\s+$/.test(gap)) return body;
+	return [
+		{ ...first, position: { start: { offset: close + 1, line: 0, column: 0 }, end: { offset: bodyStart, line: 0, column: 0 } } } as Node,
+		...body.slice(1)
+	];
 }
 
 export function createListItem(content: Node[], options: ConversionOptions): PmNode[] {
