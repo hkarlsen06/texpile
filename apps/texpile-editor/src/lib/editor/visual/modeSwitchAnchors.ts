@@ -30,15 +30,13 @@ function findScrollParent(el: HTMLElement | null): HTMLElement | null {
 }
 
 /**
- * Leaving visual mode: the viewport-top block's offset (scroll) plus the caret's (cursor). An
- * off-screen caret is ignored: flashing a line the user wasn't looking at would read as a wrong jump.
+ * Leaving visual mode: the viewport-top block's offset (scroll) plus the caret's (cursor).
  */
 export function captureVisualAnchor(map: SourceMap): VisualAnchor | null {
 	const v = editorViewStore.current;
 	if (!v) return null;
 	const scRect = findScrollParent(v.dom)?.getBoundingClientRect();
 	const scTop = (scRect?.top ?? 0) + 4;
-	const scBottom = scRect?.bottom ?? Number.POSITIVE_INFINITY;
 
 	// scroll anchor: the topmost visible block
 	let scroll: number | null = null;
@@ -50,16 +48,10 @@ export function captureVisualAnchor(map: SourceMap): VisualAnchor | null {
 		}
 	}
 
-	// cursor anchor: only when the caret's block is on-screen (an off-screen caret must not
-	// yank the incoming view away from the reading position)
-	let cursor: number | null = null;
+	// cursor anchor: the caret, wherever it is. The source editor keeps the reading position when
+	// the caret falls inside the viewport from there, and brings the caret into view otherwise
 	const head = v.state.selection.head;
-	const cb = blockAtPm(map, head);
-	if (cb) {
-		const dom = v.nodeDOM(cb.pmFrom);
-		const r = dom instanceof HTMLElement ? dom.getBoundingClientRect() : null;
-		if (r && r.bottom > scTop && r.top < scBottom) cursor = offsetAtPm(map, head);
-	}
+	const cursor = blockAtPm(map, head) ? offsetAtPm(map, head) : null;
 
 	return scroll == null && cursor == null ? null : { scroll, cursor };
 }
@@ -86,6 +78,18 @@ export function placeSourceCaret(offset: number): void {
 	});
 }
 
+/** whether the caret at `pos` sits inside the visual editor's viewport */
+function caretVisible(v: EditorView, pos: number): boolean {
+	try {
+		const c = v.coordsAtPos(pos);
+		const r = findScrollParent(v.dom)?.getBoundingClientRect();
+		if (!r || r.height === 0) return true;
+		return c.top >= r.top && c.bottom <= r.bottom;
+	} catch {
+		return true;
+	}
+}
+
 /**
  * Entering visual mode: restore the reading position and caret from a source anchor. Double rAF:
  * EditorView's doc-swap effect restores its saved scrollTop in a single rAF registered in this
@@ -102,15 +106,15 @@ export function resolveVisualAnchor(v: EditorView & { isDestroyed?: boolean }, a
 					const dom = v.nodeDOM(scrollHit.pmFrom);
 					if (dom instanceof HTMLElement) dom.scrollIntoView({ block: 'start' });
 				}
-				// caret: the source cursor's own position, falling back to the scroll block. no
-				// scrollIntoView on a switch: the scroll anchor owns the viewport.
+				// caret: the source cursor's own position, falling back to the scroll block. The scroll
+				// anchor owns the viewport while the caret lands inside it; a caret it leaves outside
+				// (the source caret was below the viewport) is brought into view instead
 				const caretPos = (anchor.cursor != null ? pmAtOffset(map, anchor.cursor) : null) ?? (scrollHit ? scrollHit.pmFrom + 1 : null);
 				if (caretPos == null) return; // an empty doc: nothing to place a caret in at all
 				const doc = v.state.doc;
-				const tr = v.state.tr
-					.setSelection(TextSelection.near(doc.resolve(Math.min(caretPos, doc.content.size))))
-					.setMeta('addToHistory', false);
-				v.dispatch(anchor.caretOnly ? tr.scrollIntoView() : tr);
+				const at = Math.min(caretPos, doc.content.size);
+				const tr = v.state.tr.setSelection(TextSelection.near(doc.resolve(at))).setMeta('addToHistory', false);
+				v.dispatch(anchor.caretOnly || !caretVisible(v, at) ? tr.scrollIntoView() : tr);
 				// reclaim DOM focus for PM: the mount-time selection can sit inside a CM-backed
 				// nodeview that focuses its inner CodeMirror; PM then never syncs the DOM caret
 				// and the next keystrokes would land in that nodeview instead of at the parked caret

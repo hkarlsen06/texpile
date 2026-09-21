@@ -64,8 +64,9 @@ export function reapplyScrollOffset(getView: () => EditorView | null, scroll: nu
 	});
 }
 
-/** mode-switch sync: reveal the scroll offset near the top, park the caret at the
- *  visual editor's caret and flash its line */
+/** mode-switch sync: park the caret at the visual editor's caret and flash its line. The viewport
+ *  keeps the reading position (the visual editor's top block) when the caret falls inside it from
+ *  there; a caret further down is brought into view instead, which is what the switch is for */
 export function applyModeSwitchAnchor(view: EditorView, anchor: { scroll: number | null; cursor: number | null }): void {
 	const len = view.state.doc.length;
 	function clamp(p: number) {
@@ -73,10 +74,32 @@ export function applyModeSwitchAnchor(view: EditorView, anchor: { scroll: number
 	}
 	const scrollPos = anchor.scroll != null ? clamp(anchor.scroll) : null;
 	const cursorPos = anchor.cursor != null ? clamp(anchor.cursor) : scrollPos;
-	if (cursorPos != null) {
-		view.dispatch({
-			selection: { anchor: cursorPos },
-			effects: [flashLineEffect.of(cursorPos), EditorView.scrollIntoView(scrollPos ?? cursorPos, { y: 'start', yMargin: 12 })]
-		});
-	}
+	if (cursorPos == null) return;
+	// line heights are estimates until the first measure; a long wrapped line reads as one line
+	// here, which the check after the measure below makes up for
+	const height = view.scrollDOM.clientHeight || window.innerHeight;
+	const anchored =
+		scrollPos != null && scrollPos <= cursorPos && view.lineBlockAt(cursorPos).bottom - view.lineBlockAt(scrollPos).top <= height - 12;
+	view.dispatch({
+		selection: { anchor: cursorPos },
+		effects: [
+			flashLineEffect.of(cursorPos),
+			anchored ? EditorView.scrollIntoView(scrollPos!, { y: 'start', yMargin: 12 }) : EditorView.scrollIntoView(cursorPos, { y: 'center' })
+		]
+	});
+	caretIntoView(view, cursorPos);
+}
+
+/** once CodeMirror has measured, the caret's true place is known: brought into view where the
+ *  estimate above left it outside. Two frames on, after the scroll the dispatch asked for */
+function caretIntoView(view: EditorView, pos: number): void {
+	requestAnimationFrame(() =>
+		requestAnimationFrame(() => {
+			if (!view.dom.isConnected) return;
+			const c = view.coordsAtPos(pos);
+			const r = view.scrollDOM.getBoundingClientRect();
+			if (!c || r.height === 0 || (c.top >= r.top && c.bottom <= r.bottom)) return;
+			view.dispatch({ effects: EditorView.scrollIntoView(pos, { y: 'nearest', yMargin: 24 }) });
+		})
+	);
 }
