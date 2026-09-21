@@ -1294,3 +1294,28 @@ Some words before the list:
 		expect(serializeLatexFile(parsed, doc)).toContain('Some \\textbf{words} before the list:\n%\n\\begin{enumerate}');
 	});
 });
+
+describe('a comment ending an item paragraph before a display', () => {
+	it('keeps its line end when the paragraph is written afresh inside the item', () => {
+		const src = `${PREAMBLE}
+\\begin{enumerate}
+    \\item the inclusions are continuous, compact when the order components
+    are strict in the sense that
+    \t%
+        \\begin{align*}
+            x = 1
+        \\end{align*}
+        %
+    \\item next one.
+\\end{enumerate}
+\\end{document}
+`;
+		const parsed = parseLatexFile(src);
+		const from = posOf(parsed.doc, 'compact');
+		const doc = new Transform(parsed.doc).addMark(from, from + 7, schema.marks.strong.create()).doc;
+		const out = serializeLatexFile(parsed, doc);
+		expect(out).toContain('\\textbf{compact}');
+		expect(out).toMatch(/%\n\s*\\begin\{align\*\}/);
+		expect(parseLatexFile(out).doc.toString()).toBe(doc.toString());
+	});
+});

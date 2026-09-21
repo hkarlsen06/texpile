@@ -542,6 +542,8 @@ const assembly = createBlockAssembly((node, ctx) => serializeNode(node, ctx), {
 	},
 	inlineBytes,
 	mapInlineLeaves,
+	// a comment runs to the end of its line: nothing may follow it on that line
+	endsLine: (text) => /(^|[^\\])(\\\\)*%[^\n]*$/.test(text),
 	// a control word ending the fresh bytes would fuse with a letter beginning the kept tail
 	keepApart: (bytes, tail) => (/\\[a-zA-Z@]+$/.test(bytes) && /^[a-zA-Z]/.test(tail) ? bytes + ' ' : bytes),
 	// a block written afresh inside an environment or an item continues its lines as the file

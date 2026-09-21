@@ -115,6 +115,9 @@ export type BlockAssemblyOptions = {
 	 *  sides then meet; `gone` is what the change took out from between them. Null for a seam the
 	 *  dialect cannot write, which gives up the splice and writes the block afresh */
 	keepApart?: (bytes: string, tail: string, head: string, gone: string) => string | null;
+	/** whether `text` ends on something that owns the rest of its line (a LaTeX comment), so
+	 *  what follows it must begin a line of its own */
+	endsLine?: (text: string) => boolean;
 };
 
 /** how a dialect's own rendering of a container's children is joined */
@@ -375,6 +378,9 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 					// of the dialect (a \par before a blank line) applies as at the top level
 					const after = ref ? gapAfter(ref.index + slot.size - 1) : usualGap;
 					const last = slot === slots[slots.length - 1] && m === nodes.length - 1;
+					// a child ending on a comment keeps the line end after it, or the comment would run
+					// on into what follows
+					if (options.endsLine?.(core) && !after.startsWith('\n') && !(last && after === '')) core += '\n';
 					if (options.beforeBreak && (last || BLANK.test(after))) {
 						const at2 = slots.indexOf(slot) + 1;
 						const nextSlot = at2 < slots.length ? slots[at2] : null;
