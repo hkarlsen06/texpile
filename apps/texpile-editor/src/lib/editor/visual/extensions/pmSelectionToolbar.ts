@@ -24,11 +24,7 @@ const HEIGHT = 26;
  * move the text without an editor update, so a capture-phase scroll listener and a ResizeObserver
  * cover what update() cannot see.
  */
-export function pmSelectionToolbar(
-	onAdd: (anchor: CommentAnchor | null) => void,
-	label: string,
-	sourceAnchor: SourceAnchorFn
-): Plugin {
+export function pmSelectionToolbar(onAdd: (anchor: CommentAnchor | null) => void, label: string, sourceAnchor: SourceAnchorFn): Plugin {
 	return new Plugin({
 		view(view) {
 			const row = selectionToolbarRow(

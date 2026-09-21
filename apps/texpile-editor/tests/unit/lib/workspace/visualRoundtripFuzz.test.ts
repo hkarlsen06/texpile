@@ -26,8 +26,10 @@ function visible(doc: PMNode, format: Format['name']): string[] {
 			} else if (child.type.name === 'hard_break') {
 				cells.push({ ch: plain ? ' ' : '⏎', marks: [] });
 			} else {
-				const { orig: _orig, ...attrs } = child.attrs as Record<string, unknown>;
-				cells.push({ ch: `‹${child.type.name}:${child.textContent.replace(/\s+/g, ' ').trim() || JSON.stringify(attrs)}›`, marks: [] });
+				cells.push({
+					ch: `‹${child.type.name}:${child.textContent.replace(/\s+/g, ' ').trim() || JSON.stringify(child.attrs)}›`,
+					marks: []
+				});
 			}
 		});
 		return cells;

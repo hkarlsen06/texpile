@@ -9,11 +9,10 @@ import type { TokenEncoder } from 'prosemirror-changeset';
 
 type Token = string | number;
 
-// Where a node came from, not what it is: the importer's verbatim slice and its offset in the
-// source file. Two versions of an untouched paragraph carry different offsets, so encoding these
-// lights up every block in the document. Nothing real hides behind them - if the content differs,
-// its own tokens differ.
-const PROVENANCE = new Set(['orig', 'preBody', 'docTail']);
+// Plumbing a block carries from the file, not what it is: a float's raw prefix is re-emitted
+// as it was, never read. Nothing real hides behind it - if the content differs, its own tokens
+// differ.
+const PROVENANCE = new Set(['preBody']);
 
 function contentAttrs(attrs: Record<string, unknown>): string | null {
 	const keys = Object.keys(attrs).filter((k) => !PROVENANCE.has(k));

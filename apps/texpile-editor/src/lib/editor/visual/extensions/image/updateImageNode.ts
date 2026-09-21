@@ -39,9 +39,6 @@ export function updateImageNode(nodes: Schema['spec']['nodes'], pluginSettings: 
 			bareOriginal: { default: false },
 			// verbatim \caption[short] optional arg; see schema.ts
 			captionOpt: { default: null },
-			// see ORIG_BLOCKS in schema.ts. this spec replaces the base attrs wholesale,
-			// so orig must be declared here too.
-			orig: { default: null },
 			...attributesUpdate
 		},
 		atom: true,

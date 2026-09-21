@@ -1,9 +1,18 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { noParse } from '$lib/editor/visual/sourceSpans';
 import { visualDocCache } from '$lib/workspace/visualDocCache';
 import type { ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
 
 function parsed(marker: string): ParsedLatexFile {
-	return { preamble: marker, postamble: '', doc: { marker } as never, hadDocumentEnv: true, warnings: [], map: { leaves: [], blocks: [] } };
+	return {
+		preamble: marker,
+		postamble: '',
+		doc: { marker } as never,
+		hadDocumentEnv: true,
+		warnings: [],
+		map: { leaves: [], blocks: [] },
+		origins: noParse()
+	};
 }
 
 beforeEach(() => {

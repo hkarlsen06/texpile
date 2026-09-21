@@ -1,5 +1,5 @@
 // A list regenerates as a whole group the moment one word inside it changes, so the shape it comes
-// back in is what the reader is left with. See the `orig` verbatim layer in CLAUDE.md.
+// back in is what the reader is left with. See the verbatim layer in blockAssembly.
 import { describe, it, expect } from 'vitest';
 import { parseLatexFile, serializeLatexFile } from '$lib/workspace/latexRoundtrip';
 import type { Node as PMNode } from 'prosemirror-model';

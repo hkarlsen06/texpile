@@ -8,9 +8,9 @@
  *     pnpm --filter texpile-editor exec vitest run dirroundtrip.tool
  *
  * RT_SKIP (regex on basename): copy matching .tex verbatim instead of round-tripping.
- * RT_MODE: 'verbatim' (default) is the real app path, untouched blocks re-emit their `orig`
- * slice. 'deterministic' strips `orig`/`docTail` before serializing, forcing every block
- * through the deterministic rules: this is what proves the regeneration path itself.
+ * RT_MODE: 'verbatim' (default) is the real app path, untouched blocks re-emit the bytes they
+ * came from. 'deterministic' forgets the parse before serializing, forcing every block through
+ * the deterministic rules: this is what proves the regeneration path itself.
  *
  * Cross-file macros mirror the real app: one gatherProjectMacros call per paper root (via the
  * detected main file's include-chain), applied to every .tex file in that paper.
@@ -19,7 +19,7 @@ import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Node } from 'prosemirror-model';
-import { Fragment } from 'prosemirror-model';
+import { withoutOrigins } from '$lib/editor/visual/sourceSpans';
 
 // project.ts's fileSystem import does real network fetches, unusable under vitest. swap in a
 // real-fs shim so detectMainFile/gatherProjectMacros run their actual logic against the paper
@@ -51,18 +51,9 @@ function walk(dir: string, base = dir): string[] {
 	return out;
 }
 
-/** strip every `orig`/`docTail` stamp so the doc serializes through the deterministic rules only */
+/** forget the parse so the doc serializes through the deterministic rules only */
 function stripOrig(doc: Node): Node {
-	const kids: Node[] = [];
-	for (let i = 0; i < doc.childCount; i++) {
-		const child = doc.child(i);
-		if ((child.attrs as { orig?: unknown }).orig != null) {
-			kids.push(child.type.create({ ...child.attrs, orig: null }, child.content, child.marks));
-		} else {
-			kids.push(child);
-		}
-	}
-	return doc.type.create({ ...doc.attrs, docTail: null }, Fragment.fromArray(kids), doc.marks);
+	return withoutOrigins(doc);
 }
 
 async function roundtripDir(inDir: string, outDir: string, skip: RegExp | null): Promise<void> {

@@ -43,6 +43,38 @@ export function serializeTable(node: Node, serializeNode: SerializeNodeFn): stri
 	return ''; // rows/cells are consumed by their parents
 }
 
+/** a row written on its own, inside the table's frame: its cells joined, the row break and the
+ *  rules left to the frame. `table` is the row's parent, for the cells a rowspan above covers */
+export function serializeRowCells(row: Node, table: Node | null, serializeNode: SerializeNodeFn): string {
+	const coverage = table ? buildRowspanCoverage(table) : new Map<number, Map<number, { colspan: number; rowspan: number }>>();
+	let rowIndex = 0;
+	table?.forEach((r, _o, i) => {
+		if (r === row) rowIndex = i;
+	});
+	const coveredHere = coverage.get(rowIndex);
+	const cells: string[] = [];
+	let colIndex = 0;
+	function emitCovered() {
+		while (coveredHere?.has(colIndex)) {
+			const span = coveredHere.get(colIndex)!;
+			cells.push(placeholderCell(span, colIndex === 0));
+			colIndex += span.colspan;
+		}
+	}
+	row.forEach((cell) => {
+		emitCovered();
+		cells.push(renderCell(cell, colIndex === 0, serializeNode));
+		colIndex += Number(cell.attrs.colspan ?? 1);
+	});
+	emitCovered();
+	return cells.join(' & ');
+}
+
+/** a cell written on its own, inside its row's frame */
+export function serializeCell(cell: Node, first: boolean, serializeNode: SerializeNodeFn): string {
+	return renderCell(cell, first, serializeNode);
+}
+
 function renderInline(node: Node, serializeNode: SerializeNodeFn): string {
 	const pieces: string[] = [];
 	node.forEach((child, _offset, index) => {

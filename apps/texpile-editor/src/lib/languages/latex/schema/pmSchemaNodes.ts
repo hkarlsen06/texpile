@@ -1,7 +1,7 @@
 import { citationNodeSpec } from '$lib/languages/latex/visual/extensions/citation/citationSchema';
 import { refNodeSpec } from '$lib/languages/latex/visual/extensions/ref/refSchema';
 import { labelNodeSpec } from '$lib/languages/latex/visual/extensions/label/labelSchema';
-import { baseNodes, withOrigAttr } from '$lib/editor/visual/schema/basePMSchema';
+import { baseNodes } from '$lib/editor/visual/schema/basePMSchema';
 import type { NodeSpec } from 'prosemirror-model';
 
 const base = baseNodes as Record<string, NodeSpec>;
@@ -25,7 +25,7 @@ export const nodes: Record<string, NodeSpec> = {
 
 	// sourceForm remembers whether the file used \begin{abstract} ('env') or \abstract{} ('macro')
 	// so it round-trips in the original shape
-	abstract: withOrigAttr({
+	abstract: {
 		content: 'block+',
 		group: 'block',
 		definingAsContext: true,
@@ -43,10 +43,10 @@ export const nodes: Record<string, NodeSpec> = {
 		toDOM(node) {
 			return ['div', { class: 'abstract', 'data-source-form': node.attrs.sourceForm }, 0];
 		}
-	}),
+	},
 
 	// any environment without special handling wraps into this so its body stays editable
-	environment: withOrigAttr({
+	environment: {
 		content: 'block+',
 		group: 'block',
 		definingAsContext: true,
@@ -68,7 +68,7 @@ export const nodes: Record<string, NodeSpec> = {
 		toDOM(node) {
 			return ['div', { class: 'tex-environment', 'data-env': node.attrs.name, 'data-args': node.attrs.args }, 0];
 		}
-	}),
+	},
 
 	citation: citationNodeSpec,
 	ref: refNodeSpec,

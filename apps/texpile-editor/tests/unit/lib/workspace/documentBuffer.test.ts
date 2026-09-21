@@ -2,6 +2,7 @@
 // then back to visual). Node views settling on that mount dispatched a transaction, which
 // serialized the OLD doc over the newer texSource and dropped the queued autosave of it.
 import { describe, it, expect, vi } from 'vitest';
+import { noParse } from '$lib/editor/visual/sourceSpans';
 import { DocumentBuffer } from '$lib/workspace/documentBuffer.svelte';
 import { schema } from '$lib/languages/latex/schema/latexPMSchema';
 import type { ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
@@ -13,7 +14,8 @@ function parsedWith(text: string): ParsedLatexFile {
 		postamble: '\\end{document}\n',
 		hadDocumentEnv: true,
 		warnings: [],
-		map: { leaves: [], blocks: [] }
+		map: { leaves: [], blocks: [] },
+		origins: noParse()
 	};
 }
 

@@ -9,7 +9,7 @@ import {
 import { unifiedLatexTrimEnvironmentContents, unifiedLatexTrimRoot } from '@unified-latex/unified-latex-util-trim';
 import type { Root, Node, Argument } from '@unified-latex/unified-latex-types';
 import type { ParseOptions, LatexAst } from './types';
-import { parseMinimalChunked } from './chunkedMinimalParse';
+import { parseMinimal } from './pegMinimal';
 
 // @unified-latex plugins are built against unified@10, this app uses @11: the Plugin<> generics
 // don't structurally match though the runtime contract is the same. cast via `unknown` first so
@@ -20,13 +20,14 @@ type UnifiedLatexParserPlugin = Plugin<[], string, Root>;
 type UnifiedLatexTransformPlugin<O = void> = Plugin<[O], Root, Root>;
 type UnifiedLatexAstComplierPlugin = Plugin<[], Root, Root>;
 
-function chunkedMinimalParser(this: { Parser?: (str: string) => Root }) {
-	// unified passes the file as a second argument; it must not land in the chunk size
-	Object.assign(this, { Parser: (str: string) => parseMinimalChunked(str) });
+function memoFreeMinimalParser(this: { Parser?: (str: string) => Root }) {
+	// unified passes the file as a second argument; the tokenizer takes the string alone
+	Object.assign(this, { Parser: (str: string) => parseMinimal(str) });
 }
 
-// unifiedLatexFromString with its tokenizer stage swapped for the chunked one. math mode keeps
-// upstream's: its inputs are small and its root is shaped differently
+// unifiedLatexFromString with its tokenizer stage swapped for the memo-free one (see pegMinimal):
+// whole-string, since without the memo nothing grows with the file but the tokens themselves.
+// math mode keeps upstream's: its inputs are small and its root is shaped differently
 function processorFor(options: ParseOptions) {
 	if (options.mode === 'math') {
 		return unified()
@@ -40,7 +41,7 @@ function processorFor(options: ParseOptions) {
 	}
 	const { macros = {}, environments = {}, flags = {} } = options;
 	return unified()
-		.use(chunkedMinimalParser as unknown as UnifiedLatexParserPlugin)
+		.use(memoFreeMinimalParser as unknown as UnifiedLatexParserPlugin)
 		.use(unifiedLatexProcessAtLetterAndExplMacros as unknown as UnifiedLatexTransformPlugin<ParseOptions['flags']>, flags)
 		.use(unifiedLatexProcessMacrosAndEnvironmentsWithMathReparse as unknown as UnifiedLatexTransformPlugin<UnifiedLatexPluginOptions>, {
 			macros: Object.assign({}, ...Object.values(macroInfo), macros),

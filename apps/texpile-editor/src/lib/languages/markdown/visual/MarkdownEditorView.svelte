@@ -20,6 +20,7 @@
 	import { search } from 'prosemirror-search';
 	import { mdSchema } from './schema';
 	import { markdownCopyPlugin } from './clipboard';
+	import { parseCarryPlugin } from '$lib/editor/visual/parseCarry';
 	import { listAttrInheritance } from './listAttrInheritance';
 	import { isMac } from '$lib/platform';
 	import { editorViewStore, referenceStore } from '$lib/stores/editorStore';
@@ -149,6 +150,7 @@
 		const { mathlivePlugin, mlarrowHandlers } = await import('$lib/editor/visual/extensions/mathlivebridge/mlplugin');
 
 		const plugins = [
+			parseCarryPlugin,
 			markdownCopyPlugin,
 			gapCursor(),
 			dropCursor({ color: 'var(--color-primary-500)', width: 2 }),

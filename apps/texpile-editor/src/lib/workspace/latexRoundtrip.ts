@@ -1,10 +1,17 @@
 // the .tex file IS the document: opening splits preamble/body and parses only the body;
 // saving regenerates only the body and splices it back under the untouched preamble
 import * as LatexParser from '$lib/languages/latex/parser/latexParser';
-import { dropParagraphEnd, serializeToLatexDetailed, serializeNode } from '$lib/languages/latex/serializer/latexSerializer';
-import { fillOrigNorms } from '$lib/serializer/blockAssembly';
+import { dropParagraphEnd, serializeToLatexDetailed } from '$lib/languages/latex/serializer/latexSerializer';
 import { padTables } from '$lib/editor/visual/padTables';
-import { collectMap, rememberParseMap, shiftMap, type RegionParse, type SourceMap } from '$lib/editor/visual/sourceSpans';
+import {
+	collectMap,
+	rememberParseMap,
+	shiftMap,
+	type ParseBody,
+	type ParseOrigins,
+	type RegionParse,
+	type SourceMap
+} from '$lib/editor/visual/sourceSpans';
 import type { Node } from 'prosemirror-model';
 
 // the importer runs in max-fidelity mode: unrecognized constructs are preserved as raw/inline LaTeX
@@ -68,6 +75,8 @@ export type ParsedLatexFile = {
 	warnings: string[];
 	/** where each run and block of the document came from in the file */
 	map: SourceMap;
+	/** what the parse knew about every top-level block, for writing untouched ones back as they were */
+	origins: ParseOrigins;
 };
 
 /** counts raw_latex / inline_latex nodes (constructs the parser couldn't model). */
@@ -118,8 +127,7 @@ export function parseLatexFile(latex: string, projectMacros = '', onPhase?: (pha
 	const scanPreamble = projectMacros ? `${projectMacros}\n${preamble}` : preamble;
 	const { doc: parsedDoc } = LatexParser.latexToProseMirror(body, { preamble: scanPreamble, onPhase });
 	onPhase?.('finalizing');
-	// complete the verbatim stamps: untouched blocks then round-trip byte-for-byte
-	const doc = fillOrigNorms(padTables(parsedDoc), serializeNode);
+	const doc = padTables(parsedDoc);
 
 	// dev-only tripwire: a doc that violates the content model renders fine but freezes the editor
 	// on the first structural edit (PM throws mid-dispatch). production still opens the file, degraded.
@@ -140,8 +148,8 @@ export function parseLatexFile(latex: string, projectMacros = '', onPhase?: (pha
 	}
 
 	const map = collectMap(doc, hadDocumentEnv ? preamble.length : 0);
-	rememberParseMap(doc, map);
-	return { preamble, postamble, doc, hadDocumentEnv, warnings, map };
+	const origins = rememberParseMap(doc, map, parseBodyOf({ preamble, postamble, hadDocumentEnv }, latex));
+	return { preamble, postamble, doc, hadDocumentEnv, warnings, map, origins };
 }
 
 /** a stretch of the body parsed as the file is, for a comparison; the map's offsets are the stretch's own */
@@ -150,10 +158,16 @@ export function parseLatexRegion(body: string, scanPreamble = ''): RegionParse {
 	return { doc, map: collectMap(doc, 0) };
 }
 
-/** file offset where the body (what orig.start counts from) begins: after the preamble for a
- *  real document, 0 for a fragment whose "preamble" is synthesized and not in the file. */
+/** file offset where the body (what the source map's block offsets count from) begins: after the
+ *  preamble for a real document, 0 for a fragment whose "preamble" is synthesized and not in the file. */
 export function bodyOffsetOf(p: Pick<ParsedLatexFile, 'preamble' | 'hadDocumentEnv'>): number {
 	return p.hadDocumentEnv ? p.preamble.length : 0;
+}
+
+/** the stretch of `text` the parsed document stands for: the body between preamble and postamble.
+ *  Shared by the three dialects: markdown's preamble is its frontmatter, typst has neither. */
+export function parseBodyOf(p: Pick<ParsedLatexFile, 'preamble' | 'postamble' | 'hadDocumentEnv'>, text: string): ParseBody {
+	return { text, from: bodyOffsetOf(p), to: text.length - (p.hadDocumentEnv ? p.postamble.length : 0) };
 }
 
 /**
@@ -167,15 +181,18 @@ export function serializeLatexFile(parsed: Pick<ParsedLatexFile, 'preamble' | 'p
 
 /** the file text and where every run of `doc` landed in it */
 export function serializeLatexFileDetailed(
-	parsed: Pick<ParsedLatexFile, 'preamble' | 'postamble' | 'hadDocumentEnv'>,
+	parsed: Pick<ParsedLatexFile, 'preamble' | 'postamble' | 'hadDocumentEnv'> & Partial<Pick<ParsedLatexFile, 'origins'>>,
 	doc: Node
 ): { text: string; map: SourceMap } {
-	const { text, leadProtected, tailProtected, leadGap, tailGap, trailingRegenerated, map } = serializeToLatexDetailed(doc);
+	// a caller holding the parse hands it on, for a document no block of which the parse knows by node
+	const { text, leadProtected, tailProtected, leadGap, tailGap, trailingRegenerated, map } = serializeToLatexDetailed(
+		doc,
+		parsed.origins ?? null
+	);
 	// fragment file: body IS the entire file, no synthesized wrapper written back. a protected
 	// tail reproduces the original bytes through EOF, including a missing trailing newline.
 	if (parsed.hadDocumentEnv === false) return { text: tailProtected ? text : text + '\n', map: shiftMap(map, 0, text.length) };
-	const lastSeq = (doc.attrs.docTail as { afterSeq?: unknown } | null)?.afterSeq;
-	const body = dropParagraphEnd(text, trailingRegenerated, typeof lastSeq === 'number' ? lastSeq + 1 : undefined);
+	const body = dropParagraphEnd(text, trailingRegenerated?.node ?? null, trailingRegenerated?.was ?? null, 'end');
 	// the gap the file had, not a separator of our own: editing the first or the last block would
 	// otherwise swallow the blank line it sat behind, and that shows up as a suggestion covering the
 	// whole block rather than the words that changed

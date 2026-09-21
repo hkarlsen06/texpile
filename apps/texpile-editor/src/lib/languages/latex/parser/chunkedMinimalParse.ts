@@ -9,7 +9,7 @@
 // at every cut first, then every opener with a closer merges its chunks and the span is
 // tokenized again, until nothing spans a cut. an opener with no closer anywhere is bare in the
 // whole parse too.
-import { parseMinimal } from '@unified-latex/unified-latex-util-parse';
+import { parseMinimal } from './pegMinimal';
 import type * as Ast from '@unified-latex/unified-latex-types';
 
 export const CHUNK_BYTES = 32 * 1024;

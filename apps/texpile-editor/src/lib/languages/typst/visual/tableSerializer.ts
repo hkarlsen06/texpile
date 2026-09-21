@@ -3,6 +3,23 @@ import type { Node } from 'prosemirror-model';
 import { renderInline } from './typstInline';
 import { parseTracks, distribute, toFrTracks } from './tracks';
 
+/** a cell on its own, inside its row's frame: a bare [..], or table.cell(..)[..] for a merged one */
+export function cellCall(cell: Node, renderBlocks: (parent: Node) => string): string {
+	const colspan = Number(cell.attrs.colspan ?? 1);
+	const rowspan = Number(cell.attrs.rowspan ?? 1);
+	const spans = [...(colspan > 1 ? [`colspan: ${colspan}`] : []), ...(rowspan > 1 ? [`rowspan: ${rowspan}`] : [])];
+	// a `[` body is fresh markup: a marker at its start would open a list or heading
+	const text = cell.childCount === 1 && cell.child(0).type.name === 'paragraph' ? renderInline(cell.child(0), true) : renderBlocks(cell);
+	return spans.length ? `table.cell(${spans.join(', ')})[${text}]` : `[${text}]`;
+}
+
+/** a row on its own, inside the table's frame: its cells joined, the line's comma left to the frame */
+export function rowCells(row: Node, renderBlocks: (parent: Node) => string): string {
+	const cells: string[] = [];
+	row.forEach((cell) => cells.push(cellCall(cell, renderBlocks)));
+	return cells.join(', ');
+}
+
 export function tableBody(node: Node, indent: string, renderBlocks: (parent: Node) => string): string {
 	const rows: { cells: Node[]; isHeader: boolean; rules: unknown }[] = [];
 	node.forEach((row) => {
@@ -30,19 +47,9 @@ export function tableBody(node: Node, indent: string, renderBlocks: (parent: Nod
 			for (let d = 1; d < rowspan; d++) covered.set(i + d, (covered.get(i + d) ?? 0) + colspan);
 		});
 	});
-	function cellText(cell: Node) {
-		// a `[` body is fresh markup: a marker at its start would open a list or heading
-		return cell.childCount === 1 && cell.child(0).type.name === 'paragraph' ? renderInline(cell.child(0), true) : renderBlocks(cell);
-	}
-	/** a merged cell has to go back through table.cell(); a plain one stays a bare [..] */
-	function cellCall(cell: Node) {
-		const colspan = Number(cell.attrs.colspan ?? 1);
-		const rowspan = Number(cell.attrs.rowspan ?? 1);
-		const spans = [...(colspan > 1 ? [`colspan: ${colspan}`] : []), ...(rowspan > 1 ? [`rowspan: ${rowspan}`] : [])];
-		return spans.length ? `table.cell(${spans.join(', ')})[${cellText(cell)}]` : `[${cellText(cell)}]`;
-	}
+	const call = (cell: Node) => cellCall(cell, renderBlocks);
 	function rowLine(r: { cells: Node[] }) {
-		return `  ${r.cells.map(cellCall).join(', ')},`;
+		return `  ${r.cells.map(call).join(', ')},`;
 	}
 	// A drag is detected as "the cells no longer agree with the colspec". Parsing sets colwidth from
 	// the source's own tracks, so the presence of a width proves nothing on its own - without this
@@ -98,8 +105,8 @@ export function tableBody(node: Node, indent: string, renderBlocks: (parent: Nod
 		let j = i;
 		while (j + 1 < rows.length && rows[j + 1].isHeader && rows[j + 1].cells.length && asStrings(rows[j + 1].rules).length === 0) j++;
 		const run = rows.slice(i, j + 1);
-		if (run.length === 1) lines.push(`  table.header(${run[0].cells.map(cellCall).join(', ')}),`);
-		else lines.push('  table.header(', ...run.map((h) => `    ${h.cells.map(cellCall).join(', ')},`), '  ),');
+		if (run.length === 1) lines.push(`  table.header(${run[0].cells.map(call).join(', ')}),`);
+		else lines.push('  table.header(', ...run.map((h) => `    ${h.cells.map(call).join(', ')},`), '  ),');
 		i = j;
 	}
 	for (const rule of asStrings(node.attrs.typBottomRules)) lines.push(`  ${rule},`);

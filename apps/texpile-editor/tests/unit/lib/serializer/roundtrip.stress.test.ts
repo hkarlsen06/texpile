@@ -13,7 +13,7 @@ import { describe, it, beforeAll, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Node } from 'prosemirror-model';
-import { parseLatexFile, serializeLatexFile } from '$lib/workspace/latexRoundtrip';
+import { parseLatexFile, serializeLatexFile, type ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
 
 const CORPUS = process.env.CORPUS_DIR;
 const HOOK_TIMEOUT_MS = 30 * 60 * 1000;
@@ -104,7 +104,7 @@ interface FileResult {
 	wordRatio: number;
 	missingWords: string[];
 	firstDiff: string | null;
-	// untouched-save fidelity (the `orig` attr): a no-edit save (R1) must equal the source
+	// untouched-save fidelity (the verbatim layer): a no-edit save (R1) must equal the source
 	// byte-for-byte. strictly stronger than convergence: byteIdentical proves pass 1 changed
 	// nothing, so the compiled PDF is provably unaffected.
 	byteIdentical: boolean;
@@ -120,7 +120,7 @@ interface FileResult {
 	firstByteDiff: string | null;
 	// top-level doc children that are raw_latex blocks: the block-level "demoted to raw" count
 	rawBlocksTop: number;
-	// fraction of top-level body blocks carrying a full `orig` stamp (latex + norm both present).
+	// fraction of top-level body blocks the parse could place (their bytes known).
 	// low coverage explains a non-identical result without opening the file: the gap is in which
 	// constructs get spans, not in the substitution logic.
 	origCoverage: number;
@@ -177,13 +177,10 @@ function classifyDiff(src: string, r1: string): 'inert-whitespace' | 'structural
 	return sameParas && sameVerbatim ? 'inert-whitespace' : 'structural-whitespace';
 }
 
-function origCoverageOf(doc: Node): { coverage: number; withOrig: number; total: number } {
+function origCoverageOf(parsed: ParsedLatexFile): { coverage: number; withOrig: number; total: number } {
 	let withOrig = 0;
-	const total = doc.childCount;
-	for (let i = 0; i < total; i++) {
-		const orig = (doc.child(i).attrs as { orig?: { latex?: unknown; norm?: unknown } | null }).orig;
-		if (orig && typeof orig.latex === 'string' && typeof orig.norm === 'string') withOrig++;
-	}
+	const total = parsed.doc.childCount;
+	for (const o of parsed.origins.origins) if (typeof o.text === 'string') withOrig++;
 	return { coverage: total === 0 ? 1 : withOrig / total, withOrig, total };
 }
 
@@ -258,7 +255,7 @@ describe('stress: real LaTeX round-trip', () => {
 					r.diffKind = classifyDiff(src, r1);
 					r.firstByteDiff = firstStringDiff(src, r1, 'src/R1');
 				}
-				const cov = origCoverageOf(p1.doc);
+				const cov = origCoverageOf(p1);
 				r.origCoverage = cov.coverage;
 				r.origBlocks = cov.withOrig;
 				r.totalBlocks = cov.total;
@@ -426,7 +423,7 @@ describe('stress: real LaTeX round-trip', () => {
 
 	// a content diff on an untouched save is always a real bug (a span-capture gap or a
 	// substitution-assembly mistake). hard gate, no threshold: this is the entire promise
-	// of the `orig` mechanism.
+	// of the verbatim layer.
 	it('no CONTENT diff on an untouched save (verbatim preservation must never alter meaning)', () => {
 		const bad = results
 			.filter((r) => !r.crash && r.diffKind === 'content')

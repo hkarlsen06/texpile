@@ -4,12 +4,11 @@
 // reused wholesale so the buffer/worker/view plumbing needs no parallel types: preamble =
 // byte order mark + frontmatter, postamble = '', hadDocumentEnv = has a preamble.
 import { markdownToProseMirror } from './converter';
-import { serializeToMarkdownDetailed, serializeMdNode } from './serializer';
-import { fillOrigNorms } from '$lib/serializer/blockAssembly';
+import { serializeToMarkdownDetailed } from './serializer';
 import { padTables } from '$lib/editor/visual/padTables';
 import { collectMap, mapToCrlf, rememberParseMap, shiftMap, type RegionParse, type SourceMap } from '$lib/editor/visual/sourceSpans';
 import type { Node } from 'prosemirror-model';
-import type { ParsedLatexFile, ParsePhase } from '$lib/workspace/latexRoundtrip';
+import { parseBodyOf, type ParsedLatexFile, type ParsePhase } from '$lib/workspace/latexRoundtrip';
 
 const BOM = String.fromCharCode(0xfeff);
 const EOL = '(?:\\r\\n|\\r|\\n)';
@@ -42,7 +41,7 @@ export function parseMarkdownFile(markdown: string, _projectMacros = '', onPhase
 	const body = markdown.slice(preamble.length);
 	const { doc: parsedDoc } = markdownToProseMirror(body);
 	onPhase?.('finalizing');
-	const doc = fillOrigNorms(padTables(parsedDoc), serializeMdNode);
+	const doc = padTables(parsedDoc);
 
 	if (import.meta.env.DEV) {
 		try {
@@ -53,8 +52,9 @@ export function parseMarkdownFile(markdown: string, _projectMacros = '', onPhase
 	}
 
 	const map = collectMap(doc, preamble.length);
-	rememberParseMap(doc, map);
-	return { preamble, postamble: '', doc, hadDocumentEnv: preamble.length > 0, warnings: [], map };
+	const meta = { preamble, postamble: '', hadDocumentEnv: preamble.length > 0 };
+	const origins = rememberParseMap(doc, map, parseBodyOf(meta, markdown));
+	return { ...meta, doc, warnings: [], map, origins };
 }
 
 /** a stretch of the body parsed as the file is, for a comparison; the map's offsets are the stretch's own */
@@ -70,10 +70,10 @@ export function serializeMarkdownFile(parsed: Pick<ParsedLatexFile, 'preamble' |
 
 /** the file text and where every run of `doc` landed in it */
 export function serializeMarkdownFileDetailed(
-	parsed: Pick<ParsedLatexFile, 'preamble' | 'postamble' | 'hadDocumentEnv'>,
+	parsed: Pick<ParsedLatexFile, 'preamble' | 'postamble' | 'hadDocumentEnv'> & Partial<Pick<ParsedLatexFile, 'origins'>>,
 	doc: Node
 ): { text: string; map: SourceMap } {
-	const { text: body, leadProtected, tailProtected, map } = serializeToMarkdownDetailed(doc);
+	const { text: body, leadProtected, tailProtected, map } = serializeToMarkdownDetailed(doc, parsed.origins ?? null);
 	const tail = tailProtected ? '' : '\n';
 	const bom = parsed.preamble.startsWith(BOM) ? BOM : '';
 	const frontmatter = parsed.preamble.slice(bom.length);

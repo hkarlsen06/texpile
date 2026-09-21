@@ -6,6 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { Fragment, type Node } from 'prosemirror-model';
 import { parseLatexFile, serializeLatexFile } from '$lib/workspace/latexRoundtrip';
+import { withoutOrigins } from '$lib/editor/visual/sourceSpans';
 
 function parse(body: string) {
 	return parseLatexFile(`\\documentclass{article}\n\\begin{document}\n${body}\n\\end{document}\n`);
@@ -13,13 +14,8 @@ function parse(body: string) {
 
 function regenerate(body: string): string {
 	const parsed = parse(body);
-	// drop orig so every block goes through the deterministic rules, which is what an edit does
-	const kids: Node[] = [];
-	for (let i = 0; i < parsed.doc.childCount; i++) {
-		const c = parsed.doc.child(i);
-		kids.push(c.type.create({ ...c.attrs, orig: null }, c.content, c.marks));
-	}
-	const out = serializeLatexFile(parsed, parsed.doc.copy(Fragment.fromArray(kids)));
+	// forget the source so every block goes through the deterministic rules, which is what an edit does
+	const out = serializeLatexFile(parsed, withoutOrigins(parsed.doc));
 	return out.slice(out.indexOf('\\begin{document}') + 16, out.lastIndexOf('\\end{document}')).trim();
 }
 
@@ -33,7 +29,7 @@ function retypeLabel(body: string, typed: string): string {
 		if (i > 0) rest.push(n);
 	});
 	const edited = para.type.create(para.attrs, [para.type.schema.text(typed, para.child(0).marks), ...rest]);
-	const next = list.type.create({ ...list.attrs, orig: null }, Fragment.fromArray([edited]));
+	const next = list.type.create(list.attrs, Fragment.fromArray([edited]));
 	return serializeLatexFile(parsed, parsed.doc.copy(Fragment.fromArray([next])));
 }
 
@@ -57,7 +53,7 @@ describe('description item labels', () => {
 		const para = list.child(0);
 		// the whole leading run replaced by unmarked text: nothing is the label any more
 		const retyped = para.type.create(para.attrs, para.type.schema.text('something else entirely'));
-		const edited = list.type.create({ ...list.attrs, orig: null }, Fragment.fromArray([retyped]));
+		const edited = list.type.create(list.attrs, Fragment.fromArray([retyped]));
 		const out = serializeLatexFile(parsed, parsed.doc.copy(Fragment.fromArray([edited])));
 		expect(out).toMatch(/\\item\s+something else entirely/);
 		expect(out).not.toContain('[Term]');

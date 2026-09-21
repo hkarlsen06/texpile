@@ -156,7 +156,7 @@ export function resolvePosition(
 	return { cursor: Math.min(cursor, doc.length), scroll: doc.line(firstVisible).from };
 }
 
-// The visual editor works in file OFFSETS (the orig.start stamps the importer puts on blocks) while
+// The visual editor works in file OFFSETS (the source map's block and leaf runs) while
 // this record is line/column, so these two are the whole conversion between them. Both modes write
 // ONE record: a ProseMirror position would be meaningless the moment the doc is re-parsed, which
 // happens on every entry to visual mode, whereas a place in the file survives.

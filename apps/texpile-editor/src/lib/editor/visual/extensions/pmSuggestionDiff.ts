@@ -3,10 +3,10 @@ import { ChangeSet, simplifyChanges, type Change, type TokenEncoder } from 'pros
 import type { Attrs, Mark, Node as PMNode } from 'prosemirror-model';
 import { ReplaceStep } from 'prosemirror-transform';
 
-// the verbatim stamp and the source gap say where a block came from, which is not what the reader
-// sees change
+// the source gap says where a block came from, and the label gap where its label stood: neither
+// is what the reader sees change
 function attrsKey(attrs: Attrs): string {
-	const { orig: _orig, typGap: _gap, ...rest } = attrs;
+	const { typGap: _gap, labelGap: _labelGap, ...rest } = attrs;
 	return Object.keys(rest).length ? JSON.stringify(rest) : '';
 }
 

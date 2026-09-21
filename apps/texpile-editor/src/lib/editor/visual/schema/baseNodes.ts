@@ -16,10 +16,7 @@ const pDom: DOMOutputSpec = ['p', 0],
 
 export const baseNodes = {
 	doc: {
-		content: 'block+',
-		// the body's trailing gap (blank lines before \end{document}) belongs to no block node.
-		// { text, afterSeq }: re-emitted verbatim iff the doc still ends with that pristine block
-		attrs: { docTail: { default: null } }
+		content: 'block+'
 	} as NodeSpec,
 	paragraph: {
 		content: 'inline*',
@@ -280,33 +277,3 @@ baseNodes.list.attrs = {
 	envName: { default: null },
 	itemLabel: { default: null }
 };
-
-// verbatim source preservation: every block an importer can emit at the top level carries
-// orig: { latex, norm, pre, seq, start, group* }. latex = original slice; norm = its parse-time
-// deterministic serialization; pre = inter-block source; seq = pristine top-level index;
-// start = body-relative offset (positional consumers like scroll sync); group* set when one
-// construct became several blocks (itemize = one list node per item) so substitution is
-// all-or-nothing. the serializer re-emits `latex` only while the block still serializes to
-// exactly `norm`, so a stale slice can never overwrite an edit. default null: editor-created
-// nodes always go through the deterministic rules. (image gets its orig in updateImageNode)
-const ORIG_BLOCKS = [
-	'paragraph',
-	'blockquote',
-	'horizontal_rule',
-	'heading',
-	'code_block',
-	'raw_latex',
-	'includedoc',
-	'block_math',
-	'table_wrapper',
-	'table', // a bare tabular (no float wrapper) imports as a bare table at the top level
-	'list'
-] as const;
-
-/** add the `orig` attr to a block spec; dialect-only blocks apply it to their own additions. */
-export function withOrigAttr(spec: NodeSpec): NodeSpec {
-	return { ...spec, attrs: { ...(spec.attrs ?? {}), orig: { default: null } } };
-}
-
-const specs = baseNodes as Record<string, NodeSpec>;
-for (const name of ORIG_BLOCKS) specs[name] = withOrigAttr(specs[name]);

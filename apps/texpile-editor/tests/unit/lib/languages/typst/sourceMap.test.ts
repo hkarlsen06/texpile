@@ -3,10 +3,9 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { Fragment } from 'prosemirror-model';
 import type { Node as PMNode } from 'prosemirror-model';
 import { parseTypstFile, serializeTypstFileDetailed } from '$lib/languages/typst/visual/roundtrip';
-import { pmToSource, sourceToPm } from '$lib/editor/visual/sourceSpans';
+import { pmToSource, sourceToPm, withoutOrigins } from '$lib/editor/visual/sourceSpans';
 import { auditMap, coverage } from '../../editor/visual/sourceMapAudit';
 
 function walk(dir: string): string[] {
@@ -20,13 +19,6 @@ function walk(dir: string): string[] {
 }
 
 const files = walk(join(__dirname, '../../../../fixtures'));
-
-/** the same document with no memory of its source: every block regenerates */
-function regenerated(doc: PMNode): PMNode {
-	const kids: PMNode[] = [];
-	doc.forEach((child) => kids.push(child.type.create({ ...child.attrs, orig: null }, child.content, child.marks)));
-	return doc.type.create({ ...doc.attrs, docTail: null }, Fragment.fromArray(kids), doc.marks);
-}
 
 function posOf(doc: PMNode, needle: string): number {
 	let found = -1;
@@ -94,7 +86,7 @@ describe('the Typst serializer source map', () => {
 		const failures: string[] = [];
 		const audits = files.map((f) => {
 			const parsed = parseTypstFile(readFileSync(f, 'utf8'));
-			const doc = regenerated(parsed.doc);
+			const doc = withoutOrigins(parsed.doc);
 			const out = serializeTypstFileDetailed(parsed, doc);
 			const a = auditMap(doc, out.text, out.map.leaves);
 			for (const p of a.problems.slice(0, 5)) failures.push(`${f}: ${p}`);
@@ -111,7 +103,7 @@ describe('the Typst serializer source map', () => {
 
 	it('maps a regenerated paragraph both ways, escapes included', () => {
 		const parsed = parseTypstFile('Hello _world_, 100\\% of $x$ and a\\*b.\n');
-		const doc = regenerated(parsed.doc);
+		const doc = withoutOrigins(parsed.doc);
 		const { text, map } = serializeTypstFileDetailed(parsed, doc);
 		const world = posOf(doc, 'world');
 		expect(pmToSource(map.leaves, world + 1)).toBe(text.indexOf('world') + 1);

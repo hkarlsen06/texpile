@@ -1,9 +1,9 @@
 // Minimal top-level block patch between the mounted visual doc and a fresh re-parse of the same
 // file: prefix/suffix trim finds the smallest child range to replace, comparing content but NOT
-// the orig verbatim attrs (a remote edit shifts every later block's orig.start, so attr-strict
-// equality would see the whole tail as changed). syncOrigAttrs then adopts the new parse's orig
-// stamps everywhere, so the patched doc ends fully .eq to the parsed one while untouched blocks
-// keep their node identity (NodeViews, decorations and the caret survive).
+// the parse-time stamps (typst's source gap), which syncParseAttrs then adopts from the new parse
+// everywhere, so the patched doc ends fully .eq to the parsed one while untouched blocks keep
+// their node identity (NodeViews, decorations and the caret survive). Where the blocks came from
+// is not an attr at all: the parse's origins are keyed by node (see sourceSpans).
 
 import type { Node as PMNode } from 'prosemirror-model';
 import { Fragment, Mark } from 'prosemirror-model';
@@ -17,8 +17,8 @@ export type BlockPatch = {
 	nodes: PMNode[];
 };
 
-// parse-time stamps the live doc never sets itself: the verbatim slice, and typst's source gap
-const PARSE_STAMPS = new Set(['orig', 'typGap']);
+// parse-time stamps the live doc never sets itself: typst's source gap
+const PARSE_STAMPS = new Set(['typGap']);
 
 function attrsEqualExceptStamps(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
 	const ka = Object.keys(a).filter((k) => !PARSE_STAMPS.has(k));
@@ -28,12 +28,12 @@ function attrsEqualExceptStamps(a: Record<string, unknown>, b: Record<string, un
 	return true;
 }
 
-// orig lives only on top-level blocks, so children compare with plain .eq
+// the stamps live only on top-level blocks, so children compare with plain .eq
 function blockEq(a: PMNode, b: PMNode): boolean {
 	return a.type === b.type && Mark.sameSet(a.marks, b.marks) && attrsEqualExceptStamps(a.attrs, b.attrs) && a.content.eq(b.content);
 }
 
-/** null when every block matches (orig attrs may still differ; run syncOrigAttrs regardless). */
+/** null when every block matches (stamps may still differ; run syncParseAttrs regardless). */
 export function computeBlockPatch(oldDoc: PMNode, newDoc: PMNode): BlockPatch | null {
 	const a = oldDoc.childCount;
 	const b = newDoc.childCount;
@@ -133,10 +133,10 @@ export function protectCaretBlock(oldDoc: PMNode, newDoc: PMNode, head: number):
 	return newDoc.copy(Fragment.fromArray(kids));
 }
 
-/** after the replace, restamp kept blocks whose attrs (orig.start, seq, group ids) went stale
- *  with the new parse's truth; attr-only steps, so no content or DOM churn. The doc node itself
- *  carries verbatim state too (docTail), so it syncs the same way. */
-export function syncOrigAttrs(tr: Transaction, newDoc: PMNode): void {
+/** after the replace, restamp kept blocks whose attrs went stale with the new parse's truth;
+ *  attr-only steps, so no content or DOM churn. The doc node's own attrs (a file's line ending)
+ *  sync the same way. */
+export function syncParseAttrs(tr: Transaction, newDoc: PMNode): void {
 	const doc = tr.doc;
 	if (doc.childCount !== newDoc.childCount) return; // structural drift; the next full parse settles it
 	for (const k of Object.keys(newDoc.attrs)) {

@@ -214,3 +214,41 @@ it('keeps the last placement of a mark whose text the editor has moved past', ()
 	expect(ranges).toEqual([]);
 	expect([...stale]).toEqual(['old']);
 });
+
+it('draws words changed beside a formula as words, and the formula beside the one it was', () => {
+	const source =
+		'\\documentclass{beamer}\n\\begin{document}\n\\begin{frame}{Math}\nInline ma1.\\textbackslash{}th $E = mc^2 x$ sits in prose.\n\\end{frame}\n\\end{document}\n';
+	const { doc, ranges, partial } = placed(source, [
+		mark(source, 'words', 'ma1.\\textbackslash{}th', 'math'),
+		mark(source, 'formula', ' x', '')
+	]);
+	expect([...partial]).toEqual([]);
+	const words = ranges.find((r) => r.id === 'words')!;
+	expect(words.node).toBeUndefined();
+	expect(words.gone).toBeUndefined();
+	// the letters the two spellings share stay; what came in is drawn as words, not as the formula struck
+	expect(doc.textBetween(words.from, words.to)).toBe('1.\\');
+	expect(oldOf(words)).toEqual([]);
+	const formula = ranges.find((r) => r.id === 'formula')!;
+	expect(formula.node).toBe(true);
+	expect(doc.nodeAt(formula.from)?.type.name).toBe('inline_math');
+	expect(formula.was?.textContent).toBe('E = mc^2');
+});
+
+it('strikes the paragraph a figure took in as its caption after the figure it was', () => {
+	const source =
+		'\\documentclass{article}\n\\begin{document}\nSome words.\n\n\\begin{figure}[h]\n\\centering\n\\includegraphics[width=40pt]{plot.png}\n\\caption{Now the caption words.}\n\\end{figure}\n\nTail words.\n\\end{document}\n';
+	const { doc, ranges, partial } = placed(source, [
+		mark(source, 'open', '\\begin{figure}[h]\n\\centering\n', ''),
+		mark(source, 'caption', '\n\\caption{Now', ' Now'),
+		mark(source, 'close', '}\n\\end{figure}', '')
+	]);
+	expect([...partial]).toEqual([]);
+	const figure = ranges.find((r) => r.node && r.was);
+	expect(figure?.was?.type.name).toBe('image');
+	expect(figure?.was?.textContent).toBe('');
+	const gone = ranges.find((r) => r.gone);
+	expect(gone?.gone?.blocks.map((b: PMNode) => b.textContent)).toEqual(['Now the caption words.']);
+	expect(gone?.from).toBe(figure?.to);
+	expect(doc.resolve(gone!.from).depth).toBe(0);
+});

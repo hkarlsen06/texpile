@@ -17,12 +17,12 @@ function commentChip(doc: Node): Node {
 	return found;
 }
 
-/** the paragraph rebuilt without its orig attr, so serialization must regenerate it */
+/** the paragraph rebuilt as a node no parse knows, so serialization must regenerate it */
 function withParagraphRegenerated(doc: Node): Node {
 	const kids: Node[] = [];
 	for (let i = 0; i < doc.childCount; i++) {
 		const child = doc.child(i);
-		kids.push(child.type.name === 'paragraph' ? child.type.create({ ...child.attrs, orig: null }, child.content, child.marks) : child);
+		kids.push(child.type.name === 'paragraph' ? child.type.create(child.attrs, child.content, child.marks) : child);
 	}
 	return doc.copy(doc.type.schema.nodes.doc.createChecked(doc.attrs, kids).content);
 }

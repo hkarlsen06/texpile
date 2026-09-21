@@ -40,6 +40,9 @@ export function escLineStart(str: string): string {
 	return str.replace(/^(\s*)([-+/=])/, '$1\\$2').replace(/^(\s*)(\d+)\./, '$1$2\\.');
 }
 
+/** the characters typst's `--`, `---` and `...` stand for, written back as those */
+const SHORTHAND_OF: Record<string, string> = { '\u2013': '--', '\u2014': '---', '\u2026': '...' };
+
 function wordy(ch: string): boolean {
 	return /[\p{L}\p{N}]/u.test(ch) && !/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(ch);
 }
@@ -63,12 +66,24 @@ export function escTypst(str: string, startOfLine = false, extra = ''): string {
 			out += intraword ? ch : '\\_';
 			continue;
 		}
-		if (ch === '@' && /[\p{L}\p{N}\p{M}\p{Pc}-]/u.test(str[i + 1] ?? '')) {
+		// a dash or ellipsis character goes out as its shorthand below, which a ref would eat too
+		if (ch === '@' && (/[\p{L}\p{N}\p{M}\p{Pc}-]/u.test(str[i + 1] ?? '') || SHORTHAND_OF[str[i + 1] ?? ''] !== undefined)) {
 			out += '\\@';
 			continue;
 		}
 		if (ch === '-' && str[i + 1] === '?') {
 			out += '\\-';
+			continue;
+		}
+		// the dash and ellipsis characters go out as the shorthand typst sources write them, so a
+		// regenerated run reads as the file did; next to a hyphen or a dot the character itself
+		// is kept, since the shorthand would fuse with its neighbour into another one
+		const short = SHORTHAND_OF[ch];
+		if (short) {
+			const fuses = short[0] === '-' ? /[-?]/ : /[.]/;
+			const prev = out[out.length - 1] ?? '';
+			const next = str[i + 1] ?? '';
+			out += fuses.test(prev) || fuses.test(next) ? ch : short;
 			continue;
 		}
 		if (ch === '/' && str[i + 1] === '/') {

@@ -1,12 +1,13 @@
 // Deterministic ProseMirror -> Markdown serializer: the latexSerializer's sibling dialect.
 // String-returning handlers per node type over the shared Ctx contract; doc assembly (verbatim
-// orig substitution + per-block memo) delegated to blockAssembly. prosemirror-markdown's
+// substitution + per-block memo) delegated to blockAssembly. prosemirror-markdown's
 // serializer can't drive prosemirror-flat-list (it walks nested list NODES; flat-list is one
 // node per item), so list/emphasis logic lives here; escaping follows prosemirror-markdown's
 // rules. Convention: every block handler ends with its own separation ('\n\n', lists '\n'
 // mid-run), so plain concatenation of parts is a valid document.
-import type { Node } from 'prosemirror-model';
+import { Fragment, type Node } from 'prosemirror-model';
 import { createBlockAssembly, type DocSerializeResult } from '$lib/serializer/blockAssembly';
+import type { ParseOrigins, Segment } from '$lib/editor/visual/sourceSpans';
 import type { Ctx } from '$lib/serializer/types';
 import { escMd } from './inlineSyntax';
 import { imageMarkdown, renderInline, mdShadow, isMdHandlerLeaf } from './markdownInline';
@@ -228,14 +229,68 @@ export function serializeMdNode(node: Node, ctx: Ctx): string {
 	return inner ? inner + '\n\n' : '';
 }
 
+/** the inline children of a paragraph as one run, and how the paragraph writes it */
+function inlineRun(block: Node, nodes: Node[]): Node {
+	return block.type.create(block.attrs, Fragment.fromArray(nodes), block.marks);
+}
+
+function inTable(block: Node): boolean {
+	return block.type.name === 'table' || block.type.name === 'table_wrapper';
+}
+
+/** a stretch of a paragraph's inline content, written as the paragraph writes it: the line-start
+ *  escapes only where the stretch begins the paragraph */
+function inlineBytes(block: Node, nodes: Node[], atStart: boolean): string | null {
+	if (block.type.name !== 'paragraph') return null;
+	return renderInline(inlineRun(block, nodes), { startOfLine: atStart });
+}
+
+function mapInlineLeaves(block: Node, nodes: Node[], text: string, atStart: boolean): Segment[] | null {
+	const run = inlineRun(block, nodes);
+	return mdShadow.mapBlockLeaves(
+		(n) => renderInline(n, { startOfLine: atStart }),
+		run,
+		{ parent: null, index: 0, isLastChild: true, inTableCell: false },
+		text
+	);
+}
+
+/** a text leaf on its own: the text inside code, the dialect's escaping elsewhere; null for a
+ *  leaf written by a rule of its own (a bare link, code that would need a longer fence) */
+function leafBytes(leaf: Node, parent: Node, atStart: boolean, block: Node): string | null {
+	const text = leaf.text ?? '';
+	if (parent.type.spec.code || parent.type.spec.leafText) return text;
+	if (leaf.marks.some((m) => m.type.name === 'code')) return text.includes('`') ? null : text;
+	if (/^(https?:\/\/|www\.)\S+$/.test(text)) return null;
+	return escMd(text, atStart, inTable(block));
+}
+
+/** what continues a child's lines inside its container: the prefix the file gave its second line,
+ *  else the width of what stood before its first (a marker becomes spaces, a quote's `>` stays) */
+function continuation(_parent: Node, text: string, head: string): string {
+	const nl = text.indexOf('\n');
+	if (nl < 0) return head.replace(/[^>]/g, ' ');
+	const prefix = /^[ \t]*(?:>[ \t]*)*/.exec(text.slice(nl + 1))![0];
+	// a quote's second line carries the quote's own marker after its container's: the container's
+	// part is what continues the quote's lines, the quote writes its own
+	return text.startsWith('>') ? prefix.replace(/>[ \t]*$/, '') : prefix;
+}
+
 const assembly = createBlockAssembly((node, ctx) => serializeMdNode(node, ctx), {
-	mapLeaves: (node, ctx, text) => mdShadow.mapBlockLeaves(serializeMdNode, node, ctx, text)
+	mapLeaves: (node, ctx, text) => mdShadow.mapBlockLeaves(serializeMdNode, node, ctx, text),
+	// a task item's box is written with its marker, from the item's attrs: the first block of the
+	// item cannot be rendered on its own inside the item's frame, whose bytes hold the box
+	spliceChild: (parent, index) => !(parent.type.name === 'list' && index === 0 && parent.attrs.kind === 'task'),
+	continuation,
+	leafBytes,
+	inlineBytes,
+	mapInlineLeaves
 });
 
 export function serializeToMarkdown(doc: Node): string {
 	return assembly.serializeDocChildrenDetailed(doc).text;
 }
 
-export function serializeToMarkdownDetailed(doc: Node): DocSerializeResult {
-	return assembly.serializeDocChildrenDetailed(doc);
+export function serializeToMarkdownDetailed(doc: Node, parse?: ParseOrigins | null): DocSerializeResult {
+	return assembly.serializeDocChildrenDetailed(doc, parse);
 }

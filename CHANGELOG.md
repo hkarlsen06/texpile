@@ -5,6 +5,8 @@ Release notes for Texpile Desktop. Add notes under `## [Unreleased]` as you work
 
 ## [Unreleased]
 
+- refactor: untouched blocks are written back from the source map, not from a verbatim attr on every block
+
 ## [1.2.0] - 2026-09-20
 
 - feat: suggestion mode

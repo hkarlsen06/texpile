@@ -66,7 +66,7 @@ export const envHandlers: Record<string, EnvHandler> = {
 	// the figureTemplate slot mechanism. without this, figure* fell to the generic env wrapper
 	// and a lone \includegraphics inside got promoted to a template-less image that always
 	// serializes as a bare \begin{figure}[h]: wrong env, invalid nesting, caption dropped.
-	// invisible to byte round-trip checks (the orig layer masks it); only surfaces on regeneration.
+	// invisible to byte round-trip checks (the verbatim layer masks it); only surfaces on regeneration.
 	'figure*': (env, ctx, options) => createFigureWrapper(env, ctx, options),
 	// wrapfig: same bug/fix as figure*; createFigureWrapper handles any env name verbatim.
 	// wraptable is deliberately NOT routed here: table_wrapper has no verbatim template

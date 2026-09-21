@@ -1,14 +1,15 @@
 // Deterministic ProseMirror -> Typst serializer: third sibling of latexSerializer and the
 // markdown serializer. String-returning handlers per node type over the shared Ctx contract;
-// doc assembly (verbatim orig substitution + per-block memo) delegated to blockAssembly.
+// doc assembly (verbatim substitution + per-block memo) delegated to blockAssembly.
 // Convention: every block handler ends with '\n\n'; the gap a block actually gets is decided
 // by blockGap from the NEXT block's typGap, in renderBlocks for nested blocks and through the
 // assembly's boundary hook at the top level.
-import type { Node } from 'prosemirror-model';
+import { Fragment, type Node } from 'prosemirror-model';
 import { createBlockAssembly, type DocSerializeResult } from '$lib/serializer/blockAssembly';
+import type { ParseOrigins, Segment } from '$lib/editor/visual/sourceSpans';
 import type { Ctx } from '$lib/serializer/types';
 import { escTypst, renderInline, renderHeadingLine, renderBody, mathTypstOf, typStr, typstShadow, isTypHandlerLeaf } from './typstInline';
-import { tableBody } from './tableSerializer';
+import { cellCall, rowCells, tableBody } from './tableSerializer';
 import { mapToCrlf } from '$lib/editor/visual/sourceSpans';
 export { escTypst, renderInline } from './typstInline';
 
@@ -35,12 +36,15 @@ function islandEndsLine(node: Node): boolean {
 	return /^\/\//.test(last) || (/^\/\*/.test(head) && /\*\/\s*$/.test(last)) || declarationLine(head);
 }
 
-function headingLabel(node: Node): string {
-	return node.attrs.label ? ` <${String(node.attrs.label)}>` : '';
+/** the block's <label>, set off as the source set it: a space, or the line end it had */
+function labelOf(node: Node): string {
+	if (!node.attrs.label) return '';
+	const gap = typeof node.attrs.labelGap === 'string' && /\n/.test(node.attrs.labelGap) ? node.attrs.labelGap : ' ';
+	return `${gap}<${String(node.attrs.label)}>`;
 }
 
 function headingLine(node: Node): string | null {
-	return node.attrs.numbered === false ? null : renderHeadingLine(node, headingLabel(node));
+	return node.attrs.numbered === false ? null : renderHeadingLine(node, labelOf(node));
 }
 
 function lineBound(node: Node, blocks: Set<string>): boolean {
@@ -107,7 +111,7 @@ const NODES: Record<string, NodeHandler> = {
 
 	heading(node) {
 		const level = Math.min(6, Math.max(1, Number(node.attrs.level ?? 1)));
-		const label = headingLabel(node);
+		const label = labelOf(node);
 		const line = headingLine(node);
 		if (line == null) {
 			const args = node.attrs.numbered === false ? `level: ${level}, numbering: none` : `depth: ${level}`;
@@ -151,7 +155,7 @@ const NODES: Record<string, NodeHandler> = {
 		const opts = optsStr ? `, ${optsStr}` : '';
 		const img = `image(${typStr(String(node.attrs.src ?? ''))}${opts})`;
 		const caption = node.attrs.showCaption !== false ? renderBody(node) : '';
-		const label = node.attrs.label ? ` <${String(node.attrs.label)}>` : '';
+		const label = labelOf(node);
 		// a bare #image is one the source never wrapped in a figure; keep it bare
 		if (node.attrs.numbered === false && !caption && !label) return `#${img}\n\n`;
 		return `#figure(${img}${caption ? `, caption: [${caption}]` : ''})${label}\n\n`;
@@ -161,6 +165,11 @@ const NODES: Record<string, NodeHandler> = {
 		const body = tableBody(node, '', renderBlocks);
 		return body ? `#${body}\n\n` : '';
 	},
+
+	// a row or a cell written on its own, inside the frame of the table that holds it
+	table_row: (node) => rowCells(node, renderBlocks),
+	table_cell: (node) => cellCall(node, renderBlocks),
+	table_header: (node) => cellCall(node, renderBlocks),
 
 	// #figure(table(...), caption: [...]) <label> — the typst way to caption a table
 	table_wrapper(node) {
@@ -175,7 +184,7 @@ const NODES: Record<string, NodeHandler> = {
 		if (!body) return '';
 		const cap = captionNode as Node | null;
 		const caption = cap && cap.childCount > 0 ? renderBody(cap) : '';
-		const label = node.attrs.label ? ` <${String(node.attrs.label)}>` : '';
+		const label = labelOf(node);
 		return `#figure(\n  ${body}${caption ? `,\n  caption: [${caption}]` : ''},\n)${label}\n\n`;
 	},
 
@@ -183,7 +192,7 @@ const NODES: Record<string, NodeHandler> = {
 		const inner = mathTypstOf(node).trim();
 		if (!inner) return '';
 		// the label rides after the closing dollar, where typst attaches it to the equation
-		const label = node.attrs.label ? ` <${String(node.attrs.label)}>` : '';
+		const label = labelOf(node);
 		return `$ ${inner} $${label}\n\n`;
 	},
 
@@ -196,6 +205,9 @@ const NODES: Record<string, NodeHandler> = {
 	horizontal_rule() {
 		return '#line(length: 100%)\n\n';
 	},
+
+	// a title written on its own, inside the frame of the item that holds it
+	term_title: (node) => renderInline(node, false, ':', true),
 
 	term_item(node) {
 		const title = node.childCount > 0 && node.child(0).type.name === 'term_title' ? node.child(0) : null;
@@ -235,17 +247,92 @@ export function serializeTypNode(node: Node, ctx: Ctx): string {
 	return inner ? inner + '\n\n' : '';
 }
 
+/** the inline children of a textblock as one run, and how that block writes it */
+function inlineRun(block: Node, nodes: Node[]): Node {
+	return block.type.create(block.attrs, Fragment.fromArray(nodes), block.marks);
+}
+
+function renderRun(block: Node, run: Node, atStart: boolean): string | null {
+	if (block.type.name === 'paragraph') return renderInline(run, atStart);
+	if (block.type.name === 'term_title') return renderInline(run, false, ':', true);
+	return null;
+}
+
+/** a stretch of a textblock's inline content, written as the block writes it; null where a
+ *  line comment in it would swallow the bytes kept after it */
+function inlineBytes(block: Node, nodes: Node[], atStart: boolean): string | null {
+	const run = inlineRun(block, nodes);
+	let comment = false;
+	run.forEach((c) => {
+		if (c.type.name === 'inline_latex' && /\/[/*]/.test(c.textContent)) comment = true;
+	});
+	return comment ? null : renderRun(block, run, atStart);
+}
+
+function mapInlineLeaves(block: Node, nodes: Node[], text: string, atStart: boolean): Segment[] | null {
+	const run = inlineRun(block, nodes);
+	return typstShadow.mapBlockLeaves(
+		(n) => renderRun(block, n, atStart) ?? '',
+		run,
+		{ parent: null, index: 0, isLastChild: true, inTableCell: false },
+		text
+	);
+}
+
+/** a text leaf on its own: the text inside code, the dialect's escaping elsewhere */
+function leafBytes(leaf: Node, parent: Node, atStart: boolean, block: Node): string | null {
+	const text = leaf.text ?? '';
+	if (parent.type.spec.code || parent.type.spec.leafText) return text;
+	if (leaf.marks.some((m) => m.type.name === 'code')) return text.includes('`') ? null : text;
+	return escTypst(text, atStart, block.type.name === 'term_title' ? ':' : '');
+}
+
+// a typst marker reads on past the seam into the bytes the file keeps: `@` and `#` eat the word
+// after them, a url its trailing punctuation, `/` and `*` pair into a comment. The inline renderer
+// escapes all of this when it sees both sides, so the block is written afresh instead
+function fuses(bytes: string, tail: string): boolean {
+	if (/(^|[^\\])(\\\\)*@[\p{L}\p{N}_:.-]*$/u.test(bytes) && /^[\p{L}\p{N}_:.-]/u.test(tail)) return true;
+	if (/#[\p{L}\p{N}_.-]*$/u.test(bytes) && /^[\p{L}\p{N}_.([-]/u.test(tail)) return true;
+	if (/https?:\/\/\S*$/.test(bytes) && /^[0-9A-Za-z#$%&*+\-/=@_~[(]/.test(tail)) return true;
+	if (/[/*]$/.test(bytes) && /^[/*]/.test(tail)) return true;
+	// a line break is a backslash and the whitespace after it; anything else there escapes instead
+	if (/(^|[^\\])(\\\\)*\\$/.test(bytes) && /^\S/.test(tail)) return true;
+	return false;
+}
+
+// strong and emphasis open at a word edge only: a delimiter left against a letter reads as a star
+function tight(before: string, after: string): boolean {
+	return /[\p{L}\p{N}]$/u.test(before) && /^[*_]/.test(after);
+}
+
+function seam(before: string, after: string): boolean {
+	return fuses(before, after) || tight(before, after);
+}
+
+/** what continues a child's lines inside its container: the indentation the file gave its second
+ *  line, else the width of what stood before its first (a marker becomes spaces) */
+function continuation(_parent: Node, text: string, head: string): string {
+	const nl = text.indexOf('\n');
+	if (nl >= 0) return /^[ \t]*/.exec(text.slice(nl + 1))![0];
+	return head.replace(/\S/g, ' ');
+}
+
 const assembly = createBlockAssembly((node, ctx) => serializeTypNode(node, ctx), {
-	boundary: (prev, next, contiguous) => blockGap(prev, next, contiguous, false),
-	mapLeaves: (node, ctx, text) => typstShadow.mapBlockLeaves(serializeTypNode, node, ctx, text)
+	boundary: (prev, next, contiguous) => blockGap(prev.node, next.node, contiguous, false),
+	mapLeaves: (node, ctx, text) => typstShadow.mapBlockLeaves(serializeTypNode, node, ctx, text),
+	continuation,
+	leafBytes,
+	inlineBytes,
+	mapInlineLeaves,
+	keepApart: (bytes, tail, head) => ((bytes === '' ? seam(head, tail) : seam(head, bytes) || seam(bytes, tail)) ? null : bytes)
 });
 
 export function serializeToTypst(doc: Node): string {
 	return serializeToTypstDetailed(doc).text;
 }
 
-export function serializeToTypstDetailed(doc: Node): DocSerializeResult {
-	const result = assembly.serializeDocChildrenDetailed(doc);
+export function serializeToTypstDetailed(doc: Node, parse?: ParseOrigins | null): DocSerializeResult {
+	const result = assembly.serializeDocChildrenDetailed(doc, parse);
 	// a CRLF file stays CRLF: verbatim slices already are, regenerated text is not
 	const file = doc.attrs.typFile as { eol?: string } | null;
 	if (file?.eol !== '\r\n') return result;

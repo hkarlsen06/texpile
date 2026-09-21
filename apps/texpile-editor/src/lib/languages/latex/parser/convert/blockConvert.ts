@@ -9,9 +9,9 @@ import { convertNodesToBlocks } from '../converter';
 import { macroHandlers } from './macroHandlers';
 import { envHandlers, transparentEnvironments } from './envHandlers';
 import { VERBATIM_ENVS } from './blockKinds';
-import { nodeRawSpan, mathBodyRawSpan, envBeginEnd, prefixSpans, rawTextNode, trimmedRaw } from './origCapture';
+import { nodeRawSpan, mathBodyRawSpan, envBeginEnd, prefixSpans, rawTextNode, trimmedRaw, macroSpan } from './origCapture';
 import { createBlockMath } from './mathConvert';
-import { bytesSpan } from '$lib/editor/visual/sourceSpans';
+import { bytesSpan, noteSpans, spansOf, standsFor } from '$lib/editor/visual/sourceSpans';
 
 /**
  * An environment with no registered signature gets its arguments parsed as body: `[1]` after
@@ -152,6 +152,9 @@ export function convertNodeToBlock(node: Node, ctx: ConversionContext, options: 
 					result.length > 0 &&
 					['heading', 'horizontal_rule', 'includedoc', 'abstract', 'image'].includes(result[0].type.name)
 				) {
+					// a block that is a chip of its own (\input, \hrule) stands for the call's bytes
+					const span = macroSpan(macro);
+					if (span) for (const n of result) if (n.childCount === 0 && !spansOf(n)) noteSpans(n, standsFor(1, span.from, span.to));
 					return result;
 				}
 			}

@@ -1,7 +1,7 @@
 <script lang="ts">
 	// The visual editor's side of a shared session, in one place: consumes collaborators' edits
 	// (debounced re-parse of the shared Y.Text, patched into the mounted view as the smallest
-	// block range), re-stamps orig after local typing lulls, publishes our caret to awareness,
+	// block range), re-parses after local typing lulls so the doc's origins stay fresh, publishes our caret to awareness,
 	// and renders peers' carets through the remote-cursors plugin. Renderless; WorkspaceView
 	// mounts it and hands over doc-state access through `api`.
 	import { untrack } from 'svelte';
@@ -53,7 +53,7 @@
 	// remote edits -> block patch
 	let remotePatchTimer: ReturnType<typeof setTimeout> | null = null;
 	let remoteParseMs = 0;
-	// set by a local visual edit: the doc's orig stamps predate it, so the next quiet moment
+	// set by a local visual edit: the doc's parse predates it, so the next quiet moment
 	// re-parses purely to refresh them (content usually identical, attrs-only patch)
 	let origStale = false;
 	// a self-restamp whose patch would rebuild the block the caret is in, held back so the editor
@@ -120,7 +120,7 @@
 		}
 		api.texSource = snapshot;
 		api.lastParsedSource = snapshot;
-		applyRemotePatch(v, newDoc, oldMap, parsed.map, oldSource, snapshot);
+		applyRemotePatch(v, newDoc, oldMap, parsed.map, parsed.origins, oldSource, snapshot);
 		api.adopt(parsed, v.state.doc);
 		origStale = false;
 		deferredRestamp = false;

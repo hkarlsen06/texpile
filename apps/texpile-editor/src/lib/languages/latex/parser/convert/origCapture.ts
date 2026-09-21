@@ -1,31 +1,22 @@
-// verbatim `orig` capture: source extents, raw-slice recovery, and the capture state the
+// verbatim source capture: source extents, raw-slice recovery, and the capture state the
 // top-level block pass consumes (armed by latexToProseMirror)
 import type { Node, Macro, Environment } from '@unified-latex/unified-latex-types';
 import { textNode, type PmNode } from '../builders';
-import { bytesSpan, type LeafSpan, withAttrs } from '$lib/editor/visual/sourceSpans';
+import { bytesSpan, type LeafSpan } from '$lib/editor/visual/sourceSpans';
 
 export type CaptureHolder = {
 	pending: CaptureState | null;
-	last: CaptureState | null;
 	rawSource: string | null;
 };
 
-export const capture: CaptureHolder = { pending: null, last: null, rawSource: null };
+export const capture: CaptureHolder = { pending: null, rawSource: null };
 
 export type CaptureState = {
 	/** The exact source string the AST positions index into. */
 	source: string;
-	/** Next top-level block index. EVERY pushed block gets a seq, even span-less ones, so the
-	 *  serializer can tell pristine neighbours from a deletion (re-joining across a deletion
-	 *  with `pre` would resurrect the deleted source). */
-	seq: number;
 	/** End offset of the previous block's span (start of the current inter-block gap). */
 	prevEnd: number;
-	/** Next group id for one-source-construct to many-blocks results. */
-	group: number;
 };
-// stashed by the top-level convertNodesToBlocks right before it returns so latexToProseMirror
-// can read the final prevEnd/seq for the body's trailing gap. grab-and-null, like capture.pending.
 
 /** Min/max offsets over `n`'s position (+ content/args), REJECTING any start before `floor`:
  *  never a legitimate undershoot, always a synthetic/corrupt offset (math script groups have no
@@ -62,13 +53,6 @@ export function nodeExtent(node: Node, floor = 0): { min: number; max: number } 
 	const top = (node as unknown as { position?: { start?: { offset?: number } } }).position;
 	if (typeof top?.start?.offset === 'number' && top.start.offset >= floor && acc.min < top.start.offset) acc.min = top.start.offset;
 	return acc;
-}
-
-/** Recreate `node` with an `orig` attr. Types that don't declare `orig` are returned as-is
- *  (fail-safe: such a block simply always regenerates). */
-export function withOrig(node: PmNode, orig: Record<string, unknown>): PmNode {
-	if (!node.type.spec.attrs || !('orig' in node.type.spec.attrs)) return node;
-	return withAttrs(node, { ...node.attrs, orig });
 }
 
 // byte-faithful raw fallback: raw preservation slices the ORIGINAL bytes via source offsets
@@ -287,9 +271,9 @@ export function trimmedRaw(raw: RawSpan): RawSpan {
 
 /**
  * Extend ext.max over a macro's attached-arg tail when the source confirms it (repairArgTail).
- * used by the orig block capture: a block ending inside an attached argument otherwise gets a
- * truncated orig.latex, and the missing closer lands in the inter-block gap, silently lost
- * whenever the next block has no verbatim slice to re-join `pre` across.
+ * used by the block span capture: a block ending inside an attached argument otherwise gets a
+ * truncated span, and the missing closer lands in the inter-block gap, silently lost
+ * whenever the next block has no span to re-join the gap across.
  */
 export function repairExtentTail(node: Node, ext: { min: number; max: number } | null): { min: number; max: number } | null {
 	if (!ext || !capture.rawSource || !Number.isFinite(ext.max) || !Number.isFinite(ext.min)) return ext;

@@ -63,7 +63,7 @@ export type DocumentBufferDeps = {
 	/** re-parse into the visual doc after a wholesale source replacement */
 	rebuildVisual(): void;
 	isVisualMode(): boolean;
-	/** the doc's orig stamps just went stale; the collab layer re-stamps on the lull */
+	/** the doc's parse just went stale; the collab layer re-parses on the lull */
 	noteLocalEdit(): void;
 	/** the user is typing: a pending mode-switch scroll anchor is moot */
 	clearPendingAnchor(): void;

@@ -4,7 +4,7 @@
 // from the source, so an unknown token type can never crash a file open or lose bytes.
 //
 // Verbatim capture is far simpler than the LaTeX side: block tokens carry map = [startLine,
-// endLineExclusive), so orig slices come straight off a line-offset table. One markdown list of
+// endLineExclusive), so block spans come straight off a line-offset table. One markdown list of
 // N items becomes N flat-list nodes sharing one group (same model as itemize), so substitution
 // stays all-or-nothing and an item edit regenerates the whole list.
 import type { Token } from 'markdown-it';
@@ -17,12 +17,15 @@ import { cellLocator, contentLocator, locateLines, rangeOf, textSpans, type Loca
 import {
 	bytesSpan,
 	concatSpans,
+	collectMap,
+	noteBlockSpan,
+	type BlockSpan,
+	rememberParseMap,
 	noteSpans,
 	sliceSpans,
 	spansOf,
 	standsFor,
-	type LeafSpan,
-	withAttrs
+	type LeafSpan
 } from '$lib/editor/visual/sourceSpans';
 
 function withMarks(node: PmNode, marks: PmMark[]): PmNode {
@@ -204,7 +207,12 @@ function listItems(tokens: Token[], i: number, j: number, src: SourceLines): PmN
 		const e = constructEnd(tokens, k);
 		const inner = convertTokens(tokens, k + 1, e, src);
 		const raw = tokens[k + 1]?.type === 'paragraph_open' && tokens[k + 2]?.type === 'inline' ? tokens[k + 2].content : '';
-		const { blocks, checked } = detectTask(inner.length > 0 ? inner : [buildNode('paragraph')], raw);
+		// an item with nothing in it gets a paragraph of its own, with no bytes: it stands after the
+		// marker on the item's line, so a caret in it lands there and not in a neighbour
+		const { blocks, checked } = detectTask(
+			inner.length > 0 ? inner : [noteBlockSpan(buildNode('paragraph'), emptyItemAt(tokens[k], src))],
+			raw
+		);
 		items.push(
 			buildNode(
 				'list',
@@ -380,22 +388,67 @@ function ensureBlocks(blocks: PmNode[]): PmNode[] {
 	return blocks.length > 0 ? blocks : [buildNode('paragraph')];
 }
 
-/** nested walker (blockquote bodies, list items): no orig stamping below the top level. */
+/** where an empty list item's content would begin: after the marker on its first line */
+function emptyItemAt(item: Token, src: SourceLines): BlockSpan | null {
+	if (!item.map || item.map[0] >= src.lineStarts.length) return null;
+	const start = src.lineStarts[item.map[0]];
+	const line = src.source.slice(start, item.map[0] + 1 < src.lineStarts.length ? src.lineStarts[item.map[0] + 1] : src.source.length);
+	const at = start + /^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]*)?/.exec(line)![0].length;
+	return { srcFrom: at, srcTo: at, size: 1 };
+}
+
+/** the bytes of a construct below the top level: a paragraph's from where its content starts,
+ *  any other's from past the line's prefix (indentation, a quote's `>`) to the end of its last
+ *  line, blank lines trimmed. Null when the lines cannot be placed */
+function nestedSpan(tokens: Token[], i: number, src: SourceLines): BlockSpan | null {
+	const tok = tokens[i];
+	if (!tok.map) return null;
+	const [first, last] = tok.map;
+	if (first >= src.lineStarts.length) return null;
+	const inline = tok.type === 'paragraph_open' && tokens[i + 1]?.type === 'inline' ? tokens[i + 1] : null;
+	if (inline && inline.content === '') {
+		// an empty paragraph (an item with nothing typed yet) has no bytes of its own: it stands
+		// after the marker on its line, so a caret in it lands there and not in a neighbour
+		const line = src.source.slice(src.lineStarts[first], last < src.lineStarts.length ? src.lineStarts[last] : src.source.length);
+		const at = src.lineStarts[first] + /^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]*(?:\[[ xX]\][ \t]*)?)?/.exec(line)![0].length;
+		return { srcFrom: at, srcTo: at, size: 1 };
+	}
+	if (inline) {
+		const lines = inline.content.split('\n');
+		const starts = locateLines(src, first, last, lines);
+		const a = starts[0];
+		const z = starts[starts.length - 1];
+		if (a == null || z == null) return null;
+		const to = z + lines[lines.length - 1].length;
+		return to > a ? { srcFrom: a, srcTo: to, size: 1 } : null;
+	}
+	const line = src.source.slice(src.lineStarts[first], last < src.lineStarts.length ? src.lineStarts[last] : src.source.length);
+	let prefix = /^[ \t]*(?:>[ \t]*)*/.exec(line)![0];
+	// a quote's own marker is its first byte, not its container's frame: back off to the last >
+	if (tok.type === 'blockquote_open' && prefix.includes('>')) prefix = prefix.slice(0, prefix.lastIndexOf('>'));
+	const from = src.lineStarts[first] + prefix.length;
+	const end = last < src.lineStarts.length ? src.lineStarts[last] : src.source.length;
+	const to = trimBlankTail(src.source, from, end);
+	return to > from ? { srcFrom: from, srcTo: to, size: 1 } : null;
+}
+
+/** nested walker (blockquote bodies, list items): each construct's first block carries its span
+ *  below the top level too, so a container keeps its untouched children as their bytes */
 function convertTokens(tokens: Token[], from: number, to: number, src: SourceLines): PmNode[] {
 	const out: PmNode[] = [];
 	let i = from;
+	let prevEnd = 0;
 	while (i < to) {
 		const j = constructEnd(tokens, i);
-		out.push(...convertConstruct(tokens, i, Math.min(j, to), null, src));
+		const blocks = convertConstruct(tokens, i, Math.min(j, to), null, src);
+		const span = nestedSpan(tokens, i, src);
+		if (span && blocks.length > 0 && span.srcFrom >= prevEnd && (span.srcTo > span.srcFrom || blocks.length === 1)) {
+			out.push(noteBlockSpan(blocks[0], { ...span, size: blocks.length }), ...blocks.slice(1));
+			prevEnd = span.srcTo;
+		} else out.push(...blocks);
 		i = j + 1;
 	}
 	return out;
-}
-
-/** Recreate `node` with an `orig` attr; types that don't declare it pass through unchanged. */
-function withOrig(node: PmNode, orig: Record<string, unknown>): PmNode {
-	if (!node.type.spec.attrs || !('orig' in node.type.spec.attrs)) return node;
-	return withAttrs(node, { ...node.attrs, orig });
 }
 
 export type MarkdownParseResult = {
@@ -405,7 +458,7 @@ export type MarkdownParseResult = {
 export function markdownToProseMirror(source: string): MarkdownParseResult {
 	const md = createMarkdownEngine();
 	const tokens = md.parse(source, {}) as Token[];
-	const cap: Cap = { source, lineStarts: buildLineStarts(source), seq: 0, prevEnd: 0, group: 0 };
+	const cap: Cap = { source, lineStarts: buildLineStarts(source), prevEnd: 0 };
 	const src: SourceLines = { source, lineStarts: cap.lineStarts };
 
 	const result: PmNode[] = [];
@@ -414,40 +467,26 @@ export function markdownToProseMirror(source: string): MarkdownParseResult {
 		const j = constructEnd(tokens, i);
 		const blocks = convertConstruct(tokens, i, j, cap, src);
 		const map = tokens[i].map;
-		// stamp-and-push, the LaTeX converter's pushBlocks contract: every block gets a seq;
-		// only a trustworthy span gets the slice. multi-block constructs (a list) share it
-		// under a group id so substitution is all-or-nothing.
+		// note-and-push, the LaTeX converter's pushBlocks contract: only a trustworthy span is
+		// noted, on the construct's first block. a multi-block construct (a list) is one span, so
+		// substitution is all-or-nothing.
 		const min = map ? offsetOfLine(cap, map[0]) : NaN;
 		const end = map ? trimBlankTail(source, min, sliceEnd(cap, map[1])) : NaN;
 		const spanOk = map != null && Number.isFinite(min) && min >= cap.prevEnd && end <= source.length && min < end;
-		const slice = spanOk ? source.slice(min, end) : null;
-		const pre = spanOk ? source.slice(cap.prevEnd, min) : null;
-		const group = spanOk && blocks.length > 1 ? cap.group++ : null;
-		for (let b = 0; b < blocks.length; b++) {
-			const seq = cap.seq++;
-			if (slice == null) {
-				result.push(withOrig(blocks[b], { seq }));
-				continue;
-			}
-			const orig: Record<string, unknown> = { latex: slice, pre: b === 0 ? pre : '', seq, norm: null, start: min };
-			if (group != null) {
-				orig.group = group;
-				orig.groupIndex = b;
-				orig.groupSize = blocks.length;
-			}
-			result.push(withOrig(blocks[b], orig));
-		}
+		if (spanOk && blocks.length > 0)
+			result.push(noteBlockSpan(blocks[0], { srcFrom: min, srcTo: end, size: blocks.length }), ...blocks.slice(1));
+		else result.push(...blocks);
 		if (spanOk) cap.prevEnd = Math.max(cap.prevEnd, end);
 		i = j + 1;
 	}
 
-	// trailing bytes past the last block (usually just "\n") belong to no node; stash them on
-	// the doc so a pristine save reproduces the file's exact tail. an EMPTY tail is stashed
-	// too: it protects a missing final newline from being "fixed" on a no-edit save
 	const docAttrs: Record<string, unknown> = {
-		docTail: result.length > 0 ? { text: source.slice(cap.prevEnd), afterSeq: cap.seq - 1 } : null,
 		// a file that is CRLF throughout gets its regenerated blocks written the same way
 		eol: source.includes('\r\n') && !/(^|[^\r])\n/.test(source) ? '\r\n' : null
 	};
-	return { doc: buildNode('doc', docAttrs, ensureBlocks(result)) };
+	const doc = buildNode('doc', docAttrs, ensureBlocks(result));
+	// the document knows its blocks' gaps and constructs from here; parseMarkdownFile registers it
+	// against the file, where the bytes are written back from
+	rememberParseMap(doc, collectMap(doc), { text: source, from: 0, to: source.length }, false);
+	return { doc };
 }

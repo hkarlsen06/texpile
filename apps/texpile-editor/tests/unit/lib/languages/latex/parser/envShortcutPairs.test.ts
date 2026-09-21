@@ -3,21 +3,16 @@
 // maths; read as prose, every ^ and _ inside it gets text-escaped into something that no longer
 // compiles. \def-defined pairs were already understood, \newcommand ones were not.
 import { describe, it, expect } from 'vitest';
-import { Fragment, type Node } from 'prosemirror-model';
 import { parseLatexFile, serializeLatexFile } from '$lib/workspace/latexRoundtrip';
+import { withoutOrigins } from '$lib/editor/visual/sourceSpans';
 
 const PREAMBLE =
 	'\\documentclass{article}\n\\newcommand{\\bea}{\\begin{eqnarray}}\n\\newcommand{\\eea}{\\end{eqnarray}}\n\\begin{document}\n';
 
 function regenerate(body: string): string {
 	const parsed = parseLatexFile(`${PREAMBLE}${body}\n\\end{document}\n`);
-	// strip orig so every block regenerates, which is what an edit does
-	const kids: Node[] = [];
-	for (let i = 0; i < parsed.doc.childCount; i++) {
-		const c = parsed.doc.child(i);
-		kids.push(c.type.create({ ...c.attrs, orig: null }, c.content, c.marks));
-	}
-	return serializeLatexFile(parsed, parsed.doc.copy(Fragment.fromArray(kids)));
+	// forget the source so every block regenerates, which is what an edit does
+	return serializeLatexFile(parsed, withoutOrigins(parsed.doc));
 }
 
 describe('newcommand-defined math environment shortcuts', () => {

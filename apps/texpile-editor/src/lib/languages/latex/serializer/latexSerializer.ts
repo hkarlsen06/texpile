@@ -5,16 +5,23 @@
  * pairs.
  */
 
-import type { Node, Mark } from 'prosemirror-model';
-import { serializeTable } from './tableSerializer';
+import { Fragment, type Node, type Mark } from 'prosemirror-model';
+import { serializeTable, serializeRowCells, serializeCell } from './tableSerializer';
 import { FIG_IMG_SLOT, FIG_CAP_SLOT, FIG_LAB_SLOT } from '../parser/converter';
-import { createBlockAssembly, type DocSerializeResult } from '$lib/serializer/blockAssembly';
+import { createBlockAssembly, follows, isLastOfParse, type DocSerializeResult, type Neighbour } from '$lib/serializer/blockAssembly';
 import type { Ctx, NodeHandler } from '$lib/serializer/types';
 // direct, not through the image barrel: that one pulls in svelte and the DOM
 import { DEFAULT_FIGURE_FRACTION } from '$lib/editor/visual/extensions/image/figureDefaults';
 import { esc, applyMarks, joinInline, markableMarks, marksKey, setBareUrl } from './textEscapes';
 import { blockMath, alignEnvironment } from './mathBlocks';
-import { spansOfChars, type CharSource, type Segment } from '$lib/editor/visual/sourceSpans';
+import {
+	blockOriginOf,
+	spansOfChars,
+	type BlockOrigin,
+	type CharSource,
+	type ParseOrigins,
+	type Segment
+} from '$lib/editor/visual/sourceSpans';
 export { esc, sanitizeText, type EscMode } from './textEscapes';
 
 export type { DocSerializeResult } from '$lib/serializer/blockAssembly';
@@ -113,12 +120,38 @@ function textLeafSpans(leaf: ShadowLeaf): CharSource[] {
 
 /** where the leaves of a regenerated block sit in its text, or null when the shadow could not be believed */
 function mapBlockLeaves(block: Node, ctx: Ctx, real: string): Segment[] | null {
+	return mapRunLeaves(block, real, () => serializeNode(block, ctx));
+}
+
+/** the inline children `from` up to `to` of a textblock as one run of inline content, and where
+ *  its leaves sit in it: what the segment splice writes between the bytes it keeps */
+function inlineRun(block: Node, nodes: Node[]): Node {
+	return block.type.create(block.attrs, Fragment.fromArray(nodes), block.marks);
+}
+
+function inlineBytes(block: Node, nodes: Node[], _atStart: boolean, ctx: Ctx): string | null {
+	const run = inlineRun(block, nodes);
+	// a comment chip owns its line: it cannot stand mid-line between kept bytes
+	let comment = false;
+	run.forEach((c) => {
+		if (c.type.name === 'inline_latex' && c.textContent.startsWith('%')) comment = true;
+	});
+	return comment ? null : renderChildren(run, ctx.inTableCell);
+}
+
+function mapInlineLeaves(block: Node, nodes: Node[], text: string, _atStart: boolean, ctx: Ctx): Segment[] | null {
+	const run = inlineRun(block, nodes);
+	return mapRunLeaves(run, text, () => renderChildren(run, ctx.inTableCell));
+}
+
+/** where the leaves of `block` sit in `real`, the text `render` writes for it, told by a shadow run */
+function mapRunLeaves(block: Node, real: string, render: () => string): Segment[] | null {
 	const leaves: ShadowLeaf[] = [];
 	shadow = leaves;
 	setBareUrl(shadowBareUrl);
 	let out: string;
 	try {
-		out = serializeNode(block, ctx);
+		out = render();
 	} finally {
 		shadow = null;
 		setBareUrl(null);
@@ -129,12 +162,16 @@ function mapBlockLeaves(block: Node, ctx: Ctx, real: string): Segment[] | null {
 		return null;
 	}
 
-	// the leaves' positions, relative to the block node; a block that is itself one run stands at 0
+	// the leaves' positions, relative to the block node; a block that is itself one run stands at 0.
+	// A child written out as its bytes (a chunk) is one run too, its own leaves carried inside it
+	const chunks = new Set<Node>();
+	for (const leaf of leaves)
+		if (!leaf.node.isText && !leaf.node.isLeaf && !isHandlerLeaf(leaf.node) && !leaf.node.type.spec.leafText) chunks.add(leaf.node);
 	const at = new Map<Node, number>();
 	let twice = false;
 	if (isHandlerLeaf(block) || block.type.spec.leafText) at.set(block, 0);
 	block.descendants((n, pos) => {
-		const leaf = n.isText || n.isLeaf || isHandlerLeaf(n) || !!n.type.spec.leafText;
+		const leaf = n.isText || n.isLeaf || isHandlerLeaf(n) || !!n.type.spec.leafText || chunks.has(n);
 		if (!leaf) return true;
 		if (at.has(n)) twice = true;
 		at.set(n, pos + 1);
@@ -209,6 +246,21 @@ function mapBlockLeaves(block: Node, ctx: Ctx, real: string): Segment[] | null {
 			}
 			continue;
 		}
+		// a chunk's runs are where the parse had them, moved to where its bytes landed
+		if (chunks.has(leaf.node)) {
+			const origin = blockOriginOf(leaf.node);
+			if (!origin || origin.srcFrom === undefined || lead > 0 || tail > 0) continue;
+			for (const s of origin.leaves) {
+				segs.push({
+					pmFrom: pm + (s.pmFrom - origin.pmFrom),
+					pmTo: pm + (s.pmTo - origin.pmFrom),
+					srcFrom: start + (s.srcFrom - origin.srcFrom),
+					srcTo: start + (s.srcTo - origin.srcFrom),
+					kind: s.kind
+				});
+			}
+			continue;
+		}
 		// an atom whose text child appears once inside its emission maps that child character for character
 		const core = leaf.emitted.slice(lead, lead + coreLen);
 		const inner = leaf.node.childCount === 1 && leaf.node.firstChild!.isText ? (leaf.node.firstChild!.text ?? '') : '';
@@ -259,7 +311,7 @@ export function renderChildren(node: Node, inTableCell: boolean): string {
 	// merges identical text nodes, but atom leaves never merge, so \texttt{A\ B} parses to three
 	// same-marked nodes and would serialize as three separate \texttt{} calls: pointless churn
 	// that multiplies per chip.
-	const pieces: string[] = [];
+	let pieces: string[] = [];
 	let i = 0;
 	while (i < children.length) {
 		const marks = markableMarks(children[i]);
@@ -281,6 +333,8 @@ export function renderChildren(node: Node, inTableCell: boolean): string {
 		}
 		i = j;
 	}
+	// a container's untouched children are written out as their bytes, joined on the file's own gaps
+	if (pieces.length === children.length && children.length > 0 && children[0].isBlock) pieces = assembly.verbatimParts(node, pieces);
 
 	return joinInline(pieces);
 }
@@ -291,9 +345,9 @@ export function renderChildren(node: Node, inTableCell: boolean): string {
  * an unbalanced environment. Editor-made list nodes carry no source group and still coalesce.
  */
 function sameSourceList(a: Node, b: Node): boolean {
-	const ga = (a.attrs.orig as { group?: number | null } | null)?.group;
-	const gb = (b.attrs.orig as { group?: number | null } | null)?.group;
-	return ga == null || gb == null || ga === gb;
+	const oa = blockOriginOf(a);
+	const ob = blockOriginOf(b);
+	return !oa || !ob || (oa.parse === ob.parse && oa.index - oa.member === ob.index - ob.member);
 }
 
 /** the environment name the first node of this run of list nodes carries, if any */
@@ -400,40 +454,75 @@ function buildIncludegraphics(node: Node): string {
 	return `\\includegraphics[width=${DEFAULT_FIGURE_FRACTION}\\textwidth]{${src}}`;
 }
 
-type ParagraphOrig = { latex?: unknown; pre?: unknown; seq?: unknown } | null | undefined;
-
-function seqOf(node: Node | null): number | undefined {
-	const seq = (node?.attrs.orig as ParagraphOrig)?.seq;
-	return typeof seq === 'number' ? seq : undefined;
-}
-
-// a \par the source had stays while the same block follows, so typing never rewrites how a paragraph ends
-export function dropParagraphEnd(text: string, last: Node | null, nextSeq?: number): string {
+/**
+ * A \par the source had stays while the same block follows, so typing never rewrites how a
+ * paragraph ends. `was` is what the parse knew the paragraph as before the edit; `next` is the
+ * block written after it, or 'end' for the body's end.
+ */
+export function dropParagraphEnd(
+	text: string,
+	last: Node | null,
+	was: BlockOrigin | null = null,
+	next: BlockOrigin | 'end' | null = null
+): string {
 	if (last?.type.name !== 'paragraph') return text;
-	const orig = last.attrs.orig as ParagraphOrig;
-	const kept = typeof orig?.latex === 'string' && /\\par\s*$/.test(orig.latex) && nextSeq !== undefined && seqOf(last) === nextSeq - 1;
+	const hadPar = typeof was?.text === 'string' && /\\par\s*$/.test(was.text);
+	const kept = hadPar && (next === 'end' ? isLastOfParse(was!) : follows(was, next));
 	return kept ? text : text.replace(/[ \t]*\\par$/, '');
 }
 
-function paragraphGap(prev: Node, next: Node, contiguous: boolean, before: string): string | null {
-	const pre = (next.attrs.orig as ParagraphOrig)?.pre;
-	return contiguous && prev.type.name === 'paragraph' && typeof pre === 'string' && /\\par\s*$/.test(before.slice(-16)) ? pre : null;
+// the file's own gap between a pair still the source pair, even a single line end: prose can
+// only merge across one into prose, so after anything but a paragraph (a heading, an
+// environment, a comment line) the gap is safe as written, and after a paragraph while it still
+// ends in the \par the file gave it
+function paragraphGap(prev: Neighbour, next: Neighbour, contiguous: boolean, before: string): string | null {
+	const origin = next.origin ?? next.was;
+	const pre = origin?.pre;
+	// a later member of a construct (an item of a list written as one) has no gap of its own
+	if (!contiguous || typeof pre !== 'string' || origin!.member !== 0) return null;
+	return prev.node.type.name !== 'paragraph' || /\\par\s*$/.test(before.slice(-16)) ? pre : null;
 }
 
 function envBody(node: Node): string {
 	return dropParagraphEnd(renderChildren(node, false).replace(/^\n+|\n+$/g, ''), node.lastChild) + '\n';
 }
 
-// doc assembly (verbatim `orig` substitution + per-block memo) is format-neutral and shared
-// with the markdown serializer; serializeNode hoists, so binding it here is safe.
+// doc assembly (verbatim substitution + per-block memo) is format-neutral and shared with the
+// markdown serializer; serializeNode hoists, so binding it here is safe.
 const assembly = createBlockAssembly((node, ctx) => serializeNode(node, ctx), {
-	beforeBreak: (text, last, next) => dropParagraphEnd(text, last, seqOf(next)),
+	beforeBreak: (text, last, next) => dropParagraphEnd(text, last.node, last.was, next.origin ?? next.was),
 	boundary: paragraphGap,
-	mapLeaves: mapBlockLeaves
+	mapLeaves: mapBlockLeaves,
+	shadowChunk: (node, bytes) => shadowed(node, bytes),
+	// an item's label is written with \item, by the list handler, from the run at the head of the
+	// item's first block: that block cannot be rendered on its own inside the item's frame
+	spliceChild: (parent, index, was) =>
+		!(parent.type.name === 'list' && index === 0 && (splitLeadingLabel(parent.child(0)) !== null || splitLeadingLabel(was) !== null)),
+	// inside a formula, a chip or a code block the text is the source; prose is escaped the way the text handler does
+	leafBytes: (leaf, parent) =>
+		parent.type.spec.leafText || parent.type.spec.code
+			? (leaf.text ?? '')
+			: bareTextString(
+					leaf.text ?? '',
+					leaf.marks.some((m) => m.type.name === 'code')
+				),
+	inlineBytes,
+	mapInlineLeaves,
+	// a control word ending the fresh bytes would fuse with a letter beginning the kept tail
+	keepApart: (bytes, tail) => (/\\[a-zA-Z@]+$/.test(bytes) && /^[a-zA-Z]/.test(tail) ? bytes + ' ' : bytes),
+	// a block written afresh inside an environment or an item continues its lines as the file
+	// indented the block it replaced, else under what stood before it on its first line
+	continuation: (_parent, text, head) => {
+		const nl = text.indexOf('\n');
+		return nl >= 0 ? /^[ \t]*/.exec(text.slice(nl + 1))![0] : head.replace(/\S/g, ' ');
+	},
+	// the paragraphs of a table cell are joined by \par, as the cell handler writes them: a blank
+	// line inside a tabular is not one
+	childGap: (parent) => (parent.type.name === 'table_cell' || parent.type.name === 'table_header' ? ' \\par ' : null)
 });
 
-function serializeDocChildrenDetailed(doc: Node): DocSerializeResult {
-	return assembly.serializeDocChildrenDetailed(doc);
+function serializeDocChildrenDetailed(doc: Node, parse?: ParseOrigins | null): DocSerializeResult {
+	return assembly.serializeDocChildrenDetailed(doc, parse);
 }
 
 function serializeDocChildren(doc: Node): string {
@@ -685,10 +774,17 @@ const NODES: Record<string, NodeHandler> = {
 		const label = labelled ? (sourceHolds ? itemLabel : labelled.latex) : itemLabel === '' ? '' : null;
 		const itemCmd = label == null ? '\\item' : `\\item[${label}]`;
 
-		const parts: string[] = [];
+		// an item's untouched blocks are written out as their bytes; the labelled first block is shown
+		// without its label, so it is always rendered afresh
+		const inners: string[] = [];
 		node.forEach((item, _offset, i) => {
 			const shown = i === 0 && labelled ? labelled.body : item;
-			const inner = serializeNode(shown, { parent: node, index: i, isLastChild: i === node.childCount - 1, inTableCell: ctx.inTableCell });
+			inners.push(serializeNode(shown, { parent: node, index: i, isLastChild: i === node.childCount - 1, inTableCell: ctx.inTableCell }));
+		});
+		const rendered = assembly.verbatimParts(node, inners, { join: false, keep: (i) => i === 0 && !!labelled });
+		const parts: string[] = [];
+		node.forEach((item, _offset, i) => {
+			const inner = rendered[i];
 			if (item.type.name === 'list') {
 				// only the FIRST of a run of same-kind sub-lists opens \item[]; the rest coalesce
 				// into the same nested env (prevSame means no \begin), and another \item[] would
@@ -725,8 +821,8 @@ const NODES: Record<string, NodeHandler> = {
 	table: (node) => serializeTable(node, serializeNode),
 	table_caption: (node) => serializeTable(node, serializeNode),
 	table_notes: (node) => serializeTable(node, serializeNode),
-	table_row: (node) => serializeTable(node, serializeNode),
-	table_cell: (node) => serializeTable(node, serializeNode),
+	table_row: (node, ctx) => serializeRowCells(node, ctx.parent?.type.name === 'table' ? ctx.parent : null, serializeNode),
+	table_cell: (node, ctx) => serializeCell(node, ctx.index === 0, serializeNode),
 	table_header: (node) => serializeTable(node, serializeNode)
 };
 
@@ -769,8 +865,8 @@ export function serializeToLatex(doc: Node): string {
  * boundary: latexRoundtrip.ts must NOT insert its own separator around a protected edge (the
  * body already carries the exact original bytes), only around a regenerated one.
  */
-export function serializeToLatexDetailed(doc: Node): DocSerializeResult {
-	return serializeDocChildrenDetailed(doc);
+export function serializeToLatexDetailed(doc: Node, parse?: ParseOrigins | null): DocSerializeResult {
+	return serializeDocChildrenDetailed(doc, parse);
 }
 
 /** Nothing but labels (and whitespace) - the paragraph the importer makes for a \label sitting on

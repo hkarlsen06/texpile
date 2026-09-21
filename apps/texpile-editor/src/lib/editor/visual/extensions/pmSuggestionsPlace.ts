@@ -107,12 +107,12 @@ function blockOnSide(blocks: Segment[], pos: number, assoc: Side): Segment | nul
 }
 
 // the byte of a position in a region's document: exact in a run, else the nearest run's edge in the
-// block on the side named, else the block's own edge
+// innermost block on the side named, else that block's own edge
 function regionByte(region: RegionParse, pos: number, assoc: Side): number | null {
-	const { leaves, blocks } = region.map;
+	const { leaves } = region.map;
 	const exact = pmToSource(leaves, pos, assoc);
 	if (exact !== null) return exact;
-	const block = blockOnSide(blocks, pos, assoc);
+	const block = blockAtPm(region.map, pos, assoc);
 	if (!block) return null;
 	const i = indexStartingBy(leaves, 'pmFrom', pos);
 	const within = (s: Segment | null) => (s && s.pmFrom >= block.pmFrom && s.pmTo <= block.pmTo ? s : null);
@@ -232,14 +232,6 @@ function nodeAround(doc: PMNode, pos: number, to = pos): PMNode | null {
 	return span ? doc.nodeAt(span.from) : null;
 }
 
-// the top-level boundary a join stands on: the start of the block when the words came out above
-// its first character, else its end
-function boundaryAt(doc: PMNode, pos: number): number {
-	const $pos = doc.resolve(pos);
-	if ($pos.depth === 0) return pos;
-	return $pos.parentOffset === 0 ? $pos.before(1) : $pos.after(1);
-}
-
 function blocksSpanning(map: SourceMap, from: number, to: number): Span | null {
 	const a = blockAtPm(map, from);
 	const b = blockAtPm(map, to) ?? a;
@@ -351,6 +343,11 @@ function placeChange(doc: PMNode, s: SuggestionMark, { A, B }: Piece, before: Re
 		const ranges: PmSuggestionRange[] = [];
 		if (old.gone) ranges.push({ ...base, from: chip.from, to: chip.from, gone: old.gone });
 		ranges.push({ ...base, ...chip, node: true, old: old.runs, ...(was ? { was } : {}) });
+		// what stood after the node it was and is in the change too (the paragraph a figure took
+		// in as its caption): struck after the node, where it stood
+		const beyond = was && !stood && A.from + was.nodeSize < A.to ? oldContent(before.doc, A.from + was.nodeSize, A.to) : null;
+		if (beyond?.gone) ranges.push({ ...base, from: chip.to, to: chip.to, gone: beyond.gone });
+		else if (beyond?.runs.length) ranges.push({ ...base, from: chip.to, to: chip.to, old: beyond.runs });
 		return { ranges, partial: false };
 	}
 	// block boundaries moved and no words did: a break came or went, or a block became another kind
@@ -373,7 +370,10 @@ function placeChange(doc: PMNode, s: SuggestionMark, { A, B }: Piece, before: Re
 		const $from = doc.resolve(from);
 		const mid = $from.parent.isTextblock && $from.parentOffset > 0 && $from.parentOffset < $from.parent.content.size;
 		const inline = mid || old.gone.head.length > 0 || old.gone.tail.length > 0;
-		const edge = inline ? from : boundaryAt(doc, from);
+		// between blocks at any depth the position is the join itself; inside a textblock, the join
+		// is that block's own edge, so a block taken out of an item stands in the item
+		const edge =
+			inline || !$from.parent.isTextblock || $from.depth === 0 ? from : $from.parentOffset === 0 ? $from.before() : $from.after();
 		ranges.push({ ...base, from: edge, to: edge, gone: old.gone });
 	}
 	if (newText !== '' || old.runs.length) {
@@ -442,7 +442,63 @@ function bytesOf(region: RegionParse, span: Span): Span | null {
 
 // a change shared out among the marks whose bytes it lies in, cut where the next mark's bytes begin:
 // two words taken out at one spot by two people are two changes, not one
-function shareOut(c: Change, before: RegionParse, after: RegionParse, marks: MarkBytes[]): { mark: SuggestionMark; piece: Piece }[] {
+type Stretch = { fromA: number; toA: number; fromB: number; toB: number; joined?: boolean };
+
+// words the comparison matched, but that the reader sees in another kind of place: in prose on one
+// side and inside a node that draws itself (a figure's caption) on the other. The comparison reads
+// only the node's tokens as changed, so the words would draw as untouched while the block they
+// came from vanished; the changes on either side are read as one that takes the words in
+function movedIntoNode(before: RegionParse, aFrom: number, aTo: number, after: RegionParse, bFrom: number, bTo: number): boolean {
+	if (aTo <= aFrom || bTo <= bFrom || textOf(before.doc, aFrom, aTo).trim() === '') return false;
+	return (selfRenderedAround(before.doc, aFrom, aTo) !== null) !== (selfRenderedAround(after.doc, bFrom, bTo) !== null);
+}
+
+// the first edge of a node that draws itself which a range crosses: the node's start when the
+// range takes the node in after words of its own, its end when the range leaves the node
+function crossedEdge(doc: PMNode, from: number, to: number): { pos: number; side: 'start' | 'end' } | null {
+	let found: { pos: number; side: 'start' | 'end' } | null = null;
+	doc.nodesBetween(from, to, (node, pos) => {
+		if (found || node.isLeaf || node.isText || !isSelfRendered(node)) return !found;
+		const end = pos + node.nodeSize;
+		if (pos > from && pos < to) found = { pos, side: 'start' };
+		else if (pos < from && end > from && end < to) found = { pos: end, side: 'end' };
+		return false;
+	});
+	return found;
+}
+
+// a change that runs from words into a node that draws itself (or out of one) is two: the words,
+// and the node, which is then set beside the node it was rather than struck as a block with them
+function splitAtNodes(changes: Change[], before: RegionParse, after: RegionParse): Stretch[] {
+	const out: Stretch[] = [];
+	for (const c of changes) {
+		let cur: Stretch = { fromA: c.fromA, toA: c.toA, fromB: c.fromB, toB: c.toB };
+		for (;;) {
+			const a = crossedEdge(before.doc, cur.fromA, cur.toA);
+			const b = crossedEdge(after.doc, cur.fromB, cur.toB);
+			if (!a || !b || a.side !== b.side) break;
+			out.push({ fromA: cur.fromA, toA: a.pos, fromB: cur.fromB, toB: b.pos });
+			cur = { fromA: a.pos, toA: cur.toA, fromB: b.pos, toB: cur.toB };
+		}
+		out.push(cur);
+	}
+	return out;
+}
+
+function joinAcrossNodes(changes: Stretch[], before: RegionParse, after: RegionParse): Stretch[] {
+	const out: Stretch[] = [];
+	for (const c of changes) {
+		const prev = out[out.length - 1];
+		if (prev && movedIntoNode(before, prev.toA, c.fromA, after, prev.toB, c.fromB)) {
+			prev.toA = c.toA;
+			prev.toB = c.toB;
+			prev.joined = true;
+		} else out.push({ fromA: c.fromA, toA: c.toA, fromB: c.fromB, toB: c.toB });
+	}
+	return out;
+}
+
+function shareOut(c: Stretch, before: RegionParse, after: RegionParse, marks: MarkBytes[]): { mark: SuggestionMark; piece: Piece }[] {
 	const A = slide(before.doc, c.fromA, c.toA);
 	const B = slide(after.doc, c.fromB, c.toB);
 	const aBytes = bytesOf(before, A);
@@ -452,7 +508,9 @@ function shareOut(c: Change, before: RegionParse, after: RegionParse, marks: Mar
 		const at = bBytes?.from ?? aBytes?.from ?? 0;
 		involved = [marks.reduce((best, m) => (distance(m.b, at) < distance(best.b, at) ? m : best))];
 	}
-	if (involved.length === 1) return [{ mark: involved[0].mark, piece: { A, B } }];
+	// a change read as one across a node is drawn whole, by the first of its marks; the others
+	// ride with it
+	if (involved.length === 1 || c.joined) return [{ mark: involved[0].mark, piece: { A, B } }];
 	const clamp = (pos: number | null, lo: number, hi: number) => Math.min(hi, Math.max(lo, pos ?? lo));
 	const out: { mark: SuggestionMark; piece: Piece }[] = [];
 	let prevA = A.from;
@@ -526,14 +584,20 @@ export function placePmSuggestions(doc: PMNode, marks: SuggestionMark[], source:
 		const owned = new Map<SuggestionMark, Piece[]>(group.map((s) => [s, []]));
 		// the node it was is set beside a node once, however many marks changed it
 		const wasAt = new Set<string>();
-		for (const c of diffDocs(before.doc, after.doc)) {
+		for (const c of joinAcrossNodes(splitAtNodes(diffDocs(before.doc, after.doc), before, after), before, after)) {
 			for (const { mark, piece } of shareOut(c, before, after, bytes)) owned.get(mark)!.push(piece);
 		}
+		// a mark with nothing readable of its own - the closing brace of a wrapper whose opening
+		// brace is another mark, whitespace beside a mark that changed words - rides with the marks
+		// of its cluster that did change something the reader sees: placed where they are, drawing
+		// nothing of its own. Only when no mark of the cluster changed anything readable do the
+		// blocks say that something did.
+		const visible = (pieces: Piece[]) => pieces.some((p) => p.A.to > p.A.from || p.B.to > p.B.from);
+		const riders: SuggestionMark[] = [];
+		const anchors: PmSuggestionRange[] = [];
 		for (const [s, pieces] of owned) {
-			// nothing the reader can see changed here: a comment, a macro, whitespace. The blocks say
-			// something did.
-			if (pieces.length === 0) {
-				asBlocks(s);
+			if (!visible(pieces)) {
+				riders.push(s);
 				continue;
 			}
 			const placed = pieces.map((piece) => placeChange(doc, s, piece, before, after, shown));
@@ -562,6 +626,16 @@ export function placePmSuggestions(doc: PMNode, marks: SuggestionMark[], source:
 					} else if (!seen.was && r.was) seen.was = r.was;
 				}
 			}
+			for (const p of placed) if (!p!.partial) for (const r of p!.ranges) if (!r.partial) anchors.push(r);
+		}
+		for (const s of riders) {
+			if (anchors.length === 0) {
+				asBlocks(s);
+				continue;
+			}
+			// at the start of the first mate's range, nothing of its own to draw
+			const at = anchors.reduce((best, r) => (r.from < best.from ? r : best));
+			ranges.push({ id: s.id, from: at.from, to: at.from, restore: s.restore, mine: s.mine, old: [], partial: false, format: true });
 		}
 	}
 	return { ranges, partial, hidden, stale };

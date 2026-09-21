@@ -223,7 +223,7 @@ export function convertNodeToInline(node: Node, ctx: ConversionContext): PmNode[
 		}
 		case 'comment': {
 			// a mid-paragraph comment must be kept as an inline chip: dropped from PM content it
-			// survives only in the orig slice, which regeneration doesn't consult. % consumes to
+			// survives only in the block's bytes, which regeneration doesn't consult. % consumes to
 			// end of line; the SERIALIZER restores the line-ending newline for a chip starting
 			// with %, so the chip's own text stays single-line - a newline baked in here rendered
 			// as a bogus empty second line in the chip.

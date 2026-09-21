@@ -6,7 +6,7 @@
 // raw islands in this phase — the visual editor edits markup structure, source mode edits code.
 //
 // Verbatim capture is the simplest of the three dialects: the CST carries exact UTF-16 offsets
-// on every node, so orig slices come straight off the tree. Typst's tree is flat at the markup
+// on every node, so block spans come straight off the tree. Typst's tree is flat at the markup
 // level (paragraph boundaries are explicit Parbreak nodes, a Hash is a SIBLING of the code
 // expression it introduces), so block grouping is synthesized here.
 import type { SyntaxNode, Tree } from '@lezer/common';
@@ -30,10 +30,21 @@ import {
 	EXPRESSION_KINDS
 } from './inlineConvert';
 import { typstMathToLatex } from './mathTranslate';
-import { bytesSpan, concatSpans, noteSpans, standsFor, type LeafSpan, withAttrs } from '$lib/editor/visual/sourceSpans';
+import {
+	blockSpanOf,
+	bytesSpan,
+	concatSpans,
+	collectMap,
+	noteBlockSpan,
+	noteSpans,
+	rememberParseMap,
+	standsFor,
+	type LeafSpan,
+	withAttrs
+} from '$lib/editor/visual/sourceSpans';
 import { tableSeg } from './tableConvert';
 import { figureSeg } from './figureConvert';
-import { headingSeg, headingCallSeg, listSeg, termSeg, quoteSeg, aloneWithLabel } from './segConvert';
+import { headingSeg, headingCallSeg, listSeg, termSeg, quoteSeg, aloneWithLabel, labelGapOf } from './segConvert';
 
 // one parser for the module: Source::replace reparses incrementally against the previous text,
 // and the converter has no per-document state of its own
@@ -102,9 +113,23 @@ function fenceBlock(k: SyntaxNode, src: string): PmNode | null {
 
 /**
  * The block walker: children of a Markup node -> block segments. Runs at the top level (where
- * the caller stamps orig) and inside list items (where it doesn't). Every segment after the
+ * the caller notes block spans) and inside list items (where it doesn't). Every segment after the
  * first carries the kind of gap the source had before it.
  */
+/** the blocks of nested segments, each segment's first block carrying its bytes, so a container
+ *  keeps its untouched children as the file had them */
+export function notedBlocks(segs: Seg[]): PmNode[] {
+	const out: PmNode[] = [];
+	let prevEnd = 0;
+	for (const s of segs) {
+		if (s.blocks.length > 0 && s.from >= prevEnd && s.to > s.from) {
+			out.push(noteBlockSpan(s.blocks[0], { srcFrom: s.from, srcTo: s.to, size: s.blocks.length }), ...s.blocks.slice(1));
+			prevEnd = s.to;
+		} else out.push(...s.blocks);
+	}
+	return out;
+}
+
 export function convertMarkup(kids: SyntaxNode[], src: string): Seg[] {
 	const segs: Seg[] = [];
 	let buf: SyntaxNode[] = [];
@@ -234,6 +259,7 @@ export function convertMarkup(kids: SyntaxNode[], src: string): Seg[] {
 							'block_math',
 							{
 								label: labelNode ? src.slice(labelNode.from + 1, labelNode.to - 1) : null,
+								labelGap: labelGapOf(src, k.to, labelNode),
 								numbered: false,
 								environment: null,
 								lineLabels: [],
@@ -289,12 +315,6 @@ function includeOrRaw(hash: SyntaxNode, stmt: SyntaxNode, last: SyntaxNode, src:
 	return rawBlock(src.slice(hash.from, last.to), hash.from);
 }
 
-/** Recreate `node` with an `orig` attr; types that don't declare it pass through unchanged. */
-function withOrig(node: PmNode, orig: Record<string, unknown>): PmNode {
-	if (!node.type.spec.attrs || !('orig' in node.type.spec.attrs)) return node;
-	return withAttrs(node, { ...node.attrs, orig });
-}
-
 export type TypstParseResult = {
 	doc: PmNode;
 };
@@ -314,62 +334,55 @@ export function typstToProseMirror(source: string): TypstParseResult {
 	const kids = children(parseTree(body).topNode);
 	const segs = convertMarkup(kids, body);
 
-	// stamp-and-push, the shared pushBlocks contract: every block gets a seq; multi-block
-	// constructs (a list run) share a group so verbatim substitution is all-or-nothing
+	// note-and-push, the shared pushBlocks contract: a trustworthy span is noted on the construct's
+	// first block; a multi-block construct (a list run) is one span, so verbatim substitution is
+	// all-or-nothing. Offsets count into the markup after the byte order mark
 	const result: PmNode[] = [];
-	let seq = 0;
 	let prevEnd = 0;
-	let group = 0;
-	let lead = bom ? '\uFEFF' : '';
 	for (const s of segs) {
 		if (s.blocks.length === 0) continue;
 		const spanOk = s.from >= prevEnd && s.to <= body.length && s.from < s.to;
-		const slice = spanOk ? body.slice(s.from, s.to) : null;
-		const pre = spanOk ? lead + body.slice(prevEnd, s.from) : null;
-		const g = spanOk && s.blocks.length > 1 ? group++ : null;
-		for (let b = 0; b < s.blocks.length; b++) {
-			const sq = seq++;
-			if (slice == null) {
-				result.push(withOrig(s.blocks[b], { seq: sq }));
-				continue;
-			}
-			const orig: Record<string, unknown> = { latex: slice, pre: b === 0 ? pre : '', seq: sq, norm: null, start: s.from };
-			if (g != null) {
-				orig.group = g;
-				orig.groupIndex = b;
-				orig.groupSize = s.blocks.length;
-			}
-			result.push(withOrig(s.blocks[b], orig));
-		}
-		if (spanOk) {
-			prevEnd = Math.max(prevEnd, s.to);
-			lead = '';
-		}
+		if (spanOk) result.push(noteBlockSpan(s.blocks[0], { srcFrom: s.from, srcTo: s.to, size: s.blocks.length }), ...s.blocks.slice(1));
+		else result.push(...s.blocks);
+		if (spanOk) prevEnd = Math.max(prevEnd, s.to);
 	}
 
 	// an empty or whitespace-only file still needs one paragraph (doc content is block+); its
 	// bytes ride along as the paragraph's protected leading gap, so even "\r\n" round-trips
 	if (result.length === 0) {
-		const orig = { latex: '', pre: source, seq: 0, norm: null, start: body.length };
-		return {
-			doc: buildNode('doc', { docTail: { text: '', afterSeq: 0 }, typFile }, [withOrig(buildNode('paragraph', { indent: 'auto' }), orig)])
-		};
+		const empty = noteBlockSpan(buildNode('paragraph', { indent: 'auto' }), { srcFrom: body.length, srcTo: body.length, size: 1 });
+		return { doc: known(buildNode('doc', { typFile }, [empty]), body) };
 	}
 
-	// trailing bytes past the last block belong to no node; stash them so a pristine save
-	// reproduces the file's exact tail (an EMPTY tail protects a missing final newline too)
-	const merged = mergeAdjacentRawBlocks(buildNode('doc', { docTail: { text: body.slice(prevEnd), afterSeq: seq - 1 }, typFile }, result));
-	return { doc: restampGaps(merged) };
+	const merged = mergeAdjacentRawBlocks(buildNode('doc', { typFile }, result), body);
+	return { doc: known(restampGaps(merged, body), body) };
+}
+
+/** the document knows its blocks' gaps and constructs from here; parseTypstFile registers it
+ *  against the file, where the bytes are written back from */
+function known(doc: PmNode, body: string): PmNode {
+	rememberParseMap(doc, collectMap(doc), { text: body, from: 0, to: body.length }, false);
+	return doc;
 }
 
 /** merged raw islands come back without their typGap; every top-level gap is re-read from the
- *  pre bytes, which the merge kept exact */
-function restampGaps(doc: PmNode): PmNode {
+ *  bytes between the spans, which the merge kept exact */
+function restampGaps(doc: PmNode, body: string): PmNode {
 	const kids: PmNode[] = [];
 	let changed = false;
+	// where the construct before ended; null once one could not be placed
+	let prevEnd: number | null = 0;
+	// blocks still to come of the construct whose span was noted on an earlier block
+	let members = 0;
 	doc.forEach((child, _offset, i) => {
-		const pre = (child.attrs.orig as { pre?: unknown } | null)?.pre;
-		if (i === 0 || typeof pre !== 'string') {
+		const span = blockSpanOf(child);
+		const pre = i > 0 && span && prevEnd != null && prevEnd <= span.srcFrom ? body.slice(prevEnd, span.srcFrom) : null;
+		if (span) {
+			prevEnd = span.srcTo;
+			members = span.size - 1;
+		} else if (members > 0) members--;
+		else prevEnd = null;
+		if (pre == null) {
 			kids.push(child);
 			return;
 		}

@@ -1,6 +1,15 @@
 import { describe, it, expect } from 'vitest';
+import { EditorState } from 'prosemirror-state';
+import { Fragment, type Node as PMNode } from 'prosemirror-model';
+import { parseLatexFile } from '$lib/workspace/latexRoundtrip';
+import { parseCarryPlugin } from '$lib/editor/visual/parseCarry';
 import {
+	adoptParse,
 	alignedSpans,
+	blockOriginOf,
+	originsOf,
+	parseOf,
+	withoutOrigins,
 	charsOf,
 	concatSpans,
 	nearestPm,
@@ -86,5 +95,78 @@ describe('lookups', () => {
 		expect(nearestSource(spans, 0, -1)).toBe(0);
 		expect(nearestSource(spans, 12, -1)).toBe(16);
 		expect(nearestSource([], 3)).toBeNull();
+	});
+});
+
+describe('parse origins', () => {
+	const SRC = '\\documentclass{article}\n\\begin{document}\n\nAlpha one.\n\nBeta two.\n\nGamma three.\n\n\\end{document}\n';
+	const parse = () => parseLatexFile(SRC);
+	const retyped = (child: PMNode, text: string) => child.type.create(child.attrs, child.type.schema.text(text), child.marks);
+	const fresh = (child: PMNode) => child.type.create(child.attrs, child.content, child.marks);
+	const withChild = (doc: PMNode, i: number, child: PMNode) => {
+		const kids: PMNode[] = [];
+		doc.forEach((c, _o, k) => kids.push(k === i ? child : c));
+		return doc.copy(Fragment.fromArray(kids));
+	};
+
+	it('knows every block of the parse by node, with its bytes, its gap and the tail', () => {
+		const { doc, origins } = parse();
+		expect(origins.origins.map((o) => o.text)).toEqual(['Alpha one.', 'Beta two.', 'Gamma three.']);
+		expect(origins.origins.map((o) => o.pre)).toEqual(['\n\n', '\n\n', '\n\n']);
+		expect(origins.tail).toBe('\n\n');
+		expect(origins.verbatim).toBe(true);
+		expect(originsOf(doc).origins.map((o) => o?.index)).toEqual([0, 1, 2]);
+	});
+
+	it('takes an equal node standing in the parse’s order for the parse’s own', () => {
+		const { doc } = parse();
+		const same = withChild(doc, 1, fresh(doc.child(1)));
+		const { origins, was } = originsOf(same);
+		expect(origins.map((o) => o?.index)).toEqual([0, 1, 2]);
+		expect(was).toEqual([null, null, null]);
+		expect(blockOriginOf(same.child(1))?.index).toBe(1);
+	});
+
+	it('tells a changed block by a leaf the edit left as it was, else by its place between known blocks', () => {
+		const { doc } = parse();
+		const edited = withChild(doc, 1, retyped(doc.child(1), 'Beta changed.'));
+		const { origins, was } = originsOf(edited);
+		expect(origins.map((o) => o?.index ?? null)).toEqual([0, null, 2]);
+		expect(was[1]?.index).toBe(1);
+		// two changed blocks in a row, one keeping a leaf of the parse: the other is placed after it
+		const kept = doc.child(0).type.create(doc.child(0).attrs, [doc.child(0).firstChild!, doc.type.schema.text(' more')]);
+		const both = withChild(withChild(doc, 0, kept), 1, retyped(doc.child(1), 'Beta changed.'));
+		const twice = originsOf(both);
+		expect(twice.origins.map((o) => o?.index ?? null)).toEqual([null, null, 2]);
+		expect(twice.was.map((o) => o?.index ?? null)).toEqual([0, 1, null]);
+	});
+
+	it('leaves a block with no place in the parse unplaced', () => {
+		const { doc } = parse();
+		const kids: PMNode[] = [];
+		doc.forEach((c) => kids.push(c));
+		kids.splice(1, 0, retyped(doc.child(1), 'Inserted.'), retyped(doc.child(1), 'Also inserted.'));
+		const { origins, was } = originsOf(doc.copy(Fragment.fromArray(kids)));
+		expect(origins.map((o) => o?.index ?? null)).toEqual([0, null, null, 1, 2]);
+		expect(was).toEqual([null, null, null, null, null]);
+	});
+
+	it('a document that forgot its bytes still knows its gaps, and never writes the bytes back', () => {
+		const { doc } = parse();
+		const forgot = withoutOrigins(doc);
+		const { parse: p, origins } = originsOf(forgot);
+		expect(p?.verbatim).toBe(false);
+		expect(origins.map((o) => o?.index)).toEqual([0, 1, 2]);
+		expect(origins[1]?.pre).toBe('\n\n');
+	});
+
+	it('hands the parse on to the documents an editor makes, and to a patched one on adoption', () => {
+		const parsed = parse();
+		const state = EditorState.create({ doc: parsed.doc, plugins: [parseCarryPlugin] });
+		const typed = state.apply(state.tr.insertText(' typed', 8));
+		expect(parseOf(typed.doc)).toBe(parsed.origins);
+		const again = parse();
+		adoptParse(typed.doc, again.origins);
+		expect(parseOf(typed.doc)).toBe(again.origins);
 	});
 });

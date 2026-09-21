@@ -3,7 +3,7 @@ import type { SyntaxNode } from '@lezer/common';
 import { buildNode, type PmNode } from './builders';
 import { children, childOf, convertInline, unquote } from './inlineConvert';
 import { tableParts, buildTableNode, type TableParts } from './tableConvert';
-import { aloneWithLabel } from './segConvert';
+import { aloneWithLabel, labelGapOf } from './segConvert';
 import type { Seg } from './converter';
 import { ARG_PUNCT } from './tableConvert';
 
@@ -95,6 +95,7 @@ export function figureSeg(kids: SyntaxNode[], i: number, src: string): { seg: Se
 	if (!alone) return null;
 	const labelNode = alone.label;
 	const label = labelNode ? src.slice(labelNode.from + 1, labelNode.to - 1) : null;
+	const labelGap = labelGapOf(src, call.to, labelNode);
 	let node: PmNode;
 	if (parts) {
 		const caption = parts.captionMarkup ? convertInline(children(parts.captionMarkup), src, []) : [];
@@ -104,6 +105,7 @@ export function figureSeg(kids: SyntaxNode[], i: number, src: string): { seg: Se
 				src: parts.img.src,
 				options: parts.img.options,
 				label,
+				labelGap,
 				numbered: parts.isFigure,
 				showCaption: caption.length > 0
 			},
@@ -113,7 +115,7 @@ export function figureSeg(kids: SyntaxNode[], i: number, src: string): { seg: Se
 		const table = buildTableNode(tParts!.table);
 		if (!table) return null;
 		const caption = tParts!.captionMarkup ? convertInline(children(tParts!.captionMarkup), src, []) : [];
-		node = buildNode('table_wrapper', { label, showNotes: false }, [buildNode('table_caption', null, caption), table]);
+		node = buildNode('table_wrapper', { label, labelGap, showNotes: false }, [buildNode('table_caption', null, caption), table]);
 	}
 	const to = (labelNode ?? call).to;
 	return { seg: { blocks: [node], from: hash.from, to }, next: alone.next };

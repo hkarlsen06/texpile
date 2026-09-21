@@ -67,6 +67,7 @@ import { pmComments } from '$lib/editor/visual/extensions/pmComments';
 import { listRuleWithoutIndent } from './listItemIndent';
 import type { CommentAnchor } from '$lib/comments/anchor';
 import type { SourceAnchorFn } from '$lib/editor/visual/extensions/pmComments';
+import { parseCarryPlugin } from '$lib/editor/visual/parseCarry';
 
 export type LatexEditorSetup = {
 	/** resolved by the caller's dynamic import so mathlive stays off the critical path */
@@ -95,6 +96,7 @@ export function latexEditorPlugins(setup: LatexEditorSetup): Plugin[] {
 		addCommentLabel
 	} = setup;
 	return [
+		parseCarryPlugin,
 		gapCursor(),
 		// drop cursor is inline-styled (not CSS-targetable) and its default black vanishes on dark
 		dropCursor({ color: 'var(--color-primary-500)', width: 2 }),

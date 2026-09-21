@@ -6,7 +6,9 @@ import type { Node as PMNode } from 'prosemirror-model';
 import { activeSuggestions, takeTypedSides } from '$lib/comments/activeSuggestions.svelte';
 import { placePmSuggestions } from '$lib/editor/visual/extensions/pmSuggestionsPlace';
 import { padTables } from '$lib/editor/visual/padTables';
-import { computeBlockPatch, syncOrigAttrs } from '$lib/editor/visual/blockPatch';
+import { computeBlockPatch, syncParseAttrs } from '$lib/editor/visual/blockPatch';
+import { parseCarryPlugin } from '$lib/editor/visual/parseCarry';
+import { adoptParse } from '$lib/editor/visual/sourceSpans';
 import type { ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
 import {
 	FORMATS,
@@ -70,7 +72,8 @@ async function session(f: Format, original: string, run: number): Promise<{ text
 	let state!: EditorState;
 	const mount = () => {
 		meta = f.parse(text);
-		state = EditorState.create({ doc: padTables(meta.doc) });
+		// the editor's own plugin list hands the parse on to every document a transaction makes
+		state = EditorState.create({ doc: padTables(meta.doc), plugins: [parseCarryPlugin] });
 	};
 	mount();
 	const make = () =>
@@ -96,9 +99,11 @@ async function session(f: Format, original: string, run: number): Promise<{ text
 				const patch = computeBlockPatch(state.doc, parsed.doc);
 				const tr = state.tr;
 				if (patch) tr.replaceWith(patch.from, patch.to, patch.nodes);
-				syncOrigAttrs(tr, parsed.doc);
-				if (!tr.steps.length) return false;
-				state = state.apply(tr);
+				syncParseAttrs(tr, parsed.doc);
+				if (tr.steps.length) state = state.apply(tr);
+				// the document is the parse's from here on, steps or none: the same content may now
+				// come from other bytes (a restored "..." the parser reads as its ellipsis)
+				adoptParse(state.doc, parsed.origins);
 				text = f.serialize(meta, state.doc);
 				return true;
 			},
@@ -168,7 +173,7 @@ async function suggestTyping(f: Format, original: string, edits: Edit[]) {
 	takeTypedSides();
 	let text = original;
 	const meta = f.parse(text);
-	let state = EditorState.create({ doc: meta.doc });
+	let state = EditorState.create({ doc: meta.doc, plugins: [parseCarryPlugin] });
 	const ctl = new CommentsController({
 		root: () => ROOT,
 		preferredAuthor: () => who,

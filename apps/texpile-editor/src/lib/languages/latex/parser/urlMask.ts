@@ -1,6 +1,6 @@
 // \url and \href take their URL verbatim, but unified-latex tokenizes the argument like prose: a %
 // starts a comment that swallows the closing brace, a # is a parameter token. The URL argument is
-// masked to same-length placeholders before the parse (positions stay valid for the orig capture)
+// masked to same-length placeholders before the parse (positions stay valid for the span capture)
 // and every string in the AST is unmasked after it.
 const PERCENT = '';
 const HASH = '';

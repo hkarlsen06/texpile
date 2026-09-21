@@ -1,6 +1,6 @@
 // The Typst visual round trip: source -> ProseMirror -> source. Two properties carry the whole
 // design, same as the LaTeX and Markdown siblings: a no-edit save is BYTE-identical (verbatim
-// orig substitution), and regeneration (what an edited block goes through) reaches a fixed
+// verbatim substitution), and regeneration (what an edited block goes through) reaches a fixed
 // point instead of drifting on every save.
 import { describe, it, expect } from 'vitest';
 import { EditorState } from '@codemirror/state';
@@ -331,7 +331,7 @@ describe('converted document shape', () => {
 		const cells = [];
 		row.forEach((c) => cells.push(c));
 		cells.push(typSchema.nodes.table_cell.createAndFill()!);
-		const grown = table.type.create({ ...table.attrs, orig: null }, typSchema.nodes.table_row.create(null, cells));
+		const grown = table.type.create(table.attrs, typSchema.nodes.table_row.create(null, cells));
 		const out = serializeToTypst(typSchema.nodes.doc.create(null, [grown]));
 		expect(out).toContain('columns: 3');
 		expect(out).not.toContain('(auto, 1fr)');
@@ -399,13 +399,13 @@ describe('converted document shape', () => {
 		const island = blocks.find((n) => n.type.name === 'raw_latex' && n.textContent.startsWith('$ #calc'))!;
 		expect(island.textContent).toBe('$ #calc.pow(2, 3) $ <eq:id>');
 		// serializer re-emits the label after the closing dollar (stored typst, latex untouched)
-		const out = serializeToTypst(typSchema.nodes.doc.create(null, [math.type.create({ ...math.attrs, orig: null }, math.content)]));
+		const out = serializeToTypst(typSchema.nodes.doc.create(null, [math.type.create(math.attrs, math.content)]));
 		expect(out).toBe('$ E = m c^2 $ <eq:mass>');
 	});
 
-	it('a label ADDED through the gear reaches the file (attrs-only edit, orig still present)', () => {
-		// the gear's setNodeMarkup changes attrs and nothing else, so orig survives on the node;
-		// the label must still beat the emit-orig-verbatim shortcut
+	it('a label ADDED through the gear reaches the file (attrs-only edit)', () => {
+		// the gear's setNodeMarkup changes attrs and nothing else: another node, which the parse
+		// no longer knows, so the block regenerates with its label
 		const doc = docOf('$ E = m c^2 $\n');
 		const eq = doc.child(0);
 		expect(eq.attrs.label).toBeNull();
@@ -448,7 +448,7 @@ describe('image drag-resize (wysiwym)', () => {
 	it('snapped pixel width serializes as a percent, replacing an existing width option', () => {
 		const doc = typstToProseMirror('#figure(image("a.png", width: 70%, fit: "cover"), caption: [Cap])\n').doc;
 		const img = doc.child(0);
-		const resized = img.type.create({ ...img.attrs, orig: null, width: 300, height: 200, maxWidth: 600 }, img.content, img.marks);
+		const resized = img.type.create({ ...img.attrs, width: 300, height: 200, maxWidth: 600 }, img.content, img.marks);
 		const out = serializeToTypst(typSchema.nodes.doc.create(null, [resized]));
 		expect(out).toContain('image("a.png", width: 50%, fit: "cover")');
 	});

@@ -4,9 +4,9 @@
 import type { SyntaxNode } from '@lezer/common';
 import { buildNode, textNodes, collapseTextNodes, type PmNode } from './builders';
 import { children, childOf, convertInline, chip, rawBlock } from './inlineConvert';
-import { convertMarkup, ensureBlocks, restOnlySpace, withGap, gapKind, type Seg } from './converter';
+import { convertMarkup, ensureBlocks, notedBlocks, restOnlySpace, withGap, gapKind, type Seg } from './converter';
 import { ARG_PUNCT } from './tableConvert';
-
+import { noteBlockSpan } from '$lib/editor/visual/sourceSpans';
 export function aloneWithLabel(kids: SyntaxNode[], after: number): { label: SyntaxNode | null; next: number } | null {
 	let j = after;
 	if (kids[j]?.name === 'Space' && kids[j + 1]?.name === 'Label') j++;
@@ -15,13 +15,22 @@ export function aloneWithLabel(kids: SyntaxNode[], after: number): { label: Synt
 	return restOnlySpace(kids, j) ? { label, next: j } : null;
 }
 
+/** how the source set a <label> off from the element ending at `end`: the bytes between when they
+ *  hold a line end, else null (a space, the serializer's default) */
+export function labelGapOf(src: string, end: number, labelNode: SyntaxNode | null): string | null {
+	if (!labelNode) return null;
+	const between = src.slice(end, labelNode.from);
+	return /\n/.test(between) ? between : null;
+}
+
 export function headingSeg(k: SyntaxNode, src: string, labelNode: SyntaxNode | null = null): Seg {
 	const marker = childOf(k, 'HeadingMarker');
 	const level = Math.min(6, Math.max(1, marker ? marker.to - marker.from : 1));
 	const markup = childOf(k, 'Markup');
 	const content = markup ? convertInline(children(markup), src, []) : [];
 	const label = labelNode ? src.slice(labelNode.from + 1, labelNode.to - 1) : null;
-	return { blocks: [buildNode('heading', { level, numbered: true, label }, content)], from: k.from, to: (labelNode ?? k).to };
+	const labelGap = labelGapOf(src, k.to, labelNode);
+	return { blocks: [buildNode('heading', { level, numbered: true, label, labelGap }, content)], from: k.from, to: (labelNode ?? k).to };
 }
 
 export function headingCallSeg(kids: SyntaxNode[], i: number, src: string): { seg: Seg; next: number } | null {
@@ -130,7 +139,11 @@ export function listSeg(kids: SyntaxNode[], i: number, src: string): { seg: Seg;
 	const start = numberOf(items[0]) ?? 1;
 	const blocks = items.map((item, idx) => {
 		const markup = childOf(item, 'Markup');
-		const inner = markup ? convertMarkup(children(markup), src).flatMap((s) => s.blocks) : [];
+		const inner = markup ? notedBlocks(convertMarkup(children(markup), src)) : [];
+		// an item with nothing typed yet: its paragraph has no bytes, and stands where they would go
+		const body = ensureBlocks(inner);
+		if (inner.length === 0)
+			noteBlockSpan(body[0], { srcFrom: markup ? markup.from : item.to, srcTo: markup ? markup.from : item.to, size: 1 });
 		const node = buildNode(
 			'list',
 			{
@@ -142,7 +155,7 @@ export function listSeg(kids: SyntaxNode[], i: number, src: string): { seg: Seg;
 				collapsed: false,
 				preBody: null
 			},
-			attachComments(ensureBlocks(inner), trailing[idx])
+			attachComments(body, trailing[idx])
 		);
 		// a loose list (blank lines between items) stays loose: typst spaces it differently
 		return idx === 0 ? node : withGap(node, gapKind(src.slice(items[idx - 1].to, item.from)));
@@ -173,8 +186,15 @@ export function termSeg(kids: SyntaxNode[], i: number, src: string): { seg: Seg;
 	const blocks = items.map((item, idx) => {
 		const markups = children(item).filter((c) => c.name === 'Markup');
 		const title = buildNode('term_title', null, markups[0] ? convertInline(children(markups[0]), src, []) : []);
-		const desc = markups[1] ? convertMarkup(children(markups[1]), src).flatMap((s) => s.blocks) : [];
-		const node = buildNode('term_item', null, [title, ...attachComments(ensureBlocks(desc), trailing[idx])]);
+		const desc = markups[1] ? notedBlocks(convertMarkup(children(markups[1]), src)) : [];
+		const descBody = ensureBlocks(desc);
+		if (desc.length === 0)
+			noteBlockSpan(descBody[0], {
+				srcFrom: markups[1] ? markups[1].from : item.to,
+				srcTo: markups[1] ? markups[1].from : item.to,
+				size: 1
+			});
+		const node = buildNode('term_item', null, [title, ...attachComments(descBody, trailing[idx])]);
 		return idx === 0 ? node : withGap(node, gapKind(src.slice(items[idx - 1].to, item.from)));
 	});
 	return { seg: { blocks, from: items[0].from, to: items[items.length - 1].to }, next: j };
@@ -197,6 +217,6 @@ export function quoteSeg(kids: SyntaxNode[], i: number, src: string): { seg: Seg
 	const bool = children(real[0]).find((c) => c.name === 'Bool');
 	if (!bool || src.slice(bool.from, bool.to) !== 'true') return null;
 	const markup = childOf(real[1], 'Markup');
-	const blocks = markup ? convertMarkup(children(markup), src).flatMap((s) => s.blocks) : [];
+	const blocks = markup ? notedBlocks(convertMarkup(children(markup), src)) : [];
 	return { seg: { blocks: [buildNode('blockquote', null, ensureBlocks(blocks))], from: hash.from, to: call.to }, next: i + 2 };
 }

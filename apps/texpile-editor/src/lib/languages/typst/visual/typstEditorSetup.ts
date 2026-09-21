@@ -5,6 +5,7 @@ import type { EditorProps } from 'prosemirror-view';
 import { Fragment, Slice, type Node as PmNode } from 'prosemirror-model';
 import { typstToProseMirror } from './converter';
 import { typstCopyPlugin } from './clipboard';
+import { parseCarryPlugin } from '$lib/editor/visual/parseCarry';
 import { createSuggestPlugin } from '$lib/editor/visual/extensions/suggest/suggestPlugin';
 import { selectAllScoped } from '$lib/editor/visual/selectAllScoped';
 import { selectDocStart, selectDocEnd } from '$lib/editor/visual/selectDocBoundary';
@@ -89,8 +90,8 @@ const typInputRules = [
 
 // Pasted TYPST SOURCE becomes rich nodes - the typst counterpart of the latex clipboard.
 // Gated on structural markers so ordinary prose still pastes as plain text; html-flavored
-// pastes keep ProseMirror's own path. Parse-time orig stamps are stripped: they describe the
-// clipboard bytes, not this document, and a stale slice must never reach the serializer.
+// pastes keep ProseMirror's own path. The parse knows nothing of this document, so the pasted
+// blocks carry no origins and are always written out afresh.
 const pasteTypstPlugin = new Plugin({
 	props: {
 		handlePaste(view, event) {
@@ -101,9 +102,7 @@ const pasteTypstPlugin = new Plugin({
 			try {
 				const { doc } = typstToProseMirror(text);
 				const blocks: PmNode[] = [];
-				doc.forEach((c) =>
-					blocks.push('orig' in (c.type.spec.attrs ?? {}) ? c.type.create({ ...c.attrs, orig: null }, c.content, c.marks) : c)
-				);
+				doc.forEach((c) => blocks.push(c));
 				if (blocks.length === 0) return false;
 				const frag = Fragment.fromArray(blocks);
 				// a single pasted paragraph merges inline into the current one; anything more
@@ -147,6 +146,7 @@ export function typstEditorPlugins(setup: TypstEditorSetup): Plugin[] {
 		addCommentLabel
 	} = setup;
 	return [
+		parseCarryPlugin,
 		pasteTypstPlugin,
 		typstCopyPlugin,
 		gapCursor(),

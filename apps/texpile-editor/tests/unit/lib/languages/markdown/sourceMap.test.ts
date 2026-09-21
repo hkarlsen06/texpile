@@ -2,21 +2,13 @@
 // written out afresh maps its runs to the text it made
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { Fragment } from 'prosemirror-model';
 import type { Node as PMNode } from 'prosemirror-model';
 import { parseMarkdownFile, serializeMarkdownFileDetailed } from '$lib/languages/markdown/visual/roundtrip';
-import { pmToSource, sourceToPm } from '$lib/editor/visual/sourceSpans';
+import { pmToSource, sourceToPm, withoutOrigins } from '$lib/editor/visual/sourceSpans';
 import { auditMap, coverage } from '../../editor/visual/sourceMapAudit';
 import { FORMATS } from '../../workspace/visualEditsFuzz';
 
 const files = FORMATS[1].files;
-
-/** the same document with no memory of its source: every block regenerates */
-function regenerated(doc: PMNode): PMNode {
-	const kids: PMNode[] = [];
-	doc.forEach((child) => kids.push(child.type.create({ ...child.attrs, orig: null }, child.content, child.marks)));
-	return doc.type.create({ ...doc.attrs, docTail: null }, Fragment.fromArray(kids), doc.marks);
-}
 
 function posOf(doc: PMNode, needle: string): number {
 	let found = -1;
@@ -91,7 +83,7 @@ describe('the Markdown serializer source map', () => {
 		const failures: string[] = [];
 		const audits = files.map((f) => {
 			const parsed = parseMarkdownFile(readFileSync(f, 'utf8'));
-			const doc = regenerated(parsed.doc);
+			const doc = withoutOrigins(parsed.doc);
 			const out = serializeMarkdownFileDetailed(parsed, doc);
 			const a = auditMap(doc, out.text, out.map.leaves);
 			for (const p of a.problems.slice(0, 5)) failures.push(`${f}: ${p}`);
@@ -108,7 +100,7 @@ describe('the Markdown serializer source map', () => {
 
 	it('maps a regenerated paragraph both ways, escapes included', () => {
 		const parsed = parseMarkdownFile('Hello *world*, 100% of $x$ and a\\*b.\n');
-		const doc = regenerated(parsed.doc);
+		const doc = withoutOrigins(parsed.doc);
 		const { text, map } = serializeMarkdownFileDetailed(parsed, doc);
 		const world = posOf(doc, 'world');
 		expect(pmToSource(map.leaves, world + 1)).toBe(text.indexOf('world') + 1);

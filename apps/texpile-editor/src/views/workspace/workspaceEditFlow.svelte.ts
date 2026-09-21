@@ -2,6 +2,7 @@
 // unsaved-edit gate, on-disk change detection, tab activation/closing, and the load-the-
 // active-file effect that ties them together.
 import { untrack } from 'svelte';
+import { noParse, parseOf } from '$lib/editor/visual/sourceSpans';
 import { SavePipeline } from '$lib/workspace/savePipeline.svelte';
 import { ExternalChangeWatcher } from '$lib/workspace/externalChange.svelte';
 import { UnsavedGuard } from '$lib/workspace/unsavedGuard.svelte';
@@ -175,7 +176,9 @@ export class WorkspaceEditFlow {
 			postamble: doc.docMeta.postamble,
 			hadDocumentEnv: doc.docMeta.hadDocumentEnv,
 			warnings: [],
-			map: doc.sourceMap
+			map: doc.sourceMap,
+			// the parse the edited document still answers to, handed on by the editor's own plugin
+			origins: parseOf(doc.lastDoc) ?? noParse()
 		});
 	}
 
