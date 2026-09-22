@@ -6,6 +6,7 @@ import { buildAnchor } from '$lib/comments/anchor';
 import { editMode, takeTypedSides, type SuggestionMark } from '$lib/comments/activeSuggestions.svelte';
 import { placePmSuggestions } from '$lib/editor/visual/extensions/pmSuggestionsPlace';
 import { pmSuggestions, pmSuggestionsKey, setPmSuggestions } from '$lib/editor/visual/extensions/pmSuggestions';
+import { createCursorPlugin } from '$lib/editor/visual/extensions/cursor-plugin';
 import { parseLatexFile, parseLatexRegion } from '$lib/workspace/latexRoundtrip';
 
 const SOURCE =
@@ -128,5 +129,25 @@ it('draws old words with the marks they had, one span a character for the line b
 	const old = view.dom.querySelector('.pm-suggest-old')!;
 	expect(old.querySelector('strong')).not.toBeNull();
 	expect([...old.querySelectorAll('[data-i]')].map((e) => e.getAttribute('data-i'))).toEqual(['0', '1', '2']);
+	view.destroy();
+});
+
+// a selection over struck words lays its colour over theirs; it used to write its own into the variable
+// the words carry theirs in, and taking it away again left them with none
+it('keeps struck words in their own tint while a selection crosses them and after', () => {
+	const host = document.body.appendChild(document.createElement('div'));
+	const view = new EditorView(host, { state: EditorState.create({ doc: parsed.doc, plugins: [pmSuggestions(), createCursorPlugin()] }) });
+	setPmSuggestions(view, place([mark('replace', 'driven', 'led')]).ranges);
+	const old = view.dom.querySelector<HTMLElement>('.pm-suggest-old')!;
+	const own = old.style.getPropertyValue('--range-tint');
+	expect(own).toContain('--diff-delete-tint');
+
+	view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 2, 30)));
+	expect(old.classList.contains('pm-range-selected')).toBe(true);
+	expect(old.style.getPropertyValue('--range-tint')).toBe(own);
+
+	view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 2)));
+	expect(old.classList.contains('pm-range-selected')).toBe(false);
+	expect(old.style.getPropertyValue('--range-tint')).toBe(own);
 	view.destroy();
 });

@@ -2,6 +2,20 @@
 import { DOMSerializer, type Node as PMNode, type Schema } from 'prosemirror-model';
 import type { GoneContent, OldRun } from './pmSuggestionsPlace';
 import { renderStaticMath } from './mathlivebridge/mathStatic';
+import { tintElement } from '$lib/editor/visual/highlight/paintRange';
+
+const SUGGESTION_TINTS = {
+	new: ['var(--diff-insert-tint)', 18, 34],
+	old: ['var(--diff-delete-tint)', 16, 30],
+	partial: ['var(--color-warning-500)', 10, 20]
+} as const;
+
+/** a suggestion's colour at two strengths, so a focused one stands out of its neighbours: words put in,
+ *  words taken out, and a node only partly changed */
+export function suggestionTint(kind: keyof typeof SUGGESTION_TINTS, focused: boolean): string {
+	const [color, plain, strong] = SUGGESTION_TINTS[kind];
+	return `color-mix(in srgb, ${color} ${focused ? strong : plain}%, transparent)`;
+}
 
 let graphemes: Intl.Segmenter | undefined;
 const serializers = new WeakMap<Schema, DOMSerializer>();
@@ -33,6 +47,7 @@ export function oldWordsElement(schema: Schema, runs: OldRun[], id: string, focu
 	graphemes ??= new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 	const span = document.createElement('span');
 	span.className = `pm-suggest-old${focused ? ' pm-suggest-focused' : ''}`;
+	tintElement(span, suggestionTint('old', focused));
 	span.dataset.comment = id;
 	let offset = 0;
 	for (const run of runs) {
@@ -65,6 +80,7 @@ export function oldNodeElement(node: PMNode, id: string, focused: boolean): HTML
 	const block = node.isBlock;
 	const holder = document.createElement(block ? 'div' : 'span');
 	holder.className = `pm-suggest-old pm-suggest-was${focused ? ' pm-suggest-focused' : ''}`;
+	tintElement(holder, suggestionTint('old', focused));
 	holder.dataset.comment = id;
 	holder.contentEditable = 'false';
 	if (isMath(node)) holder.appendChild(renderStaticMath(node.textContent, block));
@@ -95,6 +111,7 @@ function runsElement(schema: Schema, runs: OldRun[]): HTMLElement {
 export function goneBlocksElement(schema: Schema, gone: GoneContent, id: string, focused: boolean): HTMLElement {
 	const holder = document.createElement('div');
 	holder.className = `pm-suggest-old pm-suggest-gone${focused ? ' pm-suggest-focused' : ''}`;
+	tintElement(holder, suggestionTint('old', focused));
 	holder.dataset.comment = id;
 	holder.contentEditable = 'false';
 	const serializer = serializerFor(schema);

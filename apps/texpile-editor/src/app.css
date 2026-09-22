@@ -727,30 +727,18 @@ select.input {
 	width: 20px;
 }
 
-.TexpileEditor .pm-suggest-new {
-	background-color: color-mix(in srgb, var(--diff-insert-tint) 18%, transparent);
-}
+/* a suggestion's tints come from the range painter (suggestionTint in pmSuggestionWidgets.ts) */
 .TexpileEditor .pm-suggest-old {
-	background-color: color-mix(in srgb, var(--diff-delete-tint) 16%, transparent);
 	text-decoration: line-through;
 	user-select: none;
 }
-/* selected old words: the tint stays text high under the selection color, as it does where the
+/* selected old words: their own tint stays text high under the selection color, as it does where the
    browser paints over new words, and the selection color alone fills the rest of the band */
-.TexpileEditor .pm-suggest-old.pm-range {
-	--old-words-tint: color-mix(in srgb, var(--diff-delete-tint) 16%, transparent);
+.TexpileEditor .pm-suggest-old.pm-range-selected {
 	background-color: transparent;
-	background-image: linear-gradient(var(--range-tint), var(--range-tint)), linear-gradient(var(--old-words-tint), var(--old-words-tint));
+	background-image:
+		linear-gradient(var(--editor-selection), var(--editor-selection)), linear-gradient(var(--range-tint), var(--range-tint));
 	background-clip: border-box, content-box;
-}
-.TexpileEditor .pm-suggest-old.pm-suggest-focused.pm-range {
-	--old-words-tint: color-mix(in srgb, var(--diff-delete-tint) 30%, transparent);
-}
-.TexpileEditor .pm-suggest-new.pm-suggest-focused {
-	background-color: color-mix(in srgb, var(--diff-insert-tint) 34%, transparent);
-}
-.TexpileEditor .pm-suggest-old.pm-suggest-focused {
-	background-color: color-mix(in srgb, var(--diff-delete-tint) 30%, transparent);
 }
 /* The formula a change replaced, typeset beside the one that replaced it: maths has no words to
    strike, so the two set side by side are the whole of what changed. The rule through it is PAINTED,
@@ -809,12 +797,6 @@ select.input {
 	box-shadow: inset 2px 0 0 var(--diff-insert-tint);
 }
 
-.TexpileEditor .pm-suggest-partial {
-	background-color: color-mix(in srgb, var(--color-warning-500) 10%, transparent);
-}
-.TexpileEditor .pm-suggest-partial.pm-suggest-focused {
-	background-color: color-mix(in srgb, var(--color-warning-500) 20%, transparent);
-}
 .comment-card {
 	position: absolute;
 	left: calc(18px - var(--comment-card-shift, 0px));

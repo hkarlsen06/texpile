@@ -51,12 +51,20 @@ export type PaintedRange = {
 	whole?: boolean;
 };
 
+/** how a range is dressed, for a caller that places its own decorations (suggestions) */
+export function rangeAttrs(tint: string, className?: string): { class: string; style: string } {
+	return { class: className ? `pm-range ${className}` : 'pm-range', style: `--range-tint: ${tint}` };
+}
+
+/** the same for an element a widget builds, which no decoration reaches */
+export function tintElement(el: HTMLElement, tint: string): HTMLElement {
+	el.classList.add('pm-range');
+	el.style.setProperty('--range-tint', tint);
+	return el;
+}
+
 function attrsOf(r: PaintedRange, shape?: string): Record<string, string> {
-	return {
-		class: ['pm-range', shape, r.class].filter(Boolean).join(' '),
-		style: `--range-tint: ${r.tint}`,
-		...r.attrs
-	};
+	return { ...rangeAttrs(r.tint, [shape, r.class].filter(Boolean).join(' ')), ...r.attrs };
 }
 
 export function paintRange(doc: PMNode, r: PaintedRange): Decoration[] {

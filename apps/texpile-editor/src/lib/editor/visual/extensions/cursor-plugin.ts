@@ -45,15 +45,11 @@ function shadeOldWords(view: EditorView, key: string, shadedBefore: boolean): bo
 	if (crossed.size === 0 && !shadedBefore) return false;
 	for (const el of view.dom.querySelectorAll<HTMLElement>('.pm-suggest-old')) {
 		const id = el.dataset.comment ?? '';
-		el.classList.toggle('pm-range', crossed.has(id));
+		// the words wear their own tint already; selected, the selection's colour goes over it (app.css)
+		el.classList.toggle('pm-range-selected', crossed.has(id));
 		el.classList.toggle('pm-range-node', crossed.has(id));
-		if (crossed.has(id)) {
-			el.style.setProperty('--range-tint', 'var(--editor-selection)');
-			el.dataset.band = `${key}-old-${id}`;
-		} else {
-			el.style.removeProperty('--range-tint');
-			delete el.dataset.band;
-		}
+		if (crossed.has(id)) el.dataset.band = `${key}-old-${id}`;
+		else delete el.dataset.band;
 	}
 	return crossed.size > 0;
 }

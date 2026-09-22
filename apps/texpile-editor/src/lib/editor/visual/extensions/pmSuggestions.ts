@@ -6,7 +6,8 @@ import type { Node as PMNode } from 'prosemirror-model';
 import type { PmSuggestionRange } from './pmSuggestionsPlace';
 import { editMode, mapSuggestionEdges, noteTypedSide, typingSide } from '$lib/comments/activeSuggestions.svelte';
 import type { CaretSide } from '$lib/comments/oldWordsCaret';
-import { breakMark, goneBlocksElement, oldNodeElement, oldWordsElement } from './pmSuggestionWidgets';
+import { breakMark, goneBlocksElement, oldNodeElement, oldWordsElement, suggestionTint } from './pmSuggestionWidgets';
+import { rangeAttrs } from '$lib/editor/visual/highlight/paintRange';
 import { isSelfRendered } from '../diff/selfRendered';
 import { caretSideWhereItLanded, oldWordsClick, oldWordsKeyDown } from './pmOldWordsCaret';
 import { hasOldWords, pmSuggestionsKey, type PmSuggestionsMeta, type PmSuggestionsState } from './pmSuggestionsState';
@@ -64,12 +65,17 @@ function build(doc: PMNode, ranges: PmSuggestionRange[], focused: string | null,
 						key: `old-${id}-${on}-node-${oldKey(r)}`
 					})
 				);
-			decos.push(Decoration.node(r.from, r.to, { class: `pm-suggest-new${focus}`, 'data-comment': id }));
+			decos.push(Decoration.node(r.from, r.to, { ...rangeAttrs(suggestionTint('new', on), `pm-suggest-new${focus}`), 'data-comment': id }));
 			continue;
 		}
 		if (r.partial) {
 			doc.nodesBetween(r.from, r.to, (node, pos) => {
-				decos.push(Decoration.node(pos, pos + node.nodeSize, { class: `pm-suggest-partial${focus}`, 'data-comment': id }));
+				decos.push(
+					Decoration.node(pos, pos + node.nodeSize, {
+						...rangeAttrs(suggestionTint('partial', on), `pm-suggest-partial${focus}`),
+						'data-comment': id
+					})
+				);
 				return false;
 			});
 			continue;
@@ -104,7 +110,10 @@ function build(doc: PMNode, ranges: PmSuggestionRange[], focused: string | null,
 						key: `old-${id}-${on}-brk-${oldKey(r)}`
 					})
 				);
-			if (r.to > r.from) decos.push(Decoration.inline(r.from, r.to, { class: `pm-suggest-new${focus}`, 'data-comment': id }));
+			if (r.to > r.from)
+				decos.push(
+					Decoration.inline(r.from, r.to, { ...rangeAttrs(suggestionTint('new', on), `pm-suggest-new${focus}`), 'data-comment': id })
+				);
 			continue;
 		}
 		if (hasOldWords(r)) {
@@ -119,11 +128,13 @@ function build(doc: PMNode, ranges: PmSuggestionRange[], focused: string | null,
 			);
 		}
 		if (r.to > r.from) {
-			decos.push(Decoration.inline(r.from, r.to, { class: `pm-suggest-new${focus}`, 'data-comment': id }));
+			decos.push(
+				Decoration.inline(r.from, r.to, { ...rangeAttrs(suggestionTint('new', on), `pm-suggest-new${focus}`), 'data-comment': id })
+			);
 			// a formula or a chip keeps its source as content, so an inline decoration lands on text nobody draws
 			doc.nodesBetween(r.from, r.to, (node, pos) => {
 				if (!node.isLeaf && isSelfRendered(node)) {
-					decos.push(Decoration.node(pos, pos + node.nodeSize, { class: `pm-suggest-new${focus}` }));
+					decos.push(Decoration.node(pos, pos + node.nodeSize, rangeAttrs(suggestionTint('new', on), `pm-suggest-new${focus}`)));
 					return false;
 				}
 				return true;
