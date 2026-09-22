@@ -13,6 +13,7 @@
 // thread list changes or a re-parsed document replaces the current one.
 import { Plugin, PluginKey, TextSelection, type EditorState } from 'prosemirror-state';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
+import { paintRange } from '$lib/editor/visual/highlight/paintRange';
 import type { Node as PMNode } from 'prosemirror-model';
 import { buildAnchor, type CommentAnchor } from '$lib/comments/anchor';
 import { indexStartingBy, pmToSource, type Segment, type SourceMap } from '../sourceSpans';
@@ -120,33 +121,46 @@ export function pmCommentAt(state: EditorState, pos: number): PmCommentRange | n
 	return best;
 }
 
+/** a thread's colour at two strengths, so a focused one stands out of its neighbours; the CodeMirror
+ *  blocks that draw a thread's characters themselves read it too */
+export function threadTint(focused: boolean): string {
+	return `color-mix(in srgb, var(--comment-tint) ${focused ? 30 : 14}%, transparent)`;
+}
+
 function build(doc: PMNode, ranges: PmCommentRange[], focused: string | null, pending: { from: number; to: number } | null): DecorationSet {
 	const size = doc.content.size;
 	const decos: Decoration[] = [];
 	for (const r of ranges) {
 		// resolved threads draw nothing, same as the source editor: the argument is over
 		if (r.resolved || r.to <= r.from || r.to > size) continue;
-		const attrs = { class: `pm-comment${r.id === focused ? ' pm-comment-focused' : ''}`, 'data-comment': r.id };
-		if (r.node) {
-			decos.push(Decoration.node(r.from, r.to, attrs));
-			continue;
-		}
-		decos.push(Decoration.inline(r.from, r.to, attrs));
-		// an inline formula keeps its source as content, so an inline decoration lands on text nobody draws
-		doc.nodesBetween(r.from, r.to, (node, pos) => {
-			if (node.isInline && node.isAtom && !node.isLeaf) decos.push(Decoration.node(pos, pos + node.nodeSize, attrs));
-			return !node.isAtom;
-		});
+		const focus = r.id === focused;
+		decos.push(
+			...paintRange(doc, {
+				from: r.from,
+				to: r.to,
+				tint: threadTint(focus),
+				key: `thread-${r.id}`,
+				reach: 'text',
+				mirrored: true,
+				whole: r.node,
+				class: `pm-comment${focus ? ' pm-comment-focused' : ''}`,
+				attrs: { 'data-comment': r.id }
+			})
+		);
 	}
+	// the passage a composer is being written for, held while the composer owns the focus: the
+	// selection's own colour, because a crossed formula goes on wearing it through all of this
 	if (pending && pending.to > pending.from) {
-		const attrs = { class: 'pm-comment-pending' };
-		decos.push(Decoration.inline(pending.from, pending.to, { class: 'pm-comment-pending pm-selection-band' }));
-		// and the atoms in it, as a settled thread's range does above: an inline decoration lands on
-		// text nobody draws, so a formula in the passage was the one part left unmarked
-		doc.nodesBetween(pending.from, pending.to, (node, pos) => {
-			if (node.isInline && node.isAtom && !node.isLeaf) decos.push(Decoration.node(pos, pos + node.nodeSize, attrs));
-			return !node.isAtom;
-		});
+		decos.push(
+			...paintRange(doc, {
+				from: pending.from,
+				to: pending.to,
+				tint: 'var(--editor-selection)',
+				key: 'composer',
+				reach: 'line',
+				class: 'pm-comment-pending'
+			})
+		);
 	}
 	return DecorationSet.create(doc, decos);
 }

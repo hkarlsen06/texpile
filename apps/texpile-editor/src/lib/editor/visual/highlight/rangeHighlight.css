@@ -1,0 +1,33 @@
+/* Every shaded range in the visual editor wears .pm-range and carries its colour in --range-tint,
+   so one passage cannot end up looking like two things. The modifiers are the shapes a range has to
+   take, and they exist because the browser gives a range it paints the whole line box while
+   anything drawn by hand gets only its own height. */
+
+.ProseMirror .pm-range,
+.ProseMirror .inline-latex-wrapper.pm-range,
+.ProseMirror code.inline-latex.pm-range {
+	background-color: var(--range-tint);
+}
+
+/* text under a selection, at the height the browser would have given it, read off the line itself */
+.ProseMirror .pm-range-text {
+	padding-block: calc((1lh - 1em) / 2);
+	-webkit-box-decoration-break: clone;
+	box-decoration-break: clone;
+}
+
+/* a crossed inline element, whose own height is not its line's: rangeBands.ts measures the line and
+   names the band. the padding paints and the margin hands the height back, so the line does not move */
+.ProseMirror .pm-range-node[data-band] {
+	padding-block: var(--band-up, 0px) var(--band-down, 0px);
+	margin-block: calc(-1 * var(--band-up, 0px)) calc(-1 * var(--band-down, 0px));
+	-webkit-box-decoration-break: clone;
+	box-decoration-break: clone;
+}
+
+/* an <hr> is a border line over a zero height content box, so a background paints nothing visible:
+   it wears the shade as a band around the line instead, with no layout shift */
+.ProseMirror hr.pm-range {
+	background-color: transparent;
+	box-shadow: 0 0 0 0.3em var(--range-tint);
+}

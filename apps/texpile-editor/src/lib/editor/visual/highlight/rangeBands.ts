@@ -32,12 +32,11 @@ function blockOf(el: Element): HTMLElement | null {
 	return null;
 }
 
-// the hyphen of a selected word is painted by hand (hyphenSelection) and needs the same band, and
-// so does a collaborator's selection, which is drawn rather than painted by the browser
-const BANDED = '.pm-selected-node[data-band], .pm-line-hyphen-selected[data-band], .pm-remote-sel-node[data-band]';
+// the hyphen of a selected word is painted by hand (hyphenSelection) and needs the same band
+const BANDED = '.pm-range-node[data-band], .pm-line-hyphen-selected[data-band]';
 
 /** one rule per crossed inline element on screen: how far its line reaches above and below it */
-export function selectionBandRules(view: EditorView): string {
+export function rangeBandRules(view: EditorView): string {
 	const linesOf = new Map<HTMLElement, LineBox[]>();
 	let rules = '';
 	const crossed = blocksNearScreen(view.dom).flatMap((block) => [...block.querySelectorAll<HTMLElement>(BANDED)]);
@@ -63,21 +62,20 @@ export function selectionBandRules(view: EditorView): string {
 	return rules;
 }
 
-export type SelectionBandPainter = { repaint(): void; destroy(): void };
+export type RangeBandPainter = { repaint(): void; destroy(): void };
 
 /** keeps the rules in step with the selection, the scroll position and the editor's width */
-export function selectionBandPainter(view: EditorView): SelectionBandPainter {
+export function rangeBandPainter(view: EditorView): RangeBandPainter {
 	const style = document.head.appendChild(document.createElement('style'));
 	let frame = 0;
 	function paint(): void {
 		frame = 0;
-		const rules = view.isDestroyed ? '' : selectionBandRules(view);
+		const rules = view.isDestroyed ? '' : rangeBandRules(view);
 		if (rules !== style.textContent) style.textContent = rules;
 	}
 	function repaint(): void {
-		// a collaborator's selection bands with no selection of our own still has to be measured
-		if (!frame && (style.textContent || !view.state.selection.empty || view.dom.querySelector(BANDED)))
-			frame = requestAnimationFrame(paint);
+		// a thread's or a peer's bands with no selection of our own still have to be measured
+		if (!frame && (style.textContent || view.dom.querySelector(BANDED))) frame = requestAnimationFrame(paint);
 	}
 	window.addEventListener('scroll', repaint, { capture: true, passive: true });
 	const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(repaint);

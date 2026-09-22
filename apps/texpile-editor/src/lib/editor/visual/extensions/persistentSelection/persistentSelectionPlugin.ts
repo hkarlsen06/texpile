@@ -1,11 +1,19 @@
 import { Plugin, PluginKey } from 'prosemirror-state';
 import { Decoration, DecorationSet } from 'prosemirror-view';
 
+import type { EditorState } from 'prosemirror-state';
+
 const key = new PluginKey<boolean>('persistentSelection');
+
+/** focus is parked in a menu or dialog, so the browser is painting neither caret nor selection */
+export function selectionHeldVisible(state: EditorState): boolean {
+	return key.getState(state) === true;
+}
 
 // browsers hide the caret of an unfocused editor, so draw a fake one while focus is parked in a
 // transient overlay ([data-scope] menus/dialogs, or anything with [data-keep-caret]). re-evaluated
-// on every focusin so it disappears the moment focus genuinely leaves the editor's chrome.
+// on every focusin so it disappears the moment focus genuinely leaves the editor's chrome. a range
+// selection is painted by the range painter, which reads the flag above.
 export function createPersistentSelectionPlugin() {
 	return new Plugin<boolean>({
 		key,
@@ -63,24 +71,22 @@ export function createPersistentSelectionPlugin() {
 			decorations(state) {
 				if (!key.getState(state)) return null;
 				const sel = state.selection;
-				if (sel.empty) {
-					// use <sup>/<sub> for pending sup/sub marks so the fake caret sits where the real
-					// one would; browsers style those natively so the ::before inherits it for free
-					const marks = state.storedMarks ?? sel.$from.marks();
-					const tag = marks.some((m) => m.type.name === 'sup') ? 'sup' : marks.some((m) => m.type.name === 'sub') ? 'sub' : 'span';
-					const widget = Decoration.widget(
-						sel.head,
-						() => {
-							const el = document.createElement(tag);
-							el.className = 'pm-blur-cursor';
-							return el;
-						},
-						// tag in the key so PM rebuilds the widget when the pending mark changes
-						{ side: 0, key: `pm-blur-cursor:${tag}` }
-					);
-					return DecorationSet.create(state.doc, [widget]);
-				}
-				return DecorationSet.create(state.doc, [Decoration.inline(sel.from, sel.to, { class: 'pm-blur-selection pm-selection-band' })]);
+				if (!sel.empty) return null;
+				// use <sup>/<sub> for pending sup/sub marks so the fake caret sits where the real
+				// one would; browsers style those natively so the ::before inherits it for free
+				const marks = state.storedMarks ?? sel.$from.marks();
+				const tag = marks.some((m) => m.type.name === 'sup') ? 'sup' : marks.some((m) => m.type.name === 'sub') ? 'sub' : 'span';
+				const widget = Decoration.widget(
+					sel.head,
+					() => {
+						const el = document.createElement(tag);
+						el.className = 'pm-blur-cursor';
+						return el;
+					},
+					// tag in the key so PM rebuilds the widget when the pending mark changes
+					{ side: 0, key: `pm-blur-cursor:${tag}` }
+				);
+				return DecorationSet.create(state.doc, [widget]);
 			}
 		}
 	});

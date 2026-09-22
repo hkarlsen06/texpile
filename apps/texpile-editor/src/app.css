@@ -298,10 +298,8 @@ math-field {
 }
 
 /* ONE selection colour for both editors and every simulated one. The source editor's drawn layer
-   (above) and the visual editor's ::selection read it; node views (math fields, code chips) sit
-   outside the browser's ::selection painting, so cursor-plugin shades them with .pm-selected-node
-   when a range crosses them; the blurred-editor simulation (.pm-blur-selection) and the
-   keep-visible-under-menu rule (ContextMenu.svelte) are the same species. Any drift showed as
+   (above) and the visual editor's ::selection read it; everything the browser paints nothing over
+   is drawn by the range painter (highlight/paintRange.ts) in this same color. Any drift showed as
    patchwork inside a single drag: solid Tailwind blue boxes over math, native blue over prose,
    lavender in source. Light is lighter over a white page. */
 :root {
@@ -312,39 +310,6 @@ math-field {
 }
 .ProseMirror ::selection {
 	background-color: var(--editor-selection);
-}
-/* the inline chip declares its own transparent ground further down at the same specificity and
-   would win by source order; the <code> form is the same chip where the schema renders it */
-.ProseMirror .pm-selected-node,
-.ProseMirror .inline-latex-wrapper.pm-selected-node,
-.ProseMirror code.inline-latex.pm-selected-node {
-	background-color: var(--editor-selection);
-}
-/* the browser paints selected text over its whole line box, so a crossed inline element reaches as
-   far: selectionBands.ts measures the line. The padding paints and the margin hands the height back,
-   so the line does not move */
-/* A selection the browser is not painting has to reach as far as one it does, or it reads as a
-   stripe over the words with gaps between the lines, beside the full-height shade a crossed formula
-   gets. Worn by the simulated selections that cover text: the blurred editor's (persistentSelection)
-   and the passage a comment composer holds (pmComments). Vertical padding on an inline box paints
-   without moving the line, and clone gives every line of the span its own. Not for a node view,
-   which is not an inline box and would move: those are shaded whole. */
-.ProseMirror .pm-selection-band {
-	padding-block: calc((1lh - 1em) / 2);
-	-webkit-box-decoration-break: clone;
-	box-decoration-break: clone;
-}
-.ProseMirror .pm-selected-node[data-band] {
-	padding-block: var(--band-up, 0px) var(--band-down, 0px);
-	margin-block: calc(-1 * var(--band-up, 0px)) calc(-1 * var(--band-down, 0px));
-	-webkit-box-decoration-break: clone;
-	box-decoration-break: clone;
-}
-/* an <hr> is a border line over a zero-height content box, so the background above paints
-   nothing visible: a crossed divider wears its selection as a band around the line instead
-   (box-shadow, so no layout shift) */
-.ProseMirror hr.pm-selected-node {
-	box-shadow: 0 0 0 0.3em var(--editor-selection);
 }
 /* prosemirror-tables paints its own cell overlay, hardcoded to rgba(200, 200, 255, 0.4): theme
    blind, and the one selection in the editor that was not reading the variable above - a pale
@@ -604,7 +569,7 @@ select.input {
 /* the browser paints no selection over generated content; a selected word's hyphen gets the colour from hyphenSelection */
 .ProseMirror .pm-line-par .pm-line-hyphen.pm-line-hyphen-selected::after {
 	background-color: var(--editor-selection);
-	/* up to the line box, as the browser paints selected text (selectionBands.ts measures the line) */
+	/* up to the line box, as the browser paints selected text (rangeBands.ts measures the line) */
 	padding-block: var(--band-up, 0px) var(--band-down, 0px);
 }
 /* inside a word no line can hold, the browser's way out; a zero width space makes the character's end a break */
@@ -762,15 +727,6 @@ select.input {
 	width: 20px;
 }
 
-/* Review-comment highlights in the visual editor: the same tints as the source editor's
-   .cm-comment (extensions/comments.ts baseTheme), so a thread looks like the same thread on
-   either side of a mode switch. */
-.TexpileEditor .pm-comment {
-	background-color: color-mix(in srgb, var(--comment-tint) 14%, transparent);
-}
-.TexpileEditor .pm-comment-focused {
-	background-color: color-mix(in srgb, var(--comment-tint) 30%, transparent);
-}
 .TexpileEditor .pm-suggest-new {
 	background-color: color-mix(in srgb, var(--diff-insert-tint) 18%, transparent);
 }
@@ -781,14 +737,13 @@ select.input {
 }
 /* selected old words: the tint stays text high under the selection color, as it does where the
    browser paints over new words, and the selection color alone fills the rest of the band */
-.TexpileEditor .pm-suggest-old.pm-selected-node {
+.TexpileEditor .pm-suggest-old.pm-range {
 	--old-words-tint: color-mix(in srgb, var(--diff-delete-tint) 16%, transparent);
 	background-color: transparent;
-	background-image:
-		linear-gradient(var(--editor-selection), var(--editor-selection)), linear-gradient(var(--old-words-tint), var(--old-words-tint));
+	background-image: linear-gradient(var(--range-tint), var(--range-tint)), linear-gradient(var(--old-words-tint), var(--old-words-tint));
 	background-clip: border-box, content-box;
 }
-.TexpileEditor .pm-suggest-old.pm-suggest-focused.pm-selected-node {
+.TexpileEditor .pm-suggest-old.pm-suggest-focused.pm-range {
 	--old-words-tint: color-mix(in srgb, var(--diff-delete-tint) 30%, transparent);
 }
 .TexpileEditor .pm-suggest-new.pm-suggest-focused {
@@ -906,14 +861,6 @@ select.input {
 		transition: none;
 	}
 }
-/* the selection being commented on, held visible while the composer owns the focus (an
-   unfocused ProseMirror hides the native selection); the selection's own color, not thread-yellow
-   and not a second blue: a crossed formula keeps wearing --editor-selection through all of this,
-   and at 22% against its 35% the two read as different colors inside one passage */
-.TexpileEditor .pm-comment-pending {
-	background-color: var(--editor-selection);
-}
-
 /* Hold a scroll container's scrollbar 3px in from its right edge, for panes that sit against a
    divider: the collapse lozenge straddles the rule and overhangs 3px into each side, and what lives
    hard against a pane's inner edge is exactly its scrollbar. 3px is the whole overhang and not a
@@ -1901,11 +1848,6 @@ select.input {
 		opacity: 0;
 	}
 }
-.pm-blur-selection {
-	/* the same color a live selection has, so blurring for a menu doesn't visibly recolor it */
-	background-color: var(--editor-selection);
-}
-
 /* \title/\author/\date rendered as in-place editable fields (frontmatterView.ts) */
 .frontmatter-block {
 	margin: calc(var(--spacing) * 3) 0;

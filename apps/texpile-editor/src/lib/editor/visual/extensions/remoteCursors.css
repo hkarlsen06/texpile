@@ -47,23 +47,5 @@
 	}
 }
 
-/* a peer's selection, the same shape the local one takes: the browser paints its own range over
-   prose, and the node views it paints nothing over are shaded by hand (see cursor-plugin.ts) */
-.ProseMirror .pm-remote-sel,
-.ProseMirror .pm-remote-sel-node,
-.ProseMirror .inline-latex-wrapper.pm-remote-sel-node,
-.ProseMirror code.inline-latex.pm-remote-sel-node {
-	background-color: color-mix(in srgb, var(--peer-color) 20%, transparent);
-}
-/* the browser paints selected text over its whole line box, so a crossed inline element reaches as
-   far: selectionBands.ts measures the line. The padding paints and the margin hands the height back */
-.ProseMirror .pm-remote-sel-node[data-band] {
-	padding-block: var(--band-up, 0px) var(--band-down, 0px);
-	margin-block: calc(-1 * var(--band-up, 0px)) calc(-1 * var(--band-down, 0px));
-	-webkit-box-decoration-break: clone;
-	box-decoration-break: clone;
-}
-/* an <hr> is a border line over a zero-height content box, so a background paints nothing visible */
-.ProseMirror hr.pm-remote-sel-node {
-	box-shadow: 0 0 0 0.3em color-mix(in srgb, var(--peer-color) 20%, transparent);
-}
+/* a peer's selection is drawn entirely by the range painter (highlight/paintRange.ts); only the
+   caret above is this file's own */

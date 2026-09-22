@@ -9,9 +9,9 @@ import { Decoration, EditorView as CodeMirrorView, type DecorationSet } from '@c
 import { StateEffect, StateField, type Extension } from '@codemirror/state';
 import type { EditorView as ProseMirrorView } from 'prosemirror-view';
 import type { Node } from 'prosemirror-model';
-import { pmCommentsKey } from '$lib/editor/visual/extensions/pmComments';
+import { pmCommentsKey, threadTint } from '$lib/editor/visual/extensions/pmComments';
 
-const setCommentRanges = StateEffect.define<{ from: number; to: number; cls: string }[]>();
+const setCommentRanges = StateEffect.define<{ from: number; to: number; cls: string; tint: string }[]>();
 
 /** the CodeMirror extension carrying the mirrored highlights; include it in the block's config */
 export const cmCommentHighlights = StateField.define<DecorationSet>({
@@ -21,7 +21,7 @@ export const cmCommentHighlights = StateField.define<DecorationSet>({
 		for (const e of tr.effects) {
 			if (e.is(setCommentRanges)) {
 				value = Decoration.set(
-					e.value.map((r) => Decoration.mark({ class: r.cls }).range(r.from, r.to)),
+					e.value.map((r) => Decoration.mark({ class: r.cls, attributes: { style: `--range-tint: ${r.tint}` } }).range(r.from, r.to)),
 					true
 				);
 			}
@@ -53,7 +53,8 @@ export function syncCmCommentHighlights(
 		.map((r) => ({
 			from: Math.max(0, r.from - start),
 			to: Math.min(len, r.to - start),
-			cls: `pm-comment${r.id === state.focused ? ' pm-comment-focused' : ''}`
+			cls: `pm-range pm-comment${r.id === state.focused ? ' pm-comment-focused' : ''}`,
+			tint: threadTint(r.id === state.focused)
 		}))
 		.filter((r) => r.to > r.from);
 	const key = JSON.stringify(ranges);
