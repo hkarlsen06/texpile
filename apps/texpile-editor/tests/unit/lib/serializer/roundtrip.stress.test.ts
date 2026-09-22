@@ -126,6 +126,10 @@ interface FileResult {
 	origCoverage: number;
 	origBlocks: number;
 	totalBlocks: number;
+	// blocks whose leaf runs contradicted their bytes at load: not placed, written afresh even
+	// untouched (see MapDefect). each one names a parser position bug. hard-gated to zero
+	mapDefects: number;
+	firstDefect: string | null;
 	// doc.check() failure or null. lenient builders (NodeType.create) can emit schema-invalid
 	// nodes; the doc loads and serializes fine but the first structural edit throws and freezes
 	// ProseMirror. hard-gated to zero.
@@ -222,6 +226,8 @@ describe('stress: real LaTeX round-trip', () => {
 				origCoverage: 0,
 				origBlocks: 0,
 				totalBlocks: 0,
+				mapDefects: 0,
+				firstDefect: null,
 				schemaViolation: null
 			};
 			try {
@@ -255,6 +261,9 @@ describe('stress: real LaTeX round-trip', () => {
 					r.diffKind = classifyDiff(src, r1);
 					r.firstByteDiff = firstStringDiff(src, r1, 'src/R1');
 				}
+				r.mapDefects = p1.origins.defects.length;
+				const d0 = p1.origins.defects[0];
+				r.firstDefect = d0 ? `${d0.kind} ${d0.srcFrom}..${d0.srcTo}: ${d0.detail}` : null;
 				const cov = origCoverageOf(p1);
 				r.origCoverage = cov.coverage;
 				r.origBlocks = cov.withOrig;
@@ -324,6 +333,9 @@ describe('stress: real LaTeX round-trip', () => {
 		);
 		lines.push(`  CONTENT diff (investigate): ${live.filter((r) => r.diffKind === 'content').length}`);
 		lines.push(`avg top-level block orig-coverage (span capture succeeded): ${(avgCoverage * 100).toFixed(1)}%`);
+		lines.push(
+			`files with map defects (a run contradicting its block's bytes; each one a parser position bug): ${live.filter((r) => r.mapDefects > 0).length} / ${live.length}, ${live.reduce((s, r) => s + r.mapDefects, 0)} blocks`
+		);
 		lines.push('');
 		// editability metric: how much of each document is demoted to raw LaTeX vs modelled,
 		// tracked at two granularities: top-level blocks (visible uneditable chunks) and all
@@ -354,6 +366,8 @@ describe('stress: real LaTeX round-trip', () => {
 				`| ${r.file} | ${r.bytes} | ${r.crash ? 'YES' : ''} | ${stable} | ${r.byteIdentical ? 'YES' : ''} | ${r.diffKind} | ${(r.origCoverage * 100).toFixed(0)}% (${r.origBlocks}/${r.totalBlocks}) | ${r.rawBlocksTop}/${r.totalBlocks} | ${r.rawNodes} | ${r.inlineLatexNodes} | ${r.totalNodes} | ${r.wordRatio.toFixed(3)} |`
 			);
 		}
+		lines.push('\n## Map defects (blocks not believed at load)\n');
+		for (const r of results.filter((x) => x.mapDefects > 0)) lines.push(`- ${r.file}: ${r.mapDefects} — ${r.firstDefect}`);
 		lines.push('\n## Crashes\n');
 		for (const r of results.filter((x) => x.crash)) lines.push(`### ${r.file}\n\n\`\`\`\n${r.crash}\n\`\`\`\n`);
 		lines.push('\n## DIVERGING / compounding — real bugs (never settles, not a bounded oscillation)\n');

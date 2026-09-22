@@ -7,6 +7,7 @@ import {
 	collectMap,
 	rememberParseMap,
 	shiftMap,
+	warnMapDefects,
 	type ParseBody,
 	type ParseOrigins,
 	type RegionParse,
@@ -149,6 +150,7 @@ export function parseLatexFile(latex: string, projectMacros = '', onPhase?: (pha
 
 	const map = collectMap(doc, hadDocumentEnv ? preamble.length : 0);
 	const origins = rememberParseMap(doc, map, parseBodyOf({ preamble, postamble, hadDocumentEnv }, latex));
+	warnMapDefects('latexRoundtrip', origins);
 	return { preamble, postamble, doc, hadDocumentEnv, warnings, map, origins };
 }
 

@@ -272,6 +272,19 @@ export type BlockOrigin = {
 	member: number;
 };
 
+/** a place where the map contradicts the bytes or itself: a run outside the block it lies in, two
+ *  runs claiming one byte, a text run that is not its bytes. The block holding it is not placed:
+ *  it is written out afresh from the document, untouched or not, as a block the parse could not
+ *  place is, so a span short of its bytes can neither drop them nor write them twice */
+export type MapDefect = {
+	kind: 'outside' | 'overlap' | 'mismatch';
+	srcFrom: number;
+	srcTo: number;
+	pmFrom: number;
+	pmTo: number;
+	detail: string;
+};
+
 /** one parse's top-level blocks in order, and the bytes after the last of them (null when it could
  *  not be placed). `verbatim` says a block still the parse's own may be written out as its bytes; a
  *  parse that only tells gaps and neighbours apart (a converter's own output, a document made to
@@ -282,7 +295,41 @@ export type ParseOrigins = {
 	verbatim: boolean;
 	/** where the body the leaves were recorded against begins in the file the origins slice */
 	from: number;
+	/** what the parse's map got wrong, at any depth; shared by the parse's containers */
+	defects: MapDefect[];
 };
+
+/**
+ * Whether the leaf runs of the block at `block` can be believed against the bytes: every run inside
+ * the block, no two runs claiming a byte, a text run being its bytes (a bare line feed standing for
+ * a carriage return and line feed aside). What fails is recorded on `defects`.
+ */
+function soundLeaves(doc: PMNode, body: ParseBody, block: Segment, leaves: Segment[], defects: MapDefect[]): boolean {
+	let ok = true;
+	const bad = (kind: MapDefect['kind'], s: Segment, detail: string) => {
+		defects.push({ kind, srcFrom: s.srcFrom, srcTo: s.srcTo, pmFrom: s.pmFrom, pmTo: s.pmTo, detail });
+		ok = false;
+	};
+	for (const s of leaves) {
+		if (s.srcFrom > s.srcTo || s.srcFrom < block.srcFrom || s.srcTo > block.srcTo) {
+			bad('outside', s, `run ${s.srcFrom}..${s.srcTo} outside its block ${block.srcFrom}..${block.srcTo}`);
+			continue;
+		}
+		if (s.kind !== 'text') continue;
+		const shown = doc.textBetween(s.pmFrom, s.pmTo);
+		const bytes = body.text.slice(s.srcFrom, s.srcTo);
+		if (shown !== bytes && shown !== bytes.replace(/\r\n/g, '\n'))
+			bad('mismatch', s, `a text run is not its bytes: ${JSON.stringify(shown)} for ${JSON.stringify(bytes)} at ${s.srcFrom}`);
+	}
+	const bySrc = [...leaves].sort((a, b) => a.srcFrom - b.srcFrom || a.srcTo - b.srcTo);
+	for (let i = 1; i < bySrc.length; i++) {
+		const prev = bySrc[i - 1];
+		const s = bySrc[i];
+		if (prev.srcTo > s.srcFrom)
+			bad('overlap', s, `two runs claim bytes ${s.srcFrom}..${prev.srcTo}: ${JSON.stringify(body.text.slice(s.srcFrom, prev.srcTo))}`);
+	}
+	return ok;
+}
 
 const blockOrigins = new WeakMap<PMNode, BlockOrigin>();
 const docParses = new WeakMap<PMNode, ParseOrigins>();
@@ -295,7 +342,9 @@ const docParses = new WeakMap<PMNode, ParseOrigins>();
  * until the roundtrip glue registers the document against the file the body came from.
  */
 export function rememberParseMap(doc: PMNode, map: SourceMap, body: ParseBody | null, verbatim = true): ParseOrigins {
-	const parse: ParseOrigins = { origins: [], tail: null, verbatim, from: body ? body.from : 0 };
+	const parse: ParseOrigins = { origins: [], tail: null, verbatim, from: body ? body.from : 0, defects: [] };
+	// the top-level blocks whose runs are not believed, by position: nothing inside them is either
+	const unsound: Segment[] = [];
 	const n = doc.childCount;
 	let b = 0;
 	let l = 0;
@@ -324,6 +373,31 @@ export function rememberParseMap(doc: PMNode, map: SourceMap, body: ParseBody | 
 			end += doc.child(i + size).nodeSize;
 			size++;
 		}
+		// a block whose runs contradict it is not placed at all: its span may be short of its bytes,
+		// and a block written afresh before a gap still holding the rest would write them twice
+		if (body && !soundLeaves(doc, body, block, leaves, parse.defects)) {
+			unsound.push(block);
+			let at = start;
+			for (let k = 0; k < size; k++) {
+				const child = doc.child(i + k);
+				parse.origins.push({
+					parse,
+					index: i + k,
+					node: child,
+					pmFrom: at,
+					pmTo: at + child.nodeSize,
+					leaves: [],
+					pre: null,
+					size: 1,
+					member: 0
+				});
+				at += child.nodeSize;
+			}
+			prevEnd = null;
+			pos = end;
+			i += size;
+			continue;
+		}
 		const text = body ? body.text.slice(block.srcFrom, block.srcTo) : undefined;
 		const pre = body && prevEnd != null && prevEnd <= block.srcFrom ? body.text.slice(prevEnd, block.srcFrom) : null;
 		for (let k = 0; k < size; k++) {
@@ -347,7 +421,7 @@ export function rememberParseMap(doc: PMNode, map: SourceMap, body: ParseBody | 
 	parse.tail = body && prevEnd != null && prevEnd <= body.to ? body.text.slice(prevEnd, body.to) : null;
 	for (const o of parse.origins) blockOrigins.set(o.node, o);
 	docParses.set(doc, parse);
-	rememberContainers(doc, map, body, verbatim);
+	rememberContainers(doc, map, body, verbatim, parse.defects, unsound);
 	return parse;
 }
 
@@ -356,25 +430,47 @@ export function rememberParseMap(doc: PMNode, map: SourceMap, body: ParseBody | 
  * placed them at, so a container written out afresh still writes its untouched children as their
  * bytes. A child's range is believed only inside its container's own and after its sibling's.
  */
-function rememberContainers(doc: PMNode, map: SourceMap, body: ParseBody | null, verbatim: boolean): void {
+function rememberContainers(
+	doc: PMNode,
+	map: SourceMap,
+	body: ParseBody | null,
+	verbatim: boolean,
+	defects: MapDefect[],
+	unsound: Segment[]
+): void {
 	const inner = map.inner ?? [];
 	if (inner.length === 0) return;
 	const byStart = new Map<number, Segment>();
 	for (const s of inner) byStart.set(s.pmFrom, s);
+	const believed = (seg: Segment): boolean => !unsound.some((u) => seg.pmFrom >= u.pmFrom && seg.pmTo <= u.pmTo);
 	doc.descendants((node, pos) => {
 		if (!node.isBlock) return false;
 		if (!isContainer(node)) return true;
 		const own = blockOrigins.get(node);
 		const bounds = own && own.srcFrom !== undefined ? { from: own.srcFrom, to: own.srcTo! } : null;
-		const parse: ParseOrigins = { origins: [], tail: null, verbatim, from: body ? body.from : 0 };
+		const parse: ParseOrigins = { origins: [], tail: null, verbatim, from: body ? body.from : 0, defects };
 		let at = pos + 1;
 		let prevEnd: number | null = null;
 		let i = 0;
 		while (i < node.childCount) {
 			const start = at;
 			const seg = byStart.get(start);
+			const leaves: Segment[] = [];
+			if (seg) {
+				for (
+					let l = Math.max(0, indexStartingBy(map.leaves, 'pmFrom', seg.pmFrom));
+					l < map.leaves.length && map.leaves[l].pmFrom < seg.pmTo;
+					l++
+				) {
+					if (map.leaves[l].pmFrom >= seg.pmFrom) leaves.push(map.leaves[l]);
+				}
+			}
 			const placed =
-				!!seg && (!bounds || (seg.srcFrom >= bounds.from && seg.srcTo <= bounds.to)) && (prevEnd == null || seg.srcFrom >= prevEnd);
+				!!seg &&
+				(!bounds || (seg.srcFrom >= bounds.from && seg.srcTo <= bounds.to)) &&
+				(prevEnd == null || seg.srcFrom >= prevEnd) &&
+				believed(seg) &&
+				(!body || soundLeaves(doc, body, seg, leaves, defects));
 			if (!seg || !placed) {
 				const child = node.child(i);
 				at += child.nodeSize;
@@ -387,14 +483,6 @@ function rememberContainers(doc: PMNode, map: SourceMap, body: ParseBody | null,
 			while (i + size < node.childCount && at < seg.pmTo) {
 				at += node.child(i + size).nodeSize;
 				size++;
-			}
-			const leaves: Segment[] = [];
-			for (
-				let l = Math.max(0, indexStartingBy(map.leaves, 'pmFrom', seg.pmFrom));
-				l < map.leaves.length && map.leaves[l].pmFrom < seg.pmTo;
-				l++
-			) {
-				if (map.leaves[l].pmFrom >= seg.pmFrom) leaves.push(map.leaves[l]);
 			}
 			const text = body ? body.text.slice(seg.srcFrom, seg.srcTo) : undefined;
 			const pre = body && prevEnd != null ? body.text.slice(prevEnd, seg.srcFrom) : null;
@@ -421,9 +509,16 @@ function rememberContainers(doc: PMNode, map: SourceMap, body: ParseBody | null,
 	});
 }
 
+/** what a parse got wrong, on the console: each defect is a parser position bug worth a report */
+export function warnMapDefects(where: string, parse: ParseOrigins): void {
+	if (parse.defects.length === 0) return;
+	const shown = parse.defects.slice(0, 3).map((d) => `${d.kind} ${d.srcFrom}..${d.srcTo}: ${d.detail}`);
+	console.warn(`[${where}] ${parse.defects.length} block(s) written afresh: the source map contradicts the bytes\n  ${shown.join('\n  ')}`);
+}
+
 /** a parse that knows nothing: for a document with no source behind it */
 export function noParse(): ParseOrigins {
-	return { origins: [], tail: null, verbatim: false, from: 0 };
+	return { origins: [], tail: null, verbatim: false, from: 0, defects: [] };
 }
 
 /** what the parse knew about the children of one of its containers, by the container node it made */
@@ -464,7 +559,7 @@ export function withoutOrigins(doc: PMNode): PMNode {
 	const out = doc.type.create(doc.attrs, kids, doc.marks);
 	const parse = parseOf(doc);
 	if (parse) {
-		const forgotten: ParseOrigins = { origins: [], tail: parse.tail, verbatim: false, from: parse.from };
+		const forgotten: ParseOrigins = { origins: [], tail: parse.tail, verbatim: false, from: parse.from, defects: parse.defects };
 		for (const o of parse.origins) forgotten.origins.push({ ...o, parse: forgotten });
 		docParses.set(out, forgotten);
 	}

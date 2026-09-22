@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { EditorState } from 'prosemirror-state';
 import { Fragment, type Node as PMNode } from 'prosemirror-model';
-import { parseLatexFile } from '$lib/workspace/latexRoundtrip';
+import { parseBodyOf, parseLatexFile } from '$lib/workspace/latexRoundtrip';
 import { parseCarryPlugin } from '$lib/editor/visual/parseCarry';
 import {
 	adoptParse,
@@ -10,6 +10,7 @@ import {
 	originsOf,
 	parseOf,
 	withoutOrigins,
+	rememberParseMap,
 	charsOf,
 	concatSpans,
 	nearestPm,
@@ -158,6 +159,25 @@ describe('parse origins', () => {
 		expect(p?.verbatim).toBe(false);
 		expect(origins.map((o) => o?.index)).toEqual([0, 1, 2]);
 		expect(origins[1]?.pre).toBe('\n\n');
+	});
+
+	it('does not place a block whose runs contradict its bytes, and says so', () => {
+		const parsed = parse();
+		const body = parseBodyOf(parsed, SRC);
+		expect(parsed.origins.defects).toEqual([]);
+		// a text run that is not its bytes: the block is written afresh, its neighbours keep theirs
+		const moved = { ...parsed.map, leaves: parsed.map.leaves.map((l, i) => (i === 1 ? { ...l, srcFrom: l.srcFrom + 1 } : l)) };
+		const shifted = rememberParseMap(parsed.doc, moved, body);
+		expect(shifted.defects.map((d) => d.kind)).toEqual(['mismatch']);
+		expect(shifted.origins.map((o) => o.text)).toEqual(['Alpha one.', undefined, 'Gamma three.']);
+		expect(shifted.origins.map((o) => o.pre)).toEqual(['\n\n', null, null]);
+		expect(shifted.tail).toBe('\n\n');
+		// a run reaching past its block: the block's span is short of its bytes, so it is not believed
+		const long = { ...parsed.map, leaves: parsed.map.leaves.map((l, i) => (i === 2 ? { ...l, srcTo: l.srcTo + 3 } : l)) };
+		const over = rememberParseMap(parsed.doc, long, body);
+		expect(over.defects.map((d) => d.kind)).toEqual(['outside']);
+		expect(over.origins.map((o) => o.text)).toEqual(['Alpha one.', 'Beta two.', undefined]);
+		expect(over.tail).toBeNull();
 	});
 
 	it('hands the parse on to the documents an editor makes, and to a patched one on adoption', () => {

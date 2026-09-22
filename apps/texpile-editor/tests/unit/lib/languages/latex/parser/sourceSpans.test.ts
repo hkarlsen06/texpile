@@ -78,6 +78,14 @@ describe('the runs of small documents', () => {
 		expect(pmToSource(spans, posOf(doc, '.'), 1)).toBe(src.indexOf('.'));
 	});
 
+	it('an item\u2019s label lies inside its paragraph\u2019s span, so the map is believed', () => {
+		const src = '\\begin{description}\n\\item[Term] its definition.\n\\item[Other] a second one.\n\\end{description}\n';
+		const { map, origins } = parseLatexFile(src);
+		expect(origins.defects).toEqual([]);
+		const items = (map.inner ?? []).map((s) => src.slice(s.srcFrom, s.srcTo));
+		expect(items).toEqual(['Term] its definition.', 'Other] a second one.']);
+	});
+
 	it('counts the preamble in a real document', () => {
 		const src = '\\documentclass{article}\n\\begin{document}\nHi there.\n\\end{document}\n';
 		const { doc, spans } = mapped(src);

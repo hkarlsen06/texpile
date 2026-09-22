@@ -254,6 +254,11 @@ function chain(f: Format, source: string, seed: number, failures: Failure[]) {
 	let typedInSource = false;
 	for (let round = 0; round < 4; round++) {
 		const parsed = f.parse(text);
+		if (parsed.origins.defects.length > 0) {
+			const shown = parsed.origins.defects.slice(0, 3).map((d) => `  ${d.kind} ${d.srcFrom}..${d.srcTo}: ${d.detail}`);
+			failures.push({ kind: 'the map contradicts the bytes', detail: `${parsed.origins.defects.length} defects\n${shown.join('\n')}` });
+			return;
+		}
 		const plain = f.serialize(parsed, parsed.doc);
 		if (plain !== text) {
 			failures.push({ kind: 'opening changes the file', detail: textDiff(text, plain) });

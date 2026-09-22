@@ -310,11 +310,13 @@ function fenceNode(tok: Token, src: SourceLines): PmNode {
 	);
 }
 
-/** a block whose bytes are its source lines whole, for a node that draws itself */
+/** a block whose bytes are its source lines whole, for a node that draws itself: the run ends
+ *  where the block's own span does, before the line break and the blank lines after it */
 function blockSpan(src: SourceLines, tok: Token): LeafSpan[] | null {
 	if (!tok.map) return null;
 	const from = tok.map[0] < src.lineStarts.length ? src.lineStarts[tok.map[0]] : src.source.length;
-	const to = tok.map[1] < src.lineStarts.length ? src.lineStarts[tok.map[1]] : src.source.length;
+	const end = tok.map[1] < src.lineStarts.length ? src.lineStarts[tok.map[1]] : src.source.length;
+	const to = trimBlankTail(src.source, from, end);
 	return from < to ? standsFor(1, from, to) : null;
 }
 

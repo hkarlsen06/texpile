@@ -67,7 +67,12 @@ export function createList(env: Environment, kind: 'bullet' | 'ordered', options
 						content: 'texpileItemLabel',
 						args: [{ type: 'argument', content: optionalArg.content, openMark: '{', closeMark: '}' }]
 					};
-					currentItemContent.push({ type: 'group', content: [syntheticLabel] });
+					// the group stands where the label's bytes are, so the item's first block spans them: its
+					// leaf runs do, and a block whose runs lie before it is not believed (see soundLeaves)
+					const placed = optionalArg.content.filter((n) => n.position);
+					const position =
+						placed.length > 0 ? { start: placed[0].position!.start, end: placed[placed.length - 1].position!.end } : undefined;
+					currentItemContent.push({ type: 'group', content: [syntheticLabel], ...(position ? { position } : {}) });
 				}
 
 				// the parser puts the item body in an argument with no delimiters
