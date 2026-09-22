@@ -52,7 +52,19 @@ export class WorkspaceDoc {
 			isVisualMode: () => this.modes.mode === 'visual',
 			noteLocalEdit: () => d.visualCollab()?.noteLocalEdit(),
 			clearPendingAnchor: () => (this.modes.pendingVisualAnchor = null),
-			projectMacros: () => this.projectMacros
+			projectMacros: () => this.projectMacros,
+			reparse: (text, format) => this.parser.reparse(text, format),
+			noteSaveRewrite: (rewritten, difference) => {
+				if (difference === null) {
+					toaster.warning({
+						title: m.wsview_toast_save_rewritten_title(),
+						description: m.wsview_toast_save_rewritten_desc({ count: rewritten })
+					});
+					return;
+				}
+				console.warn(`[save] the saved file does not read back as the editor shows: ${difference}`);
+				toaster.error({ title: m.wsview_toast_save_unverified_title(), description: m.wsview_toast_save_unverified_desc() });
+			}
 		});
 		// view mode, scroll anchors and cross-mode history live in lib/workspace/viewModeSwitch.svelte.ts
 		this.modes = new ViewModeSwitch({

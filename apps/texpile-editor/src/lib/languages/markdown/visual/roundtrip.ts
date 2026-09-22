@@ -80,9 +80,10 @@ export function serializeMarkdownFile(parsed: Pick<ParsedLatexFile, 'preamble' |
 /** the file text and where every run of `doc` landed in it */
 export function serializeMarkdownFileDetailed(
 	parsed: Pick<ParsedLatexFile, 'preamble' | 'postamble' | 'hadDocumentEnv'> & Partial<Pick<ParsedLatexFile, 'origins'>>,
-	doc: Node
+	doc: Node,
+	afresh?: ReadonlySet<Node>
 ): { text: string; map: SourceMap } {
-	const { text: body, leadProtected, tailProtected, map } = serializeToMarkdownDetailed(doc, parsed.origins ?? null);
+	const { text: body, leadProtected, tailProtected, map } = serializeToMarkdownDetailed(doc, parsed.origins ?? null, afresh);
 	const tail = tailProtected ? '' : '\n';
 	const bom = parsed.preamble.startsWith(BOM) ? BOM : '';
 	const frontmatter = parsed.preamble.slice(bom.length);

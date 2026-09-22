@@ -91,6 +91,7 @@
 	// rewritten quote badges detached at once rather than at the next mode switch
 	external.onAdopted = () => void commentsW.adoptDisk();
 	unsaved.onDiscard = (path) => commentsW.discarded(path);
+	saver.verify = (path, content) => doc.verifyForWrite(path, content);
 	saver.beforeWrite = async (path, content) => {
 		await commentsW.beforeSave(path, content);
 		await commentsCtl.syncAnchorsToText(path, content);

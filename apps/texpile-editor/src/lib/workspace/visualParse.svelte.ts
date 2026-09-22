@@ -7,6 +7,7 @@
 import type { ParsedLatexFile, ParsePhase } from '$lib/workspace/latexRoundtrip';
 import { parseLatexFileAsync, PARSE_TIMEOUT, PARSE_TOO_COMPLEX } from '$lib/workspace/latexParserClient';
 import { mark } from '$lib/debug/startupDoctor';
+import type { Node as PMNode } from 'prosemirror-model';
 
 // ProseMirror renders the whole doc with no virtualization and builds a node view per
 // math/raw/citation node, so past a certain size the mount locks the renderer for minutes and no
@@ -19,6 +20,11 @@ const MAX_VISUAL_NODES = 100_000;
 export const MAX_VISUAL_BYTES = 800 * 1024;
 const MIN_TIMEOUT_MS = 3000;
 const MAX_TIMEOUT_MS = 30000;
+
+/** parse time is roughly linear in the text, so the timeout scales with it */
+function timeoutFor(text: string): number {
+	return Math.min(MAX_TIMEOUT_MS, MIN_TIMEOUT_MS + Math.floor(text.length / 100));
+}
 
 export type ParseFailure = {
 	timeout: boolean;
@@ -52,6 +58,21 @@ export class VisualParser {
 		return seq === this.sequence;
 	}
 
+	/** the document `text` parses to, for the save check: the same parse as `parse`, with nothing
+	 *  shown while it runs and no size ceiling, since the text was small enough to open; null when
+	 *  it cannot be parsed now, which leaves the file as serialized */
+	async reparse(text: string, format: 'tex' | 'md' | 'typ'): Promise<PMNode | null> {
+		try {
+			if (format === 'typ') {
+				const { parseTypstFile } = await import('$lib/languages/typst/visual/roundtrip');
+				return parseTypstFile(text, this.getMacros()).doc;
+			}
+			return (await parseLatexFileAsync(text, this.getMacros(), timeoutFor(text), undefined, 0, format)).doc;
+		} catch {
+			return null;
+		}
+	}
+
 	/** The failure is RETURNED rather than handled here: only the caller knows whether its parse is
 	 * still the current one, and a superseded parse must not yank the user out of visual mode. */
 	async parse(text: string, format: 'tex' | 'md' | 'typ' = 'tex'): Promise<ParseOutcome> {
@@ -59,7 +80,7 @@ export class VisualParser {
 		if (text.length > MAX_VISUAL_BYTES) return { failure: { timeout: false, tooLarge: text.length, message: 'too-large' } };
 		if (format === 'typ') return this.parseTypst(text);
 		try {
-			const timeoutMs = Math.min(MAX_TIMEOUT_MS, MIN_TIMEOUT_MS + Math.floor(text.length / 100));
+			const timeoutMs = timeoutFor(text);
 			this.progress = 'parsing';
 			return { parsed: await parseLatexFileAsync(text, this.getMacros(), timeoutMs, (p) => (this.progress = p), MAX_VISUAL_NODES, format) };
 		} catch (e) {

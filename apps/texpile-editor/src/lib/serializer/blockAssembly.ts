@@ -173,15 +173,18 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 		return role === 'cell' || role === 'header_cell';
 	}
 
-	function serializeTopBlock(doc: Node, i: number, n: number, neighbours: Neighbour[]): Entry {
+	function serializeTopBlock(doc: Node, i: number, n: number, neighbours: Neighbour[], afresh?: ReadonlySet<Node>): Entry {
 		const node = doc.child(i);
-		const key = neighborKey(i > 0 ? neighbours[i - 1] : null) + '>' + neighborKey(i < n - 1 ? neighbours[i + 1] : null);
+		const whole = afresh?.has(node) ?? false;
+		const key =
+			neighborKey(i > 0 ? neighbours[i - 1] : null) + '>' + neighborKey(i < n - 1 ? neighbours[i + 1] : null) + (whole ? '!' : '');
 		const hit = blockCache.get(node);
 		if (hit && hit.key === key) return hit;
 		const entry: Entry = { key, text: serializeNode(node, ctxFor(doc, i, n)) };
 		// a container that changed inside keeps its frame and its untouched children as their bytes;
-		// a block that changed in its text alone keeps everything but the leaves that changed
-		const was = neighbours[i].was;
+		// a block that changed in its text alone keeps everything but the leaves that changed;
+		// a block to be written whole keeps nothing
+		const was = whole ? null : neighbours[i].was;
 		const spliced = was
 			? (frameSplice(node, was, ctxFor(doc, i, n)) ??
 				leafSplice(node, was, ctxFor(doc, i, n)) ??
@@ -1110,11 +1113,24 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 		return out;
 	}
 
-	function serializeDocChildrenDetailed(doc: Node, parse?: ParseOrigins | null): DocSerializeResult {
+	/**
+	 * `afresh` names top-level blocks to write out whole by the deterministic rules, whatever the
+	 * parse knows of them: neither their bytes nor a splice inside them, only the file's gaps
+	 * around them. The save check falls back to it for a block whose spliced bytes do not read
+	 * back as the block (see verifiedSerialize)
+	 */
+	function serializeDocChildrenDetailed(doc: Node, parse?: ParseOrigins | null, afresh?: ReadonlySet<Node>): DocSerializeResult {
 		const n = doc.childCount;
 		// the parse the document answers to; one handed in by the caller only stands in for a
 		// document that remembers none
 		const { parse: known, origins, was } = originsOf(doc, parseOf(doc) ?? parse ?? null);
+		if (afresh) {
+			for (let i = 0; i < n; i++) {
+				if (!afresh.has(doc.child(i))) continue;
+				was[i] = origins[i] ?? was[i];
+				origins[i] = null;
+			}
+		}
 		const neighbours: Neighbour[] = [];
 		for (let i = 0; i < n; i++) neighbours.push({ node: doc.child(i), origin: origins[i], was: was[i] });
 		const pmStarts: number[] = [];
@@ -1126,7 +1142,7 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 		// a block is rendered only once something asks for its text: a block written as its bytes
 		// never is, so a document the parse still knows costs no rendering at all
 		const entries: (Entry | undefined)[] = new Array<Entry | undefined>(n);
-		const entryAt = (i: number): Entry => (entries[i] ??= serializeTopBlock(doc, i, n, neighbours));
+		const entryAt = (i: number): Entry => (entries[i] ??= serializeTopBlock(doc, i, n, neighbours, afresh));
 		const partAt = (i: number): string => entryAt(i).text;
 		// where a block's runs landed is remembered on the block, rendered or not
 		const placedEntry = (i: number): Entry => {
@@ -1303,7 +1319,7 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 			} else {
 				// a changed block that belongs to a construct the parse knew as several blocks is written
 				// out with the whole construct, its frame and untouched items as the file's bytes
-				const construct = constructSplice(doc, i, neighbours);
+				const construct = afresh?.has(doc.child(i)) ? null : constructSplice(doc, i, neighbours);
 				const count = construct ? construct.count : 1;
 				let part = partAt(i);
 				let partLeaves: Segment[] | null = null;

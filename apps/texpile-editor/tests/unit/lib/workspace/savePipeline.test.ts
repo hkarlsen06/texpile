@@ -244,3 +244,22 @@ describe('SavePipeline while autosave is held off', () => {
 		expect(writes).toEqual([{ path: '/ws/main.tex', content: 'second' }]);
 	});
 });
+
+describe('the verify hook', () => {
+	it('writes what the check hands back, and the queued content when it hands back null', async () => {
+		const { pipeline, writes } = makePipeline();
+		pipeline.verify = async (_path, content) => (content === 'spliced' ? 'rewritten' : null);
+		await pipeline.enqueue('/ws/main.tex', 'spliced', false);
+		await pipeline.enqueue('/ws/main.tex', 'other', false);
+		expect(writes.map((w) => w.content)).toEqual(['rewritten', 'other']);
+	});
+
+	it('a check that throws leaves the content as queued', async () => {
+		const { pipeline, writes } = makePipeline();
+		pipeline.verify = async () => {
+			throw new Error('no parser');
+		};
+		await pipeline.enqueue('/ws/main.tex', 'mine', false);
+		expect(writes.map((w) => w.content)).toEqual(['mine']);
+	});
+});

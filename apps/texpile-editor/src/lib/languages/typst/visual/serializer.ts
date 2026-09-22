@@ -376,8 +376,8 @@ export function serializeToTypst(doc: Node): string {
 	return serializeToTypstDetailed(doc).text;
 }
 
-export function serializeToTypstDetailed(doc: Node, parse?: ParseOrigins | null): DocSerializeResult {
-	const result = assembly.serializeDocChildrenDetailed(doc, parse);
+export function serializeToTypstDetailed(doc: Node, parse?: ParseOrigins | null, afresh?: ReadonlySet<Node>): DocSerializeResult {
+	const result = assembly.serializeDocChildrenDetailed(doc, parse, afresh);
 	// a CRLF file stays CRLF: verbatim slices already are, regenerated text is not
 	const file = doc.attrs.typFile as { eol?: string } | null;
 	if (file?.eol !== '\r\n') return result;

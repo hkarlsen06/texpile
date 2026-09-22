@@ -557,8 +557,8 @@ const assembly = createBlockAssembly((node, ctx) => serializeNode(node, ctx), {
 	childGap: (parent) => (parent.type.name === 'table_cell' || parent.type.name === 'table_header' ? ' \\par ' : null)
 });
 
-function serializeDocChildrenDetailed(doc: Node, parse?: ParseOrigins | null): DocSerializeResult {
-	return assembly.serializeDocChildrenDetailed(doc, parse);
+function serializeDocChildrenDetailed(doc: Node, parse?: ParseOrigins | null, afresh?: ReadonlySet<Node>): DocSerializeResult {
+	return assembly.serializeDocChildrenDetailed(doc, parse, afresh);
 }
 
 function serializeDocChildren(doc: Node): string {
@@ -921,8 +921,8 @@ export function serializeToLatex(doc: Node): string {
  * boundary: latexRoundtrip.ts must NOT insert its own separator around a protected edge (the
  * body already carries the exact original bytes), only around a regenerated one.
  */
-export function serializeToLatexDetailed(doc: Node, parse?: ParseOrigins | null): DocSerializeResult {
-	return serializeDocChildrenDetailed(doc, parse);
+export function serializeToLatexDetailed(doc: Node, parse?: ParseOrigins | null, afresh?: ReadonlySet<Node>): DocSerializeResult {
+	return serializeDocChildrenDetailed(doc, parse, afresh);
 }
 
 /** Nothing but labels (and whitespace) - the paragraph the importer makes for a \label sitting on

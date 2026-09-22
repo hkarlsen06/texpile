@@ -47,9 +47,10 @@ export function serializeTypstFile(parsed: Pick<ParsedLatexFile, 'preamble' | 'p
 /** the file text and where every run of `doc` landed in it */
 export function serializeTypstFileDetailed(
 	parsed: Pick<ParsedLatexFile, 'preamble' | 'postamble' | 'hadDocumentEnv'> & Partial<Pick<ParsedLatexFile, 'origins'>>,
-	doc: Node
+	doc: Node,
+	afresh?: ReadonlySet<Node>
 ): { text: string; map: SourceMap } {
-	const { text: body, tailProtected, map } = serializeToTypstDetailed(doc, parsed.origins ?? null);
+	const { text: body, tailProtected, map } = serializeToTypstDetailed(doc, parsed.origins ?? null, afresh);
 	const file = doc.attrs.typFile as { bom?: boolean; eol?: string } | null;
 	const eol = file?.eol === '\r\n' ? '\r\n' : '\n';
 	const withTail = body + (tailProtected ? '' : eol);

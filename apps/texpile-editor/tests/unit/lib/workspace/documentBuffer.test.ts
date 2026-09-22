@@ -4,6 +4,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { noParse } from '$lib/editor/visual/sourceSpans';
 import { DocumentBuffer } from '$lib/workspace/documentBuffer.svelte';
+import { parseLatexFile } from '$lib/workspace/latexRoundtrip';
+import { Fragment, type Node as PMNode } from 'prosemirror-model';
 import { schema } from '$lib/languages/latex/schema/latexPMSchema';
 import type { ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
 
@@ -81,5 +83,60 @@ describe('DocumentBuffer.lastDocSource follows the mounted doc, not the last par
 		buffer.onVisualChange(parsedWith('edited').doc);
 		buffer.texSource = 'ORIGINAL'; // an external revert adopted over the edited buffer
 		expect(buffer.lastDocSource).not.toBe(buffer.texSource);
+	});
+});
+
+describe('DocumentBuffer.verifyForWrite', () => {
+	const SRC = '\\documentclass{article}\n\\begin{document}\nAlpha   one.\n\nBeta two.\n\\end{document}\n';
+	function withCheck(reparse: (text: string) => Promise<PMNode | null>) {
+		const noteSaveRewrite = vi.fn();
+		const buffer = new DocumentBuffer({
+			scheduleSave: () => {},
+			discardQueuedSave: () => {},
+			writeNow: () => {},
+			rebuildVisual: () => {},
+			isVisualMode: () => true,
+			noteLocalEdit: () => {},
+			clearPendingAnchor: () => {},
+			reparse,
+			noteSaveRewrite
+		});
+		const parsed = parseLatexFile(SRC);
+		buffer.openTex('C:/ws/main.tex', SRC, '\n');
+		buffer.adoptParsed(parsed, SRC);
+		const child = parsed.doc.child(1);
+		const kids: PMNode[] = [];
+		parsed.doc.forEach((c, _o, k) =>
+			kids.push(k === 1 ? child.type.create(child.attrs, child.type.schema.text('Beta changed.'), child.marks) : c)
+		);
+		buffer.onVisualChange(parsed.doc.copy(Fragment.fromArray(kids)));
+		return { buffer, noteSaveRewrite };
+	}
+
+	it('keeps a file that reads back as the document', async () => {
+		const { buffer, noteSaveRewrite } = withCheck((text) => Promise.resolve(parseLatexFile(text).doc));
+		const text = buffer.texSource;
+		expect(text).toContain('Alpha   one.\n\nBeta changed.');
+		expect(await buffer.verifyForWrite('C:/ws/main.tex', text)).toBeNull();
+		expect(noteSaveRewrite).not.toHaveBeenCalled();
+	});
+
+	it('rewrites the changed block and follows with its buffers when the file does not', async () => {
+		const empty = parseLatexFile('\\documentclass{article}\n\\begin{document}\nNothing.\n\\end{document}\n').doc;
+		const { buffer, noteSaveRewrite } = withCheck(() => Promise.resolve(empty));
+		const text = buffer.texSource;
+		const written = await buffer.verifyForWrite('C:/ws/main.tex', text);
+		expect(written).not.toBeNull();
+		expect(buffer.texSource).toBe(written);
+		expect(buffer.lastDocSource).toBe(written);
+		expect(noteSaveRewrite).toHaveBeenCalledWith(2, expect.stringMatching(/reopen/));
+	});
+
+	it('does not check text that is not the document\u2019s own serialization', async () => {
+		const reparse = vi.fn(() => Promise.resolve(null));
+		const { buffer } = withCheck(reparse);
+		buffer.onTexInput('typed in source mode');
+		expect(await buffer.verifyForWrite('C:/ws/main.tex', 'typed in source mode')).toBeNull();
+		expect(reparse).not.toHaveBeenCalled();
 	});
 });

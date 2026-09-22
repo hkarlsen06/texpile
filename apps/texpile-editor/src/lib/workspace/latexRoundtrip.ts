@@ -184,12 +184,14 @@ export function serializeLatexFile(parsed: Pick<ParsedLatexFile, 'preamble' | 'p
 /** the file text and where every run of `doc` landed in it */
 export function serializeLatexFileDetailed(
 	parsed: Pick<ParsedLatexFile, 'preamble' | 'postamble' | 'hadDocumentEnv'> & Partial<Pick<ParsedLatexFile, 'origins'>>,
-	doc: Node
+	doc: Node,
+	afresh?: ReadonlySet<Node>
 ): { text: string; map: SourceMap } {
 	// a caller holding the parse hands it on, for a document no block of which the parse knows by node
 	const { text, leadProtected, tailProtected, leadGap, tailGap, trailingRegenerated, map } = serializeToLatexDetailed(
 		doc,
-		parsed.origins ?? null
+		parsed.origins ?? null,
+		afresh
 	);
 	// fragment file: body IS the entire file, no synthesized wrapper written back. a protected
 	// tail reproduces the original bytes through EOF, including a missing trailing newline.

@@ -542,20 +542,22 @@ export function parseOf(doc: PMNode): ParseOrigins | undefined {
 	return undefined;
 }
 
+/** the same block made afresh at every depth, a node no parse knows: written out whole by the
+ *  deterministic rules, its untouched children included. type.create, not copy: copy hands the
+ *  same node back for the same content, and a container would find a child it still knows */
+export function forgetBlock(node: PMNode): PMNode {
+	if (!isContainer(node)) return node.type.create(node.attrs, node.content, node.marks);
+	const kids: PMNode[] = [];
+	node.forEach((child) => kids.push(forgetBlock(child)));
+	return node.type.create(node.attrs, kids, node.marks);
+}
+
 /** the same document with its bytes forgotten: every block is written out afresh by the
  *  deterministic rules, the path an edited block takes, while the gaps between blocks and the
  *  constructs they came from stay known */
 export function withoutOrigins(doc: PMNode): PMNode {
-	// type.create, not copy: copy hands the same node back for the same content. Every block at
-	// every depth is made afresh, so no container finds a child it still knows
-	function fresh(node: PMNode): PMNode {
-		if (!isContainer(node)) return node.type.create(node.attrs, node.content, node.marks);
-		const kids: PMNode[] = [];
-		node.forEach((child) => kids.push(fresh(child)));
-		return node.type.create(node.attrs, kids, node.marks);
-	}
 	const kids: PMNode[] = [];
-	doc.forEach((child) => kids.push(fresh(child)));
+	doc.forEach((child) => kids.push(forgetBlock(child)));
 	const out = doc.type.create(doc.attrs, kids, doc.marks);
 	const parse = parseOf(doc);
 	if (parse) {

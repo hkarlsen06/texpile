@@ -9,6 +9,7 @@ import { parseLatexRegion, serializeLatexFileDetailed, type ParsedLatexFile } fr
 import { parseMarkdownRegion, serializeMarkdownFileDetailed } from '$lib/languages/markdown/visual/roundtrip';
 import { parseTypstRegion, serializeTypstFileDetailed } from '$lib/languages/typst/visual/roundtrip';
 import { emptyMap, type RegionParser, type SourceMap } from '$lib/editor/visual/sourceSpans';
+import { verifiedSerialize } from '$lib/workspace/verifiedSerialize';
 import { replacePreambleFrontmatter } from '$lib/editor/visual/extensions/raw-latex/frontmatterView';
 import { basename, relativeTo, type Eol } from '$lib/workspace/fileSystem';
 import { citationVariantsFor } from '$lib/languages/latex/visual/extensions/citation/citationVariantsFor';
@@ -69,6 +70,12 @@ export type DocumentBufferDeps = {
 	clearPendingAnchor(): void;
 	/** macro-defining text from the main file's include chain, as the parse saw it */
 	projectMacros?(): string;
+	/** the document a file's text parses to, for the save check; null when it cannot be parsed
+	 *  now (a timeout), which leaves the file as serialized. Absent: no save check */
+	reparse?(text: string, format: 'tex' | 'md' | 'typ'): Promise<PMNode | null>;
+	/** the save check had to write `rewritten` blocks out whole; `difference` says what still
+	 *  differs on reopen when even that did not do */
+	noteSaveRewrite?(rewritten: number, difference: string | null): void;
 };
 
 export class DocumentBuffer {
@@ -123,12 +130,41 @@ export class DocumentBuffer {
 		return (src) => parseLatexRegion(src, scan);
 	}
 
-	/** serialize the visual doc back to source in the open file's dialect, with where its runs landed */
-	private serializeFile(doc: PMNode): { text: string; map: SourceMap } {
+	/** serialize the visual doc back to source in the open file's dialect, with where its runs
+	 *  landed; the blocks in `afresh` written whole (see verifiedSerialize) */
+	private serializeFile(doc: PMNode, afresh?: ReadonlySet<PMNode>): { text: string; map: SourceMap } {
 		if (!this.docMeta) return { text: this.texSource, map: this.sourceMap };
-		if (this.kind === 'md') return serializeMarkdownFileDetailed(this.docMeta, doc);
-		if (this.kind === 'typ') return serializeTypstFileDetailed(this.docMeta, doc);
-		return serializeLatexFileDetailed(this.docMeta, doc);
+		if (this.kind === 'md') return serializeMarkdownFileDetailed(this.docMeta, doc, afresh);
+		if (this.kind === 'typ') return serializeTypstFileDetailed(this.docMeta, doc, afresh);
+		return serializeLatexFileDetailed(this.docMeta, doc, afresh);
+	}
+
+	/**
+	 * The save check, run by the save pipeline before `content` goes to disk: when it is what the
+	 * visual doc serialized to, it is parsed again and must show what the doc shows; failing that
+	 * the changed blocks are written whole (see verifiedSerialize) and the buffers follow, so the
+	 * source view shows what was saved. Null keeps the content: a source-mode edit is the truth as
+	 * typed, and an edit made while the check ran gets a check of its own
+	 */
+	async verifyForWrite(path: string, content: string): Promise<string | null> {
+		const reparse = this.deps.reparse;
+		if (!reparse || !this.docMeta || !this.lastDoc || !hasVisualMode(this.kind)) return null;
+		if (path !== this.path || content !== this.texSource || this.lastDocSource !== content) return null;
+		const doc = this.lastDoc;
+		const format = formatOf(this.kind);
+		const verified = await verifiedSerialize({
+			format,
+			doc,
+			first: { text: content, map: this.sourceMap },
+			serialize: (d, afresh) => this.serializeFile(d, afresh),
+			reparse: (text) => reparse(text, format)
+		});
+		if (verified.rung === 0 || this.lastDoc !== doc || this.texSource !== content) return null;
+		this.texSource = verified.text;
+		this.sourceMap = verified.map;
+		this.lastDocSource = verified.text;
+		this.deps.noteSaveRewrite?.(verified.rewritten, verified.difference);
+		return verified.text;
 	}
 
 	/** display name: root-relative when we have a root, else just the basename */

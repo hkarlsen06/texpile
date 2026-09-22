@@ -358,6 +358,6 @@ export function serializeToMarkdown(doc: Node): string {
 	return assembly.serializeDocChildrenDetailed(doc).text;
 }
 
-export function serializeToMarkdownDetailed(doc: Node, parse?: ParseOrigins | null): DocSerializeResult {
-	return assembly.serializeDocChildrenDetailed(doc, parse);
+export function serializeToMarkdownDetailed(doc: Node, parse?: ParseOrigins | null, afresh?: ReadonlySet<Node>): DocSerializeResult {
+	return assembly.serializeDocChildrenDetailed(doc, parse, afresh);
 }
