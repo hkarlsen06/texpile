@@ -178,54 +178,13 @@ export function envArgsRawSource(env: Environment): string | null {
 export type RawSpan = { text: string; from: number; to: number };
 
 /** The node's exact original source slice and its offsets, or null when no trustworthy span exists. */
-/** the end of the brace or bracket groups the macro's args were read from, scanned from the
- *  source itself after the control sequence; null when the source has no such group where one
- *  is expected */
-function spanOverArgs(src: string, from: number, args: { openMark: string; closeMark: string }[]): number | null {
-	let at = from;
-	for (const arg of args) {
-		if (!arg.openMark) continue;
-		while (at < src.length && /[ \t\r\n]/.test(src[at])) at++;
-		if (src[at] !== arg.openMark) return null;
-		let depth = 0;
-		for (; at < src.length; at++) {
-			const ch = src[at];
-			if (ch === '\\') {
-				at++;
-				continue;
-			}
-			if (ch === '%') {
-				while (at < src.length && src[at] !== '\n') at++;
-				continue;
-			}
-			if (ch === arg.openMark) depth++;
-			else if (ch === arg.closeMark && --depth === 0) break;
-		}
-		if (at >= src.length) return null;
-		at++;
-	}
-	return at;
-}
-
 export function nodeRawSpan(node: Node): RawSpan | null {
 	if (!capture.rawSource) return null;
 	const ext = nodeExtent(node);
 	if (!ext || !Number.isFinite(ext.min) || ext.min < 0 || ext.max > capture.rawSource.length || ext.min >= ext.max) return null;
 
 	let end: number = ext.max;
-	const args = (node as Macro).args as { openMark: string; closeMark: string; content: Node[] }[] | undefined;
-	const hasArgs = !!args?.length;
-	// an argument the parser read again on its own (`\frac{\act_i}{b}`, whose subscript made it
-	// math) carries offsets counted from its own start, not the file's: the extent over them is
-	// meaningless, and the groups are found in the source instead
-	const own = (node as unknown as { position?: { start?: { offset?: number }; end?: { offset?: number } } }).position;
-	const ownEnd = typeof own?.end?.offset === 'number' ? own.end.offset : ext.max;
-	const relative = hasArgs && args!.some((a) => a.content.some((c) => Number.isFinite(extentOf(c, 0).min) && extentOf(c, 0).min < ext.min));
-	if (relative) {
-		const scanned = spanOverArgs(capture.rawSource, ownEnd, args!);
-		if (scanned === null) return null;
-		end = scanned;
-	} else if (hasArgs) end = repairArgTail(node, capture.rawSource, ext.max) ?? ext.max;
+	if ((node as Macro).args?.length) end = repairArgTail(node, capture.rawSource, ext.max) ?? ext.max;
 	end = closeUnbalanced(capture.rawSource, ext.min, end);
 	if (end > capture.rawSource.length) return null;
 

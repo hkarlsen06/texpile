@@ -171,7 +171,9 @@ function extractTableComponents(content: Node[], ctx: ConversionContext) {
 	if (noteNodes.length > 0) {
 		const convertedNotes = convertNodesToInline(noteNodes, ctx);
 		if (convertedNotes.length > 0) {
-			notes.push(noteBlockSpan(buildNode('table_notes', null, convertedNotes), spanOfNodes(trimBlank(noteNodes))));
+			// the span covers every node that became content, a comment at either edge included: a
+			// block whose leaf runs lie outside it is not believed (see soundLeaves)
+			notes.push(noteBlockSpan(buildNode('table_notes', null, convertedNotes), spanOfNodes(noteNodes)));
 		}
 	}
 

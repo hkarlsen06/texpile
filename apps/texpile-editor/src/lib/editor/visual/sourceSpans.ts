@@ -311,7 +311,7 @@ function soundLeaves(doc: PMNode, body: ParseBody, block: Segment, leaves: Segme
 		ok = false;
 	};
 	for (const s of leaves) {
-		if (s.srcFrom > s.srcTo || s.srcFrom < block.srcFrom || s.srcTo > block.srcTo) {
+		if (s.srcFrom > s.srcTo || s.srcFrom < block.srcFrom || s.srcTo > block.srcTo || s.srcFrom < body.from || s.srcTo > body.to) {
 			bad('outside', s, `run ${s.srcFrom}..${s.srcTo} outside its block ${block.srcFrom}..${block.srcTo}`);
 			continue;
 		}
