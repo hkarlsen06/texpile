@@ -2,6 +2,15 @@
 // Markdown and Typst serializers. Knows nothing about any syntax — it deals in what the parse
 // remembers of each block (its bytes, the gap before them, its place in the parse's order) and in
 // the deterministic text the dialect writes for a block the parse no longer knows.
+//
+// The round trip is a lens: the parse is `get`, this assembly is `put`, and `put` reads the old
+// file as well as the document, never the document alone. Two laws hold it together:
+//   put(file, get(file)) == file          an untouched document writes its file back byte for byte
+//   get(put(file, doc)) ~ doc             what was written reads back as what was shown
+// The first holds by construction: every block the parse still knows is its bytes, joined on the
+// file's own gaps. The second is checked before a save (see workspace/verifiedSerialize.ts) on
+// what a reader sees, since the bytes may legitimately differ from what the dialect would write;
+// a block that fails it is written whole, and nothing untouched is ever regenerated for it.
 import type { Node } from 'prosemirror-model';
 import type { Ctx } from './types';
 import {
@@ -148,7 +157,7 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 	// the neighbour facts handlers read via prevSibling/nextSibling (heading adjacency for
 	// paragraph, type+kind for list coalescing) — captured in `key`. if a handler ever reads more
 	// of Ctx at the top level, widen the key.
-	type Placed = { key: string; block: Segment; leaves: Segment[]; inner: Segment[] };
+	type Placed = { key: string; nodes: Node[]; block: Segment; leaves: Segment[]; inner: Segment[] };
 	type Entry = { key: string; text: string; leaves?: Segment[] | null; inner?: Segment[] | null; placed?: Placed };
 	/** what a splice hands back: the bytes, the leaf runs in them, and the range of every block below
 	 *  the top level in them, all relative to the text and to the first node */
@@ -156,10 +165,20 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 	const blockCache = new WeakMap<Node, Entry>();
 
 	// a block's placed runs are the same objects call after call while it lands at the same place;
-	// nothing changes them in place, so sharing them is safe
-	function placedRuns(entry: Entry, key: string, make: () => { block: Segment; leaves: Segment[]; inner: Segment[] }): Placed {
-		if (!entry.placed || entry.placed.key !== key) entry.placed = { key, ...make() };
-		return entry.placed;
+	// nothing changes them in place, so sharing them is safe. The runs of a construct of several
+	// blocks are kept on its first, and believed only while every block is the one they were made
+	// for: the first item of a list is untouched by an edit to its third, which lands at the same place
+	function placedRuns(
+		entry: Entry,
+		key: string,
+		nodes: Node[],
+		make: () => { block: Segment; leaves: Segment[]; inner: Segment[] }
+	): Placed {
+		const hit = entry.placed;
+		if (hit && hit.key === key && hit.nodes.length === nodes.length && hit.nodes.every((n, k) => n === nodes[k])) return hit;
+		const placed: Placed = { key, nodes, ...make() };
+		entry.placed = placed;
+		return placed;
 	}
 
 	function ctxFor(doc: Node, i: number, n: number): Ctx {
@@ -336,12 +355,9 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 					text += gap;
 					const at = text.length;
 					text += ref.text!;
-					for (let t = 0; t < slot.size; t++) {
-						const co = parsed[ref.index + t];
-						let pmAt = childPm;
-						for (let u = 0; u < t; u++) pmAt += group[u].nodeSize;
-						for (const l of co.leaves) leaves.push(shiftSegment(l, pmAt - co.pmFrom, at - ref.srcFrom!));
-					}
+					// every member of a construct carries the construct's runs, from its first block's
+					// position: they are moved once, or the second member's copy lands one member off
+					for (const l of ref.leaves) leaves.push(shiftSegment(l, childPm - ref.pmFrom, at - ref.srcFrom!));
 					inner.push({ pmFrom: childPm, pmTo: childPm + groupPm, srcFrom: at, srcTo: at + ref.text!.length, kind: 'sub' });
 					for (const seg of nestedOf(group, ref.pmFrom)) inner.push(shiftSegment(seg, childPm - ref.pmFrom, at - ref.srcFrom!));
 				} else {
@@ -1296,12 +1312,13 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 				// the block's runs are where they were at parse time, moved to where the slice landed
 				let pmEnd = pmStarts[i];
 				for (let k = 0; k < run; k++) pmEnd += doc.child(i + k).nodeSize;
-				const placed = placedRuns(placedEntry(i), `v:${pmStarts[i]}:${at}:${run}`, () => {
+				const members: Node[] = [];
+				for (let k = 0; k < run; k++) members.push(doc.child(i + k));
+				const placed = placedRuns(placedEntry(i), `v:${pmStarts[i]}:${at}:${run}`, members, () => {
 					const block: Segment = { pmFrom: pmStarts[i], pmTo: pmEnd, srcFrom: at, srcTo: at + text.length, kind: 'sub' };
 					const carried = origin.srcTo! - origin.srcFrom! === text.length && origin.pmTo - origin.pmFrom === pmEnd - pmStarts[i];
 					const runs = carried ? origin.leaves.map((s) => shiftSegment(s, pmStarts[i] - origin.pmFrom, at - origin.srcFrom!)) : [];
-					const nodes: Node[] = [];
-					for (let k = 0; k < run; k++) nodes.push(doc.child(i + k));
+					const nodes = members;
 					const within = carried
 						? nestedOf(nodes, origin.pmFrom).map((s) => shiftSegment(s, pmStarts[i] - origin.pmFrom, at - origin.srcFrom!))
 						: [];
@@ -1354,7 +1371,9 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 					const dropped = part.length - body.length;
 					let pmEnd = pmStarts[i];
 					for (let k = 0; k < count; k++) pmEnd += doc.child(i + k).nodeSize;
-					const placed = placedRuns(entryAt(i), `r:${pmStarts[i]}:${at}:${dropped}:${count}`, () => {
+					const members: Node[] = [];
+					for (let k = 0; k < count; k++) members.push(doc.child(i + k));
+					const placed = placedRuns(entryAt(i), `r:${pmStarts[i]}:${at}:${dropped}:${count}`, members, () => {
 						const block: Segment = { pmFrom: pmStarts[i], pmTo: pmEnd, srcFrom: at, srcTo: at + body.length, kind: 'sub' };
 						const runs: Segment[] = [];
 						for (const s of partLeaves ?? leavesOf(doc, i, n, entryAt(i))) {

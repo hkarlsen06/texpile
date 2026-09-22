@@ -5,11 +5,11 @@
 // node per item), so list/emphasis logic lives here; escaping follows prosemirror-markdown's
 // rules. Convention: every block handler ends with its own separation ('\n\n', lists '\n'
 // mid-run), so plain concatenation of parts is a valid document.
-import { Fragment, type Node } from 'prosemirror-model';
+import type { Node } from 'prosemirror-model';
 import { createBlockAssembly, type DocSerializeResult } from '$lib/serializer/blockAssembly';
-import type { ParseOrigins, Segment } from '$lib/editor/visual/sourceSpans';
+import type { ParseOrigins } from '$lib/editor/visual/sourceSpans';
 import type { Ctx } from '$lib/serializer/types';
-import { escLineStart, escMd } from './inlineSyntax';
+import { escMd } from './inlineSyntax';
 import { imageMarkdown, renderInline, mdShadow, isMdHandlerLeaf } from './markdownInline';
 import { listFamily, listMarker, sameList } from './listAttrs';
 
@@ -230,41 +230,6 @@ export function serializeMdNode(node: Node, ctx: Ctx): string {
 }
 
 /** the inline children of a paragraph as one run, and how the paragraph writes it */
-function inlineRun(block: Node, nodes: Node[]): Node {
-	return block.type.create(block.attrs, Fragment.fromArray(nodes), block.marks);
-}
-
-function inTable(block: Node): boolean {
-	return block.type.name === 'table' || block.type.name === 'table_wrapper';
-}
-
-/** a stretch of a paragraph's inline content, written as the paragraph writes it: the line-start
- *  escapes only where the stretch begins the paragraph */
-function inlineBytes(block: Node, nodes: Node[], atStart: boolean): string | null {
-	if (block.type.name !== 'paragraph') return null;
-	return renderInline(inlineRun(block, nodes), { startOfLine: atStart });
-}
-
-function mapInlineLeaves(block: Node, nodes: Node[], text: string, atStart: boolean): Segment[] | null {
-	const run = inlineRun(block, nodes);
-	return mdShadow.mapBlockLeaves(
-		(n) => renderInline(n, { startOfLine: atStart }),
-		run,
-		{ parent: null, index: 0, isLastChild: true, inTableCell: false },
-		text
-	);
-}
-
-/** a text leaf on its own: the text inside code, the dialect's escaping elsewhere; null for a
- *  leaf written by a rule of its own (a bare link, code that would need a longer fence) */
-function leafBytes(leaf: Node, parent: Node, atStart: boolean, block: Node): string | null {
-	const text = leaf.text ?? '';
-	if (parent.type.spec.code || parent.type.spec.leafText) return text;
-	if (leaf.marks.some((m) => m.type.name === 'code')) return text.includes('`') ? null : text;
-	if (/^(https?:\/\/|www\.)\S+$/.test(text)) return null;
-	return escMd(text, atStart, inTable(block));
-}
-
 /** what continues a child's lines inside its container: the prefix the file gave its second line,
  *  else the width of what stood before its first (a marker becomes spaces, a quote's `>` stays) */
 function continuation(_parent: Node, text: string, head: string): string {
@@ -276,82 +241,18 @@ function continuation(_parent: Node, text: string, head: string): string {
 	return text.startsWith('>') ? prefix.replace(/>[ \t]*$/, '') : prefix;
 }
 
-// how many runs of the delimiter `c` stand unescaped in `s`: an odd count means the next one closes
-function delimiterRuns(s: string, c: string): number {
-	let n = 0;
-	for (let i = 0; i < s.length; i++) {
-		if (s[i] === '\\') {
-			i++;
-			continue;
-		}
-		// a code span's characters are its own
-		if (s[i] === '`') {
-			let fence = 1;
-			while (s[i + fence] === '`') fence++;
-			const close = s.indexOf('`'.repeat(fence), i + fence);
-			i = close < 0 ? s.length : close + fence - 1;
-			continue;
-		}
-		if (s[i] !== c) continue;
-		n++;
-		while (s[i + 1] === c) i++;
-	}
-	return n;
-}
-
-const WORD = /[\p{L}\p{N}]/u;
-const PUNCTUATION = /[\p{P}\p{S}]/u;
-
-// whether a delimiter run of `c` can stand between `prev` and `next`, as the run it is: an
-// opener is left-flanking (not before whitespace; before punctuation only after whitespace,
-// punctuation or the start), a closer right-flanking (the mirror); `_` never opens or closes
-// inside a word
-function flanks(c: string, closer: boolean, prev: string, next: string): boolean {
-	if (closer) {
-		if (prev === '' || /\s/.test(prev)) return false;
-		if (PUNCTUATION.test(prev) && next !== '' && !/\s/.test(next) && !PUNCTUATION.test(next)) return false;
-		return !(c === '_' && WORD.test(next));
-	}
-	if (next === '' || /\s/.test(next)) return false;
-	if (PUNCTUATION.test(next) && prev !== '' && !/\s/.test(prev) && !PUNCTUATION.test(prev)) return false;
-	return !(c === '_' && WORD.test(prev));
-}
-
-// a seam where a delimiter run the file keeps, or the fresh bytes bring, could no longer flank:
-// the inline renderer moves whitespace and punctuation out of the emphasis when it sees the whole
-// run, so such a seam gives the splice up
-function delimSeam(before: string, after: string): boolean {
-	const opening = /^([*_])\1*/.exec(after);
-	if (opening) {
-		const c = opening[1];
-		const closer = delimiterRuns(before, c) % 2 === 1;
-		if (!flanks(c, closer, before[before.length - 1] ?? '', after[opening[0].length] ?? '')) return true;
-	}
-	const closing = /([*_])\1*$/.exec(before);
-	if (closing) {
-		const c = closing[1];
-		const rest = before.slice(0, before.length - closing[0].length);
-		const closer = delimiterRuns(rest, c) % 2 === 1;
-		if (!flanks(c, closer, rest[rest.length - 1] ?? '', after[0] ?? '')) return true;
-	}
-	return false;
-}
-
+// Markdown is kept at block granularity: an untouched block, at the top level or inside a list
+// item or a quote, is the file's bytes; a block that changed is written whole. No leaf or run
+// inside a changed paragraph is patched in place, since a seam between fresh bytes and the file's
+// (an emphasis delimiter that no longer flanks, a marker at a line start) is where Markdown's
+// loose grammar reads two things as one, and a paragraph written afresh loses nothing but a hand
+// wrap: the format has no comments and no macros to keep
 const assembly = createBlockAssembly((node, ctx) => serializeMdNode(node, ctx), {
 	mapLeaves: (node, ctx, text) => mdShadow.mapBlockLeaves(serializeMdNode, node, ctx, text),
 	// a task item's box is written with its marker, from the item's attrs: the first block of the
 	// item cannot be rendered on its own inside the item's frame, whose bytes hold the box
 	spliceChild: (parent, index) => !(parent.type.name === 'list' && index === 0 && parent.attrs.kind === 'task'),
-	continuation,
-	leafBytes,
-	inlineBytes,
-	mapInlineLeaves,
-	keepApart: (bytes, tail, head) => {
-		// each seam is read with everything on both sides of it, so a delimiter's run is counted whole
-		if (delimSeam(head, bytes + tail) || (bytes !== '' && delimSeam(head + bytes, tail))) return null;
-		// fresh bytes after a line end (a hard break's) begin a line, where a marker would open a block
-		return bytes !== '' && /\n[ \t]*$/.test(head) ? escLineStart(bytes) : bytes;
-	}
+	continuation
 });
 
 export function serializeToMarkdown(doc: Node): string {

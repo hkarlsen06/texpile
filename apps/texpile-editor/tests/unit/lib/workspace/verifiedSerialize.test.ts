@@ -2,7 +2,7 @@
 // not, only the blocks written from the document are written whole, never the untouched ones
 import { describe, it, expect } from 'vitest';
 import { EditorState } from 'prosemirror-state';
-import type { Node as PMNode } from 'prosemirror-model';
+import { Fragment, type Node as PMNode } from 'prosemirror-model';
 import { parseLatexFile, serializeLatexFileDetailed } from '$lib/workspace/latexRoundtrip';
 import { changedBlocks, verifiedSerialize, type Serialized } from '$lib/workspace/verifiedSerialize';
 import { FORMATS, prng, randomEdit } from './visualEditsFuzz';
@@ -25,9 +25,7 @@ function retyped(doc: PMNode, i: number, text: string): PMNode {
 	const child = doc.child(i);
 	const kids: PMNode[] = [];
 	doc.forEach((c, _o, k) => kids.push(k === i ? child.type.create(child.attrs, child.type.schema.text(text), child.marks) : c));
-	return doc.copy(
-		doc.content.constructor.fromArray ? (doc.content.constructor as { fromArray: (n: PMNode[]) => never }).fromArray(kids) : doc.content
-	);
+	return doc.copy(Fragment.fromArray(kids));
 }
 
 function edited(): { parsed: ReturnType<typeof parseLatexFile>; doc: PMNode; first: Serialized } {
