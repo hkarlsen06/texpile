@@ -18,6 +18,23 @@
 	box-decoration-break: clone;
 }
 
+/* inside a selection shade we paint ourselves, nothing paints it again: not the browser (text inside a drawn
+   chip is still selectable DOM) and not a line break's hand-drawn hyphen. Each layered its own copy of the
+   same colour over ours. A thread's tint is not in this list: the reader's selection belongs over it */
+.ProseMirror .pm-range-node::selection,
+.ProseMirror .pm-range-node ::selection,
+.ProseMirror .pm-range-text::selection,
+.ProseMirror .pm-range-text ::selection {
+	background-color: transparent;
+}
+/* ProseMirror merges two decorations over the same character into one span, so the shade can be the
+   hyphen's own element as well as around it */
+.ProseMirror .pm-line-par .pm-line-hyphen.pm-line-hyphen-selected.pm-range-text::after,
+.ProseMirror .pm-line-par .pm-range-text .pm-line-hyphen.pm-line-hyphen-selected::after,
+.ProseMirror .pm-line-par .pm-range-node .pm-line-hyphen.pm-line-hyphen-selected::after {
+	background-color: transparent;
+}
+
 /* a crossed inline element, whose own height is not its line's: rangeBands.ts measures the line and
    names the band. the padding paints and the margin hands the height back, so the line does not move */
 .ProseMirror .pm-range-node[data-band] {
