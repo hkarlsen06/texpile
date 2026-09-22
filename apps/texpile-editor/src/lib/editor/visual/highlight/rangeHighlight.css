@@ -9,9 +9,11 @@
 	background-color: var(--range-tint);
 }
 
-/* text under a selection, at the height the browser would have given it, read off the line itself */
+/* text under a selection, at the height the browser would have given it: its own line box, less the
+   height the font paints at, split the way the browser splits it (rangeBands.ts measures both) */
 .ProseMirror .pm-range-text {
-	padding-block: calc((1lh - 1em) / 2);
+	padding-block: calc((1lh - var(--text-area, 1em)) / 2 + var(--text-skew, 0em))
+		calc((1lh - var(--text-area, 1em)) / 2 - var(--text-skew, 0em));
 	-webkit-box-decoration-break: clone;
 	box-decoration-break: clone;
 }

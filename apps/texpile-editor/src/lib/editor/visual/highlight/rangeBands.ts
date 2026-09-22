@@ -62,11 +62,52 @@ export function rangeBandRules(view: EditorView): string {
 	return rules;
 }
 
+// how far a line box reaches above and below the text on it, as shares of the font size. an inline
+// box's background covers the font's ascent and descent, not the 1em it asked for, so padding worked
+// out from 1em ran every line's shade into the next one's, a darker strip at each join; and the browser
+// splits the leading unevenly, so halving it left a one pixel seam. measured on a line of its own at
+// the paragraph's size and spacing, which the browser lays out the same way to the last layout unit
+function textReachRule(view: EditorView): string {
+	const paragraph = view.dom.querySelector(':scope > p');
+	if (!paragraph) return '';
+	const font = getComputedStyle(paragraph);
+	const size = parseFloat(font.fontSize);
+	if (!font.fontFamily || !(size > 0)) return '';
+	const line = document.body.appendChild(document.createElement('div'));
+	line.style.cssText = 'position:absolute;left:-9999px;top:0;visibility:hidden;white-space:nowrap;margin:0;padding:0;border:0';
+	for (const name of ['fontFamily', 'fontWeight', 'fontStyle', 'fontSize', 'lineHeight'] as const) line.style[name] = font[name];
+	const text = line.appendChild(document.createElement('span'));
+	text.textContent = 'x';
+	const zoom = cssZoomOf(text);
+	const outer = line.getBoundingClientRect();
+	const inner = text.getBoundingClientRect();
+	line.remove();
+	const up = (inner.top - outer.top) / zoom / size;
+	const down = (outer.bottom - inner.bottom) / zoom / size;
+	const area = inner.height / zoom / size;
+	if (!(up >= 0 && down >= 0 && area > 0)) return '';
+	// the text's own height and how far off centre the browser set it, so text at another size or
+	// spacing (a heading) still centres on its own line box
+	return `.ProseMirror{--text-area:${area.toFixed(6)}em;--text-skew:${((up - down) / 2).toFixed(6)}em}`;
+}
+
 export type RangeBandPainter = { repaint(): void; destroy(): void };
 
 /** keeps the rules in step with the selection, the scroll position and the editor's width */
 export function rangeBandPainter(view: EditorView): RangeBandPainter {
 	const style = document.head.appendChild(document.createElement('style'));
+	const metric = document.head.appendChild(document.createElement('style'));
+	let measured = false;
+	function measureText(): void {
+		if (view.isDestroyed) return;
+		metric.textContent = textReachRule(view);
+		measured = metric.textContent !== '';
+	}
+	// not before the view is on the page, where it has no font yet; again when a font arrives or the theme changes it
+	const firstMeasure = requestAnimationFrame(measureText);
+	document.fonts?.addEventListener('loadingdone', measureText);
+	const themed = new MutationObserver(measureText);
+	themed.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class'] });
 	let frame = 0;
 	function paint(): void {
 		frame = 0;
@@ -74,6 +115,8 @@ export function rangeBandPainter(view: EditorView): RangeBandPainter {
 		if (rules !== style.textContent) style.textContent = rules;
 	}
 	function repaint(): void {
+		// a document opened with no paragraph yet is measured when one arrives
+		if (!measured) measureText();
 		// a thread's or a peer's bands with no selection of our own still have to be measured
 		if (!frame && (style.textContent || view.dom.querySelector(BANDED))) frame = requestAnimationFrame(paint);
 	}
@@ -84,9 +127,13 @@ export function rangeBandPainter(view: EditorView): RangeBandPainter {
 		repaint,
 		destroy() {
 			if (frame) cancelAnimationFrame(frame);
+			cancelAnimationFrame(firstMeasure);
 			window.removeEventListener('scroll', repaint, { capture: true });
+			document.fonts?.removeEventListener('loadingdone', measureText);
+			themed.disconnect();
 			resized?.disconnect();
 			style.remove();
+			metric.remove();
 		}
 	};
 }
