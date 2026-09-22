@@ -52,6 +52,7 @@ describe('the save check', () => {
 			reparse: realParse
 		});
 		expect(v.rung).toBe(0);
+		expect(v.checked).toBe(true);
 		expect(v.text).toBe(first.text);
 		expect(v.text).toContain('Alpha   one. % keep this\n\nBeta changed.\n\nGamma  three  as written.');
 	});
@@ -113,6 +114,7 @@ describe('the save check', () => {
 			reparse: () => Promise.resolve(null)
 		});
 		expect(v.rung).toBe(0);
+		expect(v.checked).toBe(false);
 		expect(v.text).toBe(first.text);
 	});
 

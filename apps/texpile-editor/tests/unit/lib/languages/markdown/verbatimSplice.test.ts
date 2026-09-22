@@ -89,8 +89,8 @@ function posOf(doc: Node, needle: string): number {
 }
 
 // Markdown is kept at block granularity (see serializer.ts): a block that changed is written
-// whole, its hand wrap with it, and every other block, at the top level or inside an item or a
-// quote, is the file's bytes
+// whole, wrapped as the file wrapped it, and every other block, at the top level or inside an
+// item or a quote, is the file's bytes
 describe('markdown: an edit keeps every block but its own', () => {
 	const parsed = parseMarkdownFile(MD);
 
@@ -98,19 +98,17 @@ describe('markdown: an edit keeps every block but its own', () => {
 		expect(serializeMarkdownFile(parsed, parsed.doc)).toBe(MD);
 	});
 
-	it('a word typed in a wrapped paragraph writes the paragraph whole and keeps the three blank lines above it', () => {
+	it('a word typed in a wrapped paragraph writes the paragraph whole at the file\u2019s width, the three blank lines above it kept', () => {
 		expect(
 			serializeMarkdownFile(
 				parsed,
 				retype(parsed.doc, [1], (t) => 'EDITED ' + t)
 			)
-		).toBe(MD.replace('Intro paragraph wrapped\nby hand here.', 'EDITED Intro paragraph wrapped by hand here.'));
+		).toBe(MD.replace('Intro paragraph wrapped\nby hand here.', 'EDITED Intro paragraph\nwrapped by hand here.'));
 	});
 
-	it('a word made bold writes its paragraph whole, the rest as written', () => {
-		expect(serializeMarkdownFile(parsed, bold(parsed.doc, [1], 'hand'))).toBe(
-			MD.replace('Intro paragraph wrapped\nby hand here.', 'Intro paragraph wrapped by **hand** here.')
-		);
+	it('a word made bold writes its paragraph whole, wrapped as it was', () => {
+		expect(serializeMarkdownFile(parsed, bold(parsed.doc, [1], 'hand'))).toBe(MD.replace('by hand here', 'by **hand** here'));
 	});
 
 	it('an item retyped leaves the other items, their wraps and the nested list as they were', () => {
@@ -119,7 +117,7 @@ describe('markdown: an edit keeps every block but its own', () => {
 				parsed,
 				retype(parsed.doc, [3, 0], (t) => t.replace('second', 'SECOND'))
 			)
-		).toBe(MD.replace('second item with *emph* and\n  a wrap', 'SECOND item with *emph* and a wrap'));
+		).toBe(MD.replace('second', 'SECOND'));
 	});
 
 	it('a nested item retyped leaves everything around it', () => {
@@ -131,13 +129,13 @@ describe('markdown: an edit keeps every block but its own', () => {
 		).toBe(MD.replace('nested other', 'nested OTHER'));
 	});
 
-	it('a quoted paragraph retyped is written whole under its marker, the quote\u2019s neighbours as written', () => {
+	it('a quoted paragraph retyped is written whole under its markers, wrapped as it was', () => {
 		expect(
 			serializeMarkdownFile(
 				parsed,
 				retype(parsed.doc, [4, 0], (t) => t.replace('two', 'TWO'))
 			)
-		).toBe(MD.replace('> quoted line one\n> quoted line two\n> continues here', '> quoted line one quoted line TWO continues here'));
+		).toBe(MD.replace('line two', 'line TWO'));
 	});
 
 	it('an ordered item retyped keeps its number and its neighbour', () => {

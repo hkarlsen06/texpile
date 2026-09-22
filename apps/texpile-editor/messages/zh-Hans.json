@@ -205,6 +205,8 @@
 	"wsview_toast_save_rewritten_desc": "{count} 个已编辑的区块无法就地修补，已被完整重写。",
 	"wsview_toast_save_unverified_title": "保存的文件重新打开时可能与显示不同",
 	"wsview_toast_save_unverified_desc": "重新打开时不会完全显示编辑器中的内容；上一版本保存在文件历史中。",
+	"wsview_toast_save_unchecked_title": "已保存但未检查",
+	"wsview_toast_save_unchecked_desc": "此文件解析两次过慢，因此可视化编辑器的保存不会与其显示内容核对。",
 	"wsview_confirm_save_before_switch": "切换前要保存对 {name} 的更改吗？",
 	"wsview_confirm_save_before_leave": "要保存对 {name} 的更改吗？",
 	"wsview_unsaved_title": "未保存的更改",

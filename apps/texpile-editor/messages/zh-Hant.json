@@ -205,6 +205,8 @@
 	"wsview_toast_save_rewritten_desc": "{count} 個已編輯的區塊無法就地修補，已被完整重寫。",
 	"wsview_toast_save_unverified_title": "儲存的檔案重新開啟時可能與顯示不同",
 	"wsview_toast_save_unverified_desc": "重新開啟時不會完全顯示編輯器中的內容；上一版本保存在檔案歷史中。",
+	"wsview_toast_save_unchecked_title": "已儲存但未檢查",
+	"wsview_toast_save_unchecked_desc": "此檔案解析兩次過慢，因此視覺化編輯器的儲存不會與其顯示內容核對。",
 	"wsview_confirm_save_before_switch": "切換前要儲存對 {name} 的變更嗎？",
 	"wsview_confirm_save_before_leave": "要儲存對 {name} 的變更嗎？",
 	"wsview_unsaved_title": "未儲存的變更",

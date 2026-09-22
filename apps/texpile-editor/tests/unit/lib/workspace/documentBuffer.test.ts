@@ -90,6 +90,7 @@ describe('DocumentBuffer.verifyForWrite', () => {
 	const SRC = '\\documentclass{article}\n\\begin{document}\nAlpha   one.\n\nBeta two.\n\\end{document}\n';
 	function withCheck(reparse: (text: string) => Promise<PMNode | null>) {
 		const noteSaveRewrite = vi.fn();
+		const noteSaveUnchecked = vi.fn();
 		const buffer = new DocumentBuffer({
 			scheduleSave: () => {},
 			discardQueuedSave: () => {},
@@ -99,7 +100,8 @@ describe('DocumentBuffer.verifyForWrite', () => {
 			noteLocalEdit: () => {},
 			clearPendingAnchor: () => {},
 			reparse,
-			noteSaveRewrite
+			noteSaveRewrite,
+			noteSaveUnchecked
 		});
 		const parsed = parseLatexFile(SRC);
 		buffer.openTex('C:/ws/main.tex', SRC, '\n');
@@ -110,8 +112,16 @@ describe('DocumentBuffer.verifyForWrite', () => {
 			kids.push(k === 1 ? child.type.create(child.attrs, child.type.schema.text('Beta changed.'), child.marks) : c)
 		);
 		buffer.onVisualChange(parsed.doc.copy(Fragment.fromArray(kids)));
-		return { buffer, noteSaveRewrite };
+		return { buffer, noteSaveRewrite, noteSaveUnchecked };
 	}
+
+	it('says when the file could not be parsed in time, and keeps it as written', async () => {
+		const { buffer, noteSaveRewrite, noteSaveUnchecked } = withCheck(() => Promise.resolve(null));
+		const text = buffer.texSource;
+		expect(await buffer.verifyForWrite('C:/ws/main.tex', text)).toBeNull();
+		expect(noteSaveUnchecked).toHaveBeenCalledWith('C:/ws/main.tex');
+		expect(noteSaveRewrite).not.toHaveBeenCalled();
+	});
 
 	it('keeps a file that reads back as the document', async () => {
 		const { buffer, noteSaveRewrite } = withCheck((text) => Promise.resolve(parseLatexFile(text).doc));

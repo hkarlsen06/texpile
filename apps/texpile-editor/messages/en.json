@@ -205,6 +205,8 @@
 	"wsview_toast_save_rewritten_desc": "{count} edited block(s) could not be patched in place and were written out in full.",
 	"wsview_toast_save_unverified_title": "The saved file may not reopen as shown",
 	"wsview_toast_save_unverified_desc": "Reopening it would not show exactly what the editor shows; the previous version is in the file history.",
+	"wsview_toast_save_unchecked_title": "Saved without checking",
+	"wsview_toast_save_unchecked_desc": "This file is too slow to parse twice, so the visual editor's saves are not checked against what it shows.",
 	"wsview_confirm_save_before_switch": "Save changes to {name} before switching?",
 	"wsview_confirm_save_before_leave": "Save changes to {name}?",
 	"wsview_unsaved_title": "Unsaved changes",

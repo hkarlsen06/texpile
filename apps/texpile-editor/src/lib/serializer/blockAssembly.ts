@@ -225,6 +225,69 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 	const BLANK = /\n[ \t]*\n/;
 
 	/**
+	 * A paragraph written afresh, wrapped as the file wrapped the paragraph it replaces: the file's
+	 * line breaks are gone with the bytes, but their width is not, and a paragraph filled to it
+	 * keeps the file's shape, so the change reads as the words that changed. A space becomes a line
+	 * break only before a word that begins with a letter, which no dialect reads as markup at a line
+	 * start; `breaks` are the offsets of the spaces so replaced. Null when the file's paragraph was
+	 * one line, or when the fresh text has line breaks of its own (a comment, a forced break)
+	 */
+	function rewrapLike(was: string, fresh: string): { text: string; breaks: number[] } | null {
+		if (fresh.includes('\n')) return null;
+		const lines = was.split('\n');
+		if (lines.length < 2) return null;
+		const width = Math.max(...lines.map((l, k) => (k === 0 ? l : l.replace(/^[ \t>]*/, '')).replace(/\s+$/, '').length));
+		if (width < 8) return null;
+		let out = '';
+		let lineLen = -1;
+		const breaks: number[] = [];
+		for (const word of fresh.split(' ')) {
+			if (lineLen < 0) {
+				out = word;
+				lineLen = word.length;
+				continue;
+			}
+			if (lineLen > 0 && lineLen + 1 + word.length > width && /^\p{L}/u.test(word)) {
+				breaks.push(out.length);
+				out += '\n' + word;
+				lineLen = word.length;
+			} else {
+				out += ' ' + word;
+				lineLen += 1 + word.length;
+			}
+		}
+		return breaks.length > 0 ? { text: out, breaks } : null;
+	}
+
+	/** the runs of a text after spaces at `breaks` became line breaks: the character stands for a byte it no longer is */
+	function brokenRuns(runs: Segment[], breaks: number[]): Segment[] {
+		if (breaks.length === 0) return runs;
+		const out: Segment[] = [];
+		for (const r of runs) {
+			if (r.kind !== 'text') {
+				out.push(r);
+				continue;
+			}
+			let from = r.srcFrom;
+			for (const b of breaks) {
+				if (b < from || b >= r.srcTo) continue;
+				if (b > from)
+					out.push({ pmFrom: r.pmFrom + (from - r.srcFrom), pmTo: r.pmFrom + (b - r.srcFrom), srcFrom: from, srcTo: b, kind: 'text' });
+				out.push({ pmFrom: r.pmFrom + (b - r.srcFrom), pmTo: r.pmFrom + (b - r.srcFrom) + 1, srcFrom: b, srcTo: b + 1, kind: 'sub' });
+				from = b + 1;
+			}
+			if (from < r.srcTo) out.push({ pmFrom: r.pmFrom + (from - r.srcFrom), pmTo: r.pmTo, srcFrom: from, srcTo: r.srcTo, kind: 'text' });
+		}
+		return out;
+	}
+
+	function wrapsAsFile(node: Node, was: BlockOrigin | null): string | null {
+		return was && node.type.name === 'paragraph' && was.node.type.name === 'paragraph' && was.text !== undefined && was.text.includes('\n')
+			? was.text
+			: null;
+	}
+
+	/**
 	 * A construct whose shape the parse still knows, written out as the bytes it came from with
 	 * only its changed children rendered afresh: the frame around the children, and the gaps
 	 * between them, are the file's own. `members` are what the parse knew the construct's blocks
@@ -378,9 +441,21 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 							: spliceMembers(group, parsed.slice(ref.index, ref.index + slot.size), childCtx, head)
 						: null;
 					if (!nested && slot.size > 1) return null;
-					const part = nested ? nested.text : serializeNode(child, childCtx);
+					let part = nested ? nested.text : serializeNode(child, childCtx);
 					const lead = nested ? 0 : WS.exec(part)![0].length;
 					let core = nested ? part : part.slice(lead, part.length - WS_END.exec(part)![0].length);
+					// a paragraph written afresh keeps the wrap the file gave the one it replaces
+					const wrapWas = nested ? null : wrapsAsFile(child, ref);
+					const rewrapped = wrapWas ? rewrapLike(wrapWas, core) : null;
+					let partLeaves = nested ? nested.leaves : (options.mapLeaves?.(child, childCtx, part) ?? []);
+					if (rewrapped) {
+						part = part.slice(0, lead) + rewrapped.text + part.slice(lead + core.length);
+						core = rewrapped.text;
+						partLeaves = brokenRuns(
+							partLeaves,
+							rewrapped.breaks.map((b) => b + lead)
+						);
+					}
 					// a child that writes nothing (an emptied paragraph) takes no gap of its own either,
 					// unless the file's bytes around it are its frame (a caption's braces), which stays
 					if (core.trim() === '') {
@@ -390,7 +465,6 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 					}
 					text += gap;
 					const at = text.length;
-					const partLeaves = nested ? nested.leaves : (options.mapLeaves?.(child, childCtx, part) ?? []);
 					const prefixing = !nested && prefix !== '' && core.includes('\n');
 					if (prefixing) core = core.replace(/\n(?!\n|$)/g, '\n' + prefix);
 					// the gap after the child is what separates it from the next; a paragraph ending rule
@@ -1341,6 +1415,20 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 				let part = partAt(i);
 				let partLeaves: Segment[] | null = null;
 				let lead = '';
+				if (!construct) {
+					// a paragraph written afresh keeps the wrap the file gave the one it replaces
+					const wrapWas = wrapsAsFile(doc.child(i), neighbours[i].was);
+					const from = WS.exec(part)![0].length;
+					const to = part.length - WS_END.exec(part)![0].length;
+					const rewrapped = wrapWas && to > from ? rewrapLike(wrapWas, part.slice(from, to)) : null;
+					if (rewrapped) {
+						partLeaves = brokenRuns(
+							leavesOf(doc, i, n, entryAt(i)),
+							rewrapped.breaks.map((b) => b + from)
+						);
+						part = part.slice(0, from) + rewrapped.text + part.slice(to);
+					}
+				}
 				if (construct) {
 					lead = /^[ \t\r\n]*/.exec(part)![0];
 					const trail = /[ \t\r\n]*$/.exec(partAt(i + count - 1))![0];

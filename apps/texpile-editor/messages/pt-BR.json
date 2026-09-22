@@ -141,6 +141,8 @@
 	"wsview_toast_save_rewritten_desc": "{count} bloco(s) editado(s) não puderam ser ajustados no lugar e foram reescritos por completo.",
 	"wsview_toast_save_unverified_title": "O arquivo salvo pode não reabrir como mostrado",
 	"wsview_toast_save_unverified_desc": "Ao reabri-lo, não seria exibido exatamente o que o editor mostra; a versão anterior está no histórico do arquivo.",
+	"wsview_toast_save_unchecked_title": "Salvo sem verificação",
+	"wsview_toast_save_unchecked_desc": "Este arquivo é lento demais para ser interpretado duas vezes, então os salvamentos do editor visual não são verificados em relação ao que ele mostra.",
 	"wsview_confirm_save_before_switch": "Salvar alterações em {name} antes de trocar?",
 	"wsview_confirm_save_before_leave": "Salvar alterações em {name}?",
 	"wsview_unsaved_title": "Alterações não salvas",

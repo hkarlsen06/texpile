@@ -76,6 +76,8 @@ export type DocumentBufferDeps = {
 	/** the save check had to write `rewritten` blocks out whole; `difference` says what still
 	 *  differs on reopen when even that did not do */
 	noteSaveRewrite?(rewritten: number, difference: string | null): void;
+	/** the save check could not parse the file in time, so this save went out unchecked */
+	noteSaveUnchecked?(path: string): void;
 };
 
 export class DocumentBuffer {
@@ -159,6 +161,7 @@ export class DocumentBuffer {
 			serialize: (d, afresh) => this.serializeFile(d, afresh),
 			reparse: (text) => reparse(text, format)
 		});
+		if (!verified.checked) this.deps.noteSaveUnchecked?.(path);
 		if (verified.rung === 0 || this.lastDoc !== doc || this.texSource !== content) return null;
 		this.texSource = verified.text;
 		this.sourceMap = verified.map;

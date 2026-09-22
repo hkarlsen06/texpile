@@ -205,6 +205,8 @@
 	"wsview_toast_save_rewritten_desc": "{count} bearbeitete Blöcke konnten nicht an Ort und Stelle angepasst werden und wurden vollständig neu geschrieben.",
 	"wsview_toast_save_unverified_title": "Die gespeicherte Datei wird möglicherweise nicht wie angezeigt geöffnet",
 	"wsview_toast_save_unverified_desc": "Beim erneuten Öffnen würde nicht genau das angezeigt, was der Editor zeigt; die vorherige Version liegt im Dateiverlauf.",
+	"wsview_toast_save_unchecked_title": "Ohne Prüfung gespeichert",
+	"wsview_toast_save_unchecked_desc": "Diese Datei lässt sich nicht schnell genug zweimal parsen, daher werden die Speichervorgänge des visuellen Editors nicht gegen die Anzeige geprüft.",
 	"wsview_confirm_save_before_switch": "Änderungen an {name} vor dem Wechsel speichern?",
 	"wsview_confirm_save_before_leave": "Änderungen an {name} speichern?",
 	"wsview_unsaved_title": "Nicht gespeicherte Änderungen",

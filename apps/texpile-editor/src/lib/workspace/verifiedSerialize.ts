@@ -19,6 +19,8 @@ export type Verified = Serialized & {
 	rewritten: number;
 	/** what still differs on reopen, at rung 3 */
 	difference: string | null;
+	/** false when the file could not be parsed now and so was not checked; it is saved as written */
+	checked: boolean;
 };
 
 export type VerifyOptions = {
@@ -56,28 +58,33 @@ function withAfresh(doc: PMNode, indices: number[]): { doc: PMNode; afresh: Set<
 	return { doc: doc.copy(Fragment.fromArray(kids)), afresh };
 }
 
+const UNPARSED = Symbol('unparsed');
+
 export async function verifiedSerialize(o: VerifyOptions): Promise<Verified> {
-	const differs = async (out: Serialized): Promise<string | null> => {
+	const differs = async (out: Serialized): Promise<string | null | typeof UNPARSED> => {
 		const again = await o.reparse(out.text);
-		return again ? reopenDifference(o.doc, padTables(again), o.format) : null;
+		return again ? reopenDifference(o.doc, padTables(again), o.format) : UNPARSED;
 	};
 	const d0 = await differs(o.first);
-	if (!d0) return { ...o.first, rung: 0, rewritten: 0, difference: null };
+	if (d0 === UNPARSED) return { ...o.first, rung: 0, rewritten: 0, difference: null, checked: false };
+	if (!d0) return { ...o.first, rung: 0, rewritten: 0, difference: null, checked: true };
 	const changed = changedBlocks(o.doc);
-	if (changed.length === 0) return { ...o.first, rung: 3, rewritten: 0, difference: d0 };
+	if (changed.length === 0) return { ...o.first, rung: 3, rewritten: 0, difference: d0, checked: true };
 	const attempt = (indices: number[]): Serialized => {
 		const { doc, afresh } = withAfresh(o.doc, indices);
 		return o.serialize(doc, afresh);
 	};
 	const first = attempt(changed);
 	const d1 = await differs(first);
-	if (!d1) return { ...first, rung: 1, rewritten: changed.length, difference: null };
+	if (d1 === UNPARSED) return { ...first, rung: 1, rewritten: changed.length, difference: null, checked: false };
+	if (!d1) return { ...first, rung: 1, rewritten: changed.length, difference: null, checked: true };
 	const wider = new Set<number>();
 	for (const i of changed) for (const k of [i - 1, i, i + 1]) if (k >= 0 && k < o.doc.childCount) wider.add(k);
 	const widened = [...wider].sort((a, b) => a - b);
-	if (widened.length === changed.length) return { ...first, rung: 3, rewritten: changed.length, difference: d1 };
+	if (widened.length === changed.length) return { ...first, rung: 3, rewritten: changed.length, difference: d1, checked: true };
 	const second = attempt(widened);
 	const d2 = await differs(second);
-	if (!d2) return { ...second, rung: 2, rewritten: widened.length, difference: null };
-	return { ...second, rung: 3, rewritten: widened.length, difference: d2 };
+	if (d2 === UNPARSED) return { ...second, rung: 2, rewritten: widened.length, difference: null, checked: false };
+	if (!d2) return { ...second, rung: 2, rewritten: widened.length, difference: null, checked: true };
+	return { ...second, rung: 3, rewritten: widened.length, difference: d2, checked: true };
 }
