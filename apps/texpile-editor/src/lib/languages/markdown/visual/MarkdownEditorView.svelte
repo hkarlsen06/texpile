@@ -17,6 +17,7 @@
 	import { tableViewOnly } from '$lib/editor/visual/extensions/table/tableViewOnly';
 	import { createListPlugins, listInputRules, listKeymap, createIndentListCommand, createDedentListCommand } from 'prosemirror-flat-list';
 	import { inputRules, textblockTypeInputRule, wrappingInputRule, InputRule, undoInputRule } from 'prosemirror-inputrules';
+	import { selectFigureBackward, selectFigureForward } from '$lib/editor/visual/figureDeleteGuard';
 	import { search } from 'prosemirror-search';
 	import { mdSchema } from './schema';
 	import { markdownCopyPlugin } from './clipboard';
@@ -170,7 +171,8 @@
 				'Mod-z': (state, dispatch) => historyUndo(state, dispatch) || (onHistoryBoundary ? (onHistoryBoundary('undo'), true) : false),
 				'Mod-y': (state, dispatch) => historyRedo(state, dispatch) || (onHistoryBoundary ? (onHistoryBoundary('redo'), true) : false),
 				'Mod-Shift-z': (state, dispatch) => historyRedo(state, dispatch) || (onHistoryBoundary ? (onHistoryBoundary('redo'), true) : false),
-				Backspace: undoInputRule,
+				Backspace: (state, dispatch) => undoInputRule(state, dispatch) || selectFigureBackward(state, dispatch),
+				Delete: selectFigureForward,
 				'Mod-a': selectAllScoped,
 				'Mod-Home': selectDocStart,
 				'Mod-End': selectDocEnd,

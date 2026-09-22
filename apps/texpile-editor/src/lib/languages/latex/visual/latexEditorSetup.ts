@@ -26,6 +26,7 @@ import { pasteUuidFixPlugin } from '$lib/editor/visual/extensions/paste-uuid-fix
 import { latexClipboardPlugin } from '$lib/editor/visual/extensions/latexClipboard';
 import { createListPlugins, listInputRules, listKeymap, createIndentListCommand, createDedentListCommand } from 'prosemirror-flat-list';
 import { inputRules, InputRule, smartQuotes, ellipsis, undoInputRule } from 'prosemirror-inputrules';
+import { selectFigureBackward, selectFigureForward } from '$lib/editor/visual/figureDeleteGuard';
 import { placeholderPlugin } from '$lib/editor/visual/extensions/placeholderplugin';
 import { tablePlaceholderPlugin } from '$lib/editor/visual/extensions/table/tablePlaceholderPlugin';
 import { search } from 'prosemirror-search';
@@ -126,7 +127,8 @@ export function latexEditorPlugins(setup: LatexEditorSetup): Plugin[] {
 			'Mod-z': (state, dispatch) => historyUndo(state, dispatch) || (onHistoryBoundary ? (onHistoryBoundary('undo'), true) : false),
 			'Mod-y': (state, dispatch) => historyRedo(state, dispatch) || (onHistoryBoundary ? (onHistoryBoundary('redo'), true) : false),
 			'Mod-Shift-z': (state, dispatch) => historyRedo(state, dispatch) || (onHistoryBoundary ? (onHistoryBoundary('redo'), true) : false),
-			Backspace: undoInputRule,
+			Backspace: (state, dispatch) => undoInputRule(state, dispatch) || selectFigureBackward(state, dispatch),
+			Delete: selectFigureForward,
 			'Mod-a': selectAllScoped,
 			'Mod-Home': selectDocStart,
 			'Mod-End': selectDocEnd,

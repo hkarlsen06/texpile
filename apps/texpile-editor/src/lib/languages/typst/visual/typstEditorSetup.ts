@@ -28,6 +28,7 @@ import {
 	type ListAttributes
 } from 'prosemirror-flat-list';
 import { inputRules, textblockTypeInputRule, InputRule, undoInputRule, smartQuotes, ellipsis } from 'prosemirror-inputrules';
+import { selectFigureBackward, selectFigureForward } from '$lib/editor/visual/figureDeleteGuard';
 import { emDashRule, enDashRule, emDashUpgradeRule } from '$lib/editor/visual/extensions/inputrules/dashRules';
 import { search } from 'prosemirror-search';
 import { typSchema } from './schema';
@@ -171,7 +172,8 @@ export function typstEditorPlugins(setup: TypstEditorSetup): Plugin[] {
 			'Mod-z': (state, dispatch) => historyUndo(state, dispatch) || (onHistoryBoundary ? (onHistoryBoundary('undo'), true) : false),
 			'Mod-y': (state, dispatch) => historyRedo(state, dispatch) || (onHistoryBoundary ? (onHistoryBoundary('redo'), true) : false),
 			'Mod-Shift-z': (state, dispatch) => historyRedo(state, dispatch) || (onHistoryBoundary ? (onHistoryBoundary('redo'), true) : false),
-			Backspace: undoInputRule,
+			Backspace: (state, dispatch) => undoInputRule(state, dispatch) || selectFigureBackward(state, dispatch),
+			Delete: selectFigureForward,
 			'Mod-a': selectAllScoped,
 			'Mod-Home': selectDocStart,
 			'Mod-End': selectDocEnd,

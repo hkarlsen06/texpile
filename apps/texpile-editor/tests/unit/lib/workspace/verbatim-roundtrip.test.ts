@@ -1319,3 +1319,17 @@ describe('a comment ending an item paragraph before a display', () => {
 		expect(parseLatexFile(out).doc.toString()).toBe(doc.toString());
 	});
 });
+
+describe('a macro whose argument the parser read again on its own', () => {
+	it('keeps every argument as written: the raw span is scanned from the source', () => {
+		const src = `${PREAMBLE}
+x &= y - \\frac{\\act_i-\\mu_i}{\\sigma_i}\\frac{c}{d}.
+\\end{document}
+`;
+		const parsed = parseLatexFile(src);
+		expect(parsed.doc.child(0).toString()).toBe(
+			'paragraph("x &= y - ", inline_latex("\\\\frac{\\\\act_i-\\\\mu_i}{\\\\sigma_i}\\\\frac{c}{d}"), ".")'
+		);
+		expect(serializeLatexFile(parsed, withoutOrigins(parsed.doc))).toContain('y - \\frac{\\act_i-\\mu_i}{\\sigma_i}\\frac{c}{d}.');
+	});
+});
