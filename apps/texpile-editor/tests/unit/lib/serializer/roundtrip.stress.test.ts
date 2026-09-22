@@ -14,6 +14,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Node } from 'prosemirror-model';
 import { parseLatexFile, serializeLatexFile, type ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
+import { Fragment } from 'prosemirror-model';
+import { compareSuggestions } from '$lib/comments/suggestCompare';
 
 const CORPUS = process.env.CORPUS_DIR;
 const HOOK_TIMEOUT_MS = 30 * 60 * 1000;
@@ -102,6 +104,11 @@ interface FileResult {
 	inlineLatexNodes: number;
 	totalNodes: number;
 	wordRatio: number;
+	// suggestions: one word typed into a paragraph at a quarter, half and three quarters of the
+	// document, the file diffed as Suggesting mode diffs it. `suggestExact` counts the edits that
+	// yield exactly one suggestion covering exactly the typed word, `suggestEdits` the edits made
+	suggestEdits: number;
+	suggestExact: number;
 	missingWords: string[];
 	firstDiff: string | null;
 	// untouched-save fidelity (the verbatim layer): a no-edit save (R1) must equal the source
@@ -181,6 +188,48 @@ function classifyDiff(src: string, r1: string): 'inert-whitespace' | 'structural
 	return sameParas && sameVerbatim ? 'inert-whitespace' : 'structural-whitespace';
 }
 
+/** the paragraph at top-level index `i` with ' zq' typed after its first word, or null */
+function typedInto(doc: Node, i: number): Node | null {
+	const block = doc.child(i);
+	if (block.type.name !== 'paragraph') return null;
+	const kids: Node[] = [];
+	let done = false;
+	block.forEach((c) => {
+		if (!done && c.isText && c.text!.trim().length > 3) {
+			kids.push(c.type.schema.text(c.text!.replace(/(\S+)/, '$1 zq'), c.marks));
+			done = true;
+		} else kids.push(c);
+	});
+	if (!done) return null;
+	const fresh = block.type.create(block.attrs, Fragment.fromArray(kids), block.marks);
+	const top: Node[] = [];
+	doc.forEach((c, _o, k) => top.push(k === i ? fresh : c));
+	return doc.type.create(doc.attrs, Fragment.fromArray(top), doc.marks);
+}
+
+/** how many one-word edits Suggesting mode would show as exactly that word */
+function suggestionPrecision(src: string, parsed: ParsedLatexFile): { edits: number; exact: number } {
+	const n = parsed.doc.childCount;
+	let edits = 0;
+	let exact = 0;
+	let id = 0;
+	for (const i of new Set([Math.floor(n / 4), Math.floor(n / 2), Math.floor((3 * n) / 4)])) {
+		const edited = typedInto(parsed.doc, i);
+		if (!edited) continue;
+		let after: string;
+		try {
+			after = serializeLatexFile(parsed, edited);
+		} catch {
+			continue;
+		}
+		if (after === src) continue;
+		edits++;
+		const { placed } = compareSuggestions({ before: src, after, pending: [], mode: 'suggesting', author: 'me', newId: () => String(++id) });
+		if (placed.length === 1 && after.slice(placed[0].from, placed[0].to).trim() === 'zq' && placed[0].restore.trim() === '') exact++;
+	}
+	return { edits, exact };
+}
+
 function origCoverageOf(parsed: ParsedLatexFile): { coverage: number; withOrig: number; total: number } {
 	let withOrig = 0;
 	const total = parsed.doc.childCount;
@@ -217,6 +266,8 @@ describe('stress: real LaTeX round-trip', () => {
 				inlineLatexNodes: 0,
 				totalNodes: 0,
 				wordRatio: 1,
+				suggestEdits: 0,
+				suggestExact: 0,
 				missingWords: [],
 				firstDiff: null,
 				byteIdentical: false,
@@ -284,6 +335,9 @@ describe('stress: real LaTeX round-trip', () => {
 				// prose the editor is responsible for preserving
 				const wp = wordPreservation(stripComments(srcBody), r1);
 				r.wordRatio = wp.ratio;
+				const sg = suggestionPrecision(src, p1);
+				r.suggestEdits = sg.edits;
+				r.suggestExact = sg.exact;
 				r.missingWords = wp.missing;
 
 				if (r.convergedAt !== 1) {
@@ -340,6 +394,12 @@ describe('stress: real LaTeX round-trip', () => {
 		// editability metric: how much of each document is demoted to raw LaTeX vs modelled,
 		// tracked at two granularities: top-level blocks (visible uneditable chunks) and all
 		// nodes (including inline chips inside paragraphs)
+		const sgEdits = live.reduce((s, r) => s + r.suggestEdits, 0);
+		const sgExact = live.reduce((s, r) => s + r.suggestExact, 0);
+		lines.push(
+			`suggestions: one typed word shown as exactly that word: ${sgExact} / ${sgEdits} edits (${sgEdits ? ((100 * sgExact) / sgEdits).toFixed(0) : 0}%)`
+		);
+		lines.push('');
 		const sumBlocks = live.reduce((s, r) => s + r.totalBlocks, 0);
 		const sumRawTop = live.reduce((s, r) => s + r.rawBlocksTop, 0);
 		const sumNodes = live.reduce((s, r) => s + r.totalNodes, 0);
