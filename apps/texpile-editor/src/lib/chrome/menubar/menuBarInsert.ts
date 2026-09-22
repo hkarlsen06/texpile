@@ -29,13 +29,14 @@ import {
 	computeLink as typLink
 } from '$lib/languages/typst/source/sourceInsert';
 import { runVisualCommand, insertNode, activeCm, cmReplace, cmApply } from '$lib/chrome/menuBarCommands';
+import { makeDrawnInserts } from './menuBarInsertDrawn';
 import type { formatOf } from '$lib/workspace/documentBuffer.svelte';
 import type { Node as PMNode } from 'prosemirror-model';
 import { m } from '$lib/paraglide/messages';
 
 type InsertDeps = {
 	dialect: () => ReturnType<typeof formatOf>;
-	askText: (title: string, initial?: string) => Promise<string | null>;
+	askText: (title: string, initial?: string, offered?: string[]) => Promise<string | null>;
 	pickImage: () => void;
 };
 
@@ -81,7 +82,10 @@ export function makeInsertHandlers(deps: InsertDeps): {
 		else if (dialect === 'tex' && MATH_ENVS[value]) insertMathEnvironment(MATH_ENVS[value]);
 	}
 
+	const insertDrawn = makeDrawnInserts(deps);
+
 	async function insertSelect(value: string) {
+		if (await insertDrawn(value)) return;
 		const dialect = deps.dialect();
 		const cm = activeCm();
 		if (cm) {

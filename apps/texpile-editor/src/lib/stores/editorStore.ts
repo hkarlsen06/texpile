@@ -47,6 +47,8 @@ export type TemplateFeatures = {
 	crossRefNames?: CrossRefNames;
 	// the reference commands the preamble's packages define (refCommandsFor). undefined = no preamble seen, nothing narrowed
 	refCommands?: string[];
+	// how the preamble prints its bibliography (bibliographyKindFor). undefined = no preamble seen
+	bibliography?: 'biblatex' | 'bibtex';
 	// the macros the document defines itself, by name without the backslash; the project's others are in projectIntel
 	macros?: Record<string, MacroDef>;
 	highlight?: boolean; // false: highlight won't appear in the final document (user sees warning)

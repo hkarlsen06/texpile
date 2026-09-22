@@ -14,6 +14,7 @@ import { replacePreambleFrontmatter } from '$lib/editor/visual/extensions/raw-la
 import { basename, relativeTo, type Eol } from '$lib/workspace/fileSystem';
 import { citationVariantsFor } from '$lib/languages/latex/visual/extensions/citation/citationVariantsFor';
 import { refCommandsFor } from '$lib/languages/latex/visual/extensions/drawn/settings/refCommandsFor';
+import { bibliographyKindFor } from '$lib/languages/latex/visual/extensions/drawn/settings/bibliographyCommand';
 import { templateFeaturesStore } from '$lib/stores/editorStore';
 import { documentHyphenationLanguage } from '$lib/editor/visual/linebreak/documentHyphenationLanguage';
 import { crossRefNamesFromPreamble } from '$lib/languages/latex/visual/extensions/drawn/crossRefNames';
@@ -257,6 +258,7 @@ export class DocumentBuffer {
 			hyphenationLanguage: documentHyphenationLanguage(source),
 			crossRefNames: crossRefNamesFromPreamble(parsed.preamble),
 			refCommands: refCommandsFor(parsed.preamble),
+			bibliography: bibliographyKindFor(parsed.preamble),
 			macros: scanMacroDefinitions(source)
 		};
 	}

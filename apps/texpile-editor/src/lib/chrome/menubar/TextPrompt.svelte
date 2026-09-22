@@ -7,12 +7,14 @@
 	let open = $state(false);
 	let title = $state('');
 	let value = $state('');
+	let suggestions = $state<string[]>([]);
 	let resolvePrompt: ((v: string | null) => void) | null = null;
 	let input = $state<HTMLInputElement>();
 
-	export function askText(promptTitle: string, initial = ''): Promise<string | null> {
+	export function askText(promptTitle: string, initial = '', offered: string[] = []): Promise<string | null> {
 		title = promptTitle;
 		value = initial;
+		suggestions = offered;
 		open = true;
 		setTimeout(() => input?.select(), 0);
 		return new Promise((resolve) => (resolvePrompt = resolve));
@@ -32,10 +34,16 @@
 			bind:this={input}
 			bind:value
 			class="input w-full"
+			list={suggestions.length ? 'text-prompt-suggestions' : undefined}
 			onkeydown={(e) => {
 				if (e.key === 'Enter') close(true);
 			}}
 		/>
+		{#if suggestions.length}
+			<datalist id="text-prompt-suggestions">
+				{#each suggestions as suggestion (suggestion)}<option value={suggestion}></option>{/each}
+			</datalist>
+		{/if}
 		<ModalActions
 			class="mt-4"
 			size="xs"

@@ -171,9 +171,16 @@
 
 	const { mathSelect, insertSelect } = makeInsertHandlers({
 		dialect: () => dialect,
-		askText: (title, initial) => textPrompt.askText(title, initial),
+		askText: (title, initial, offered) => textPrompt.askText(title, initial, offered),
 		pickImage: () => imagePicker?.pick()
 	});
+
+	// a text style the visual editor draws goes in as a chip, the way the Insert menu's drawn items do
+	function formatMenuSelect(value: string) {
+		if (value === 'format-document') onFormatDocument?.();
+		else if (value.startsWith('style:')) void insertSelect(value);
+		else formatSelect(value, dialect);
+	}
 
 	const spellcheckOn = $derived(editorConfigStore.current?.spellcheck ?? false);
 	function spellcheckSelect(value: string) {
@@ -200,7 +207,7 @@
 			view: viewSelect,
 			insert: (v) => void insertSelect(v),
 			math: mathSelect,
-			format: (v) => (v === 'format-document' ? onFormatDocument?.() : formatSelect(v, dialect)),
+			format: formatMenuSelect,
 			spelling: spellcheckSelect,
 			terminal: terminalSelect,
 			help: (v) => (v === 'tutorial' ? onOpenTutorial?.() : helpSelect(v))
@@ -302,14 +309,7 @@
 		<InsertMenu index={3} select={(v) => void insertSelect(v)} {mathSelect} {structured} {dialect} canInsertImage={!!imageDir} />
 	{/if}
 	{#if showAt(4, overflow)}
-		<FormatMenu
-			index={4}
-			select={(v) => (v === 'format-document' ? onFormatDocument?.() : formatSelect(v, dialect))}
-			{structured}
-			{dialect}
-			{fileKind}
-			canFormatDocument={!!onFormatDocument}
-		/>
+		<FormatMenu index={4} select={formatMenuSelect} {structured} {dialect} {fileKind} canFormatDocument={!!onFormatDocument} />
 	{/if}
 	{#if showAt(5, overflow)}
 		<SpellingMenu index={5} select={spellcheckSelect} {editable} {spellcheckOn} />

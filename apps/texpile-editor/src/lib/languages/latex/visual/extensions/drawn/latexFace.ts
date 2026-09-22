@@ -135,8 +135,9 @@ function drawMacro(macro: Macro, d: Drawing): ChipFace | ChipFace[] | null {
 	}
 	if (name === 'texorpdfstring') return drawNodes(args[0]?.content ?? [], d);
 	if (REFERENCES.has(name)) {
-		const target = name === 'hyperref' ? optional(macro) : argText(args[0]);
-		if (!target) return null;
+		const target = name === 'hyperref' ? optional(macro) : args[0]?.openMark === '{' ? argText(args[0]) : null;
+		// an empty {} or [] is still a reference (LaTeX prints ??), so the panel can give it its label
+		if (target === null) return null;
 		const labels = target
 			.split(',')
 			.map((label) => label.trim())

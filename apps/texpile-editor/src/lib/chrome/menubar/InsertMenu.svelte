@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { Menu, Portal } from '@skeletonlabs/skeleton-svelte';
-	import { ChevronRight } from '@lucide/svelte';
 	import MenuBarTrigger from './MenuBarTrigger.svelte';
+	import MenuBarSubmenu from './MenuBarSubmenu.svelte';
 	import { contentClass, itemClass, separatorClass } from './menuBarStyles';
+	import { MENU_SYMBOLS } from './menuBarInsertDrawn';
+	import { SYMBOLS } from '$lib/languages/latex/texCharacters';
 	import { cursorInCm } from '$lib/stores/editorStore';
 	import type { formatOf } from '$lib/workspace/documentBuffer.svelte';
 	import { m } from '$lib/paraglide/messages';
@@ -20,6 +22,10 @@
 	let { index, select, mathSelect, structured, dialect, canInsertImage }: Props = $props();
 </script>
 
+{#snippet item(value: string, label: string)}
+	<Menu.Item {value} class={itemClass}><Menu.ItemText>{label}</Menu.ItemText></Menu.Item>
+{/snippet}
+
 <Menu onSelect={(d) => select(d.value)}>
 	<MenuBarTrigger
 		id="insert"
@@ -31,48 +37,71 @@
 	<Portal>
 		<Menu.Positioner>
 			<Menu.Content class={contentClass}>
-				<Menu onSelect={(d) => mathSelect(d.value)}>
-					<Menu.TriggerItem value="math" class={itemClass}>
-						<Menu.ItemText>{m.menubar_insert_math_menu()}</Menu.ItemText><ChevronRight class="size-4 opacity-60" />
-					</Menu.TriggerItem>
-					<Portal>
-						<Menu.Positioner>
-							<Menu.Content class={contentClass}>
-								<Menu.Item value="inline" class={itemClass}><Menu.ItemText>{m.menubar_inline_equation()}</Menu.ItemText></Menu.Item>
-								<Menu.Item value="display" class={itemClass}><Menu.ItemText>{m.menubar_display_equation()}</Menu.ItemText></Menu.Item>
-								<!-- LaTeX environments; a typst/markdown document has nowhere to put \begin{align} -->
-								{#if dialect === 'tex'}
-									<Menu.Separator class={separatorClass} />
-									<Menu.Item value="align" class={itemClass}><Menu.ItemText>Align</Menu.ItemText></Menu.Item>
-									<Menu.Item value="aligned" class={itemClass}><Menu.ItemText>Aligned</Menu.ItemText></Menu.Item>
-									<Menu.Item value="gather" class={itemClass}><Menu.ItemText>Gather</Menu.ItemText></Menu.Item>
-									<Menu.Item value="cases" class={itemClass}><Menu.ItemText>Cases</Menu.ItemText></Menu.Item>
-									<Menu.Item value="multline" class={itemClass}><Menu.ItemText>Multline</Menu.ItemText></Menu.Item>
-									<Menu.Item value="split" class={itemClass}><Menu.ItemText>Split</Menu.ItemText></Menu.Item>
-									<Menu.Separator class={separatorClass} />
-									<Menu.Item value="bmatrix" class={itemClass}><Menu.ItemText>{m.menubar_math_matrix_square()}</Menu.ItemText></Menu.Item>
-									<Menu.Item value="pmatrix" class={itemClass}><Menu.ItemText>{m.menubar_math_matrix_paren()}</Menu.ItemText></Menu.Item>
-								{/if}
-							</Menu.Content>
-						</Menu.Positioner>
-					</Portal>
-				</Menu>
+				<MenuBarSubmenu value="math" label={m.menubar_insert_math_menu()} select={mathSelect}>
+					{@render item('inline', m.menubar_inline_equation())}
+					{@render item('display', m.menubar_display_equation())}
+					<!-- LaTeX environments; a typst/markdown document has nowhere to put \begin{align} -->
+					{#if dialect === 'tex'}
+						<Menu.Separator class={separatorClass} />
+						{#each ['align', 'aligned', 'gather', 'cases', 'multline', 'split'] as env (env)}
+							{@render item(env, env[0].toUpperCase() + env.slice(1))}
+						{/each}
+						<Menu.Separator class={separatorClass} />
+						{@render item('bmatrix', m.menubar_math_matrix_square())}
+						{@render item('pmatrix', m.menubar_math_matrix_paren())}
+					{/if}
+				</MenuBarSubmenu>
 				{#if canInsertImage}
-					<Menu.Item value="image" class={itemClass}><Menu.ItemText>{m.menubar_insert_image()}</Menu.ItemText></Menu.Item>
+					{@render item('image', m.menubar_insert_image())}
 				{/if}
-				<Menu.Item value="table" class={itemClass}><Menu.ItemText>{m.menubar_insert_table()}</Menu.ItemText></Menu.Item>
-				<!-- markdown has no citation node; tex writes \autocite, typst an @ref chip -->
-				{#if dialect !== 'md'}
-					<Menu.Item value="citation" class={itemClass}><Menu.ItemText>{m.menubar_insert_citation()}</Menu.ItemText></Menu.Item>
+				{@render item('table', m.menubar_insert_table())}
+				<!-- markdown has no citation node; typst writes an @ref chip, tex keeps it with the other references -->
+				{#if dialect === 'typ'}
+					{@render item('citation', m.menubar_insert_citation())}
 				{/if}
-				<Menu.Item value="link" class={itemClass}><Menu.ItemText>{m.menubar_insert_link()}</Menu.ItemText></Menu.Item>
-				<Menu.Item value="code" class={itemClass}><Menu.ItemText>{m.menubar_insert_code_block()}</Menu.ItemText></Menu.Item>
-				<Menu.Item value="hrule" class={itemClass}><Menu.ItemText>{m.menubar_insert_hrule()}</Menu.ItemText></Menu.Item>
+				{@render item('link', m.menubar_insert_link())}
+				{@render item('code', m.menubar_insert_code_block())}
+				{@render item('hrule', m.menubar_insert_hrule())}
+				<!-- what the visual editor draws in place of LaTeX commands, grouped so the menu stays shorter than a
+				     window; each drawn one opens its own panel once in -->
 				{#if dialect === 'tex'}
 					<Menu.Separator class={separatorClass} />
-					<Menu.Item value="environment" class={itemClass}><Menu.ItemText>{m.menubar_insert_environment()}</Menu.ItemText></Menu.Item>
-					<Menu.Item value="rawlatex" class={itemClass}><Menu.ItemText>{m.menubar_insert_raw_latex()}</Menu.ItemText></Menu.Item>
-					<Menu.Item value="inlinelatex" class={itemClass}><Menu.ItemText>{m.menubar_insert_inline_latex()}</Menu.ItemText></Menu.Item>
+					<MenuBarSubmenu value="references" label={m.menubar_insert_references()} {select}>
+						{@render item('citation', m.menubar_insert_citation())}
+						{@render item('crossref', m.menubar_insert_cross_reference())}
+						{@render item('hyperref', m.drawn_chip_hyperref_title())}
+						{@render item('label', m.menubar_insert_label())}
+						{@render item('footnote', m.drawn_chip_footnote_label())}
+					</MenuBarSubmenu>
+					<MenuBarSubmenu value="breaks" label={m.menubar_insert_breaks_spaces()} {select}>
+						{@render item('pagebreak', m.drawn_chip_page_label())}
+						{@render item('vspace', m.drawn_chip_space_vertical())}
+						{@render item('hspace', m.drawn_chip_space_horizontal())}
+					</MenuBarSubmenu>
+					<MenuBarSubmenu value="symbols" label={m.menubar_insert_symbol()} {select}>
+						{#each MENU_SYMBOLS as name (name)}
+							<Menu.Item value={`symbol:${name}`} class={itemClass}
+								><Menu.ItemText>{SYMBOLS[name]}</Menu.ItemText><span class="font-mono text-xs opacity-50">\{name}</span></Menu.Item
+							>
+						{/each}
+					</MenuBarSubmenu>
+					<MenuBarSubmenu value="document" label={m.menubar_insert_document_parts()} {select}>
+						{@render item('abstract', m.blockmenu_abstract())}
+						{@render item('appendix', m.drawn_chip_appendix_title())}
+						{@render item('bibliography', m.drawn_chip_bib_title())}
+						{@render item('include', m.menubar_insert_include_file())}
+					</MenuBarSubmenu>
+					<Menu.Separator class={separatorClass} />
+					<MenuBarSubmenu value="latex" label={m.menubar_insert_latex_source()} {select}>
+						{@render item('environment', m.menubar_insert_environment())}
+						{@render item('rawlatex', m.menubar_insert_raw_latex())}
+						{@render item('inlinelatex', m.menubar_insert_inline_latex())}
+						{@render item('comment', m.drawn_chip_comment_title())}
+					</MenuBarSubmenu>
+				{:else if dialect === 'typ'}
+					<Menu.Separator class={separatorClass} />
+					{@render item('include', m.menubar_insert_include_file())}
+					{@render item('comment', m.menubar_insert_source_comment())}
 				{/if}
 			</Menu.Content>
 		</Menu.Positioner>

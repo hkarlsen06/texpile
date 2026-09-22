@@ -19,9 +19,11 @@ export function crossRefFace(command: string, labels: string[], shown: string | 
 		const intel = projectIntelStore.current;
 		const aux = { numbers: intel.auxNumbers, pages: intel.auxPages, kinds: intel.auxKinds, titles: intel.auxTitles };
 		const names = templateFeaturesStore.current.crossRefNames ?? DEFAULT_CROSS_REF_NAMES;
-		dom.textContent = shown ?? crossRefText(command, labels, aux, names).text;
+		// no label yet prints what LaTeX prints for one it cannot resolve
+		const unlabeled = labels.length === 0;
+		dom.textContent = (shown ?? (unlabeled ? '' : crossRefText(command, labels, aux, names).text)) || '??';
 		const missing = labels.find((label) => undefinedRefs.current.has(label));
-		dom.classList.toggle('drawn-crossref-broken', missing !== undefined);
+		dom.classList.toggle('drawn-crossref-broken', unlabeled || missing !== undefined);
 		tipped.update(missing !== undefined ? `Label "${missing}" not found` : source);
 	}
 	show();

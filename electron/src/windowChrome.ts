@@ -267,19 +267,71 @@ function template(win: BrowserWindow, s: MenuState): MenuItemConstructorOptions[
 				},
 				...(s.canInsertImage ? [{ ...pm, label: label(s, 'image', 'Image…'), click: () => fire(win, 'insert:image') }] : []),
 				{ ...pm, label: label(s, 'table', 'Table'), click: () => fire(win, 'insert:table') },
-				// markdown has no citation node; tex writes \autocite, typst an @ref chip
-				...(dialect !== 'md' ? [{ ...pm, label: label(s, 'citation', 'Citation'), click: () => fire(win, 'insert:citation') }] : []),
+				// markdown has no citation node; typst writes an @ref chip, tex keeps it with the other references
+				...(dialect === 'typ' ? [{ ...pm, label: label(s, 'citation', 'Citation'), click: () => fire(win, 'insert:citation') }] : []),
 				{ ...pm, label: label(s, 'link', 'Link…'), click: () => fire(win, 'insert:link') },
 				{ ...pm, label: label(s, 'codeBlock', 'Code block'), click: () => fire(win, 'insert:code') },
 				{ ...pm, label: label(s, 'hrule', 'Horizontal rule'), click: () => fire(win, 'insert:hrule') },
+				// what the visual editor draws in place of LaTeX commands, grouped as the in-app menu groups them
 				...(dialect === 'tex'
 					? [
 							{ type: 'separator' as const },
-							{ ...pm, label: label(s, 'environment', 'Environment…'), click: () => fire(win, 'insert:environment') },
-							{ ...pm, label: label(s, 'rawLatex', 'Raw LaTeX block'), click: () => fire(win, 'insert:rawlatex') },
-							{ ...pm, label: label(s, 'inlineLatex', 'Inline LaTeX'), click: () => fire(win, 'insert:inlinelatex') }
+							{
+								...pm,
+								label: label(s, 'references', 'References'),
+								submenu: [
+									{ label: label(s, 'citation', 'Citation'), click: () => fire(win, 'insert:citation') },
+									{ label: label(s, 'crossRef', 'Cross-reference'), click: () => fire(win, 'insert:crossref') },
+									{ label: label(s, 'hrefLink', 'Link to a label'), click: () => fire(win, 'insert:hyperref') },
+									{ label: label(s, 'label', 'Label…'), click: () => fire(win, 'insert:label') },
+									{ label: label(s, 'footnote', 'Footnote'), click: () => fire(win, 'insert:footnote') }
+								]
+							},
+							{
+								...pm,
+								label: label(s, 'breaksSpaces', 'Breaks and spaces'),
+								submenu: [
+									{ label: label(s, 'pageBreak', 'Page break'), click: () => fire(win, 'insert:pagebreak') },
+									{ label: label(s, 'verticalSpace', 'Vertical space'), click: () => fire(win, 'insert:vspace') },
+									{ label: label(s, 'horizontalSpace', 'Horizontal space'), click: () => fire(win, 'insert:hspace') }
+								]
+							},
+							{
+								...pm,
+								label: label(s, 'symbol', 'Symbol'),
+								submenu: Object.keys(s.labels)
+									.filter((key) => key.startsWith('symbol:'))
+									.map((key) => ({ label: s.labels[key], click: () => fire(win, `insert:${key}`) }))
+							},
+							{
+								...pm,
+								label: label(s, 'documentParts', 'Document parts'),
+								submenu: [
+									{ label: label(s, 'abstract', 'Abstract'), click: () => fire(win, 'insert:abstract') },
+									{ label: label(s, 'appendix', 'Appendix'), click: () => fire(win, 'insert:appendix') },
+									{ label: label(s, 'bibliography', 'Bibliography'), click: () => fire(win, 'insert:bibliography') },
+									{ label: label(s, 'includeFile', 'Include file…'), click: () => fire(win, 'insert:include') }
+								]
+							},
+							{ type: 'separator' as const },
+							{
+								...pm,
+								label: label(s, 'latexSource', 'LaTeX source'),
+								submenu: [
+									{ label: label(s, 'environment', 'Environment…'), click: () => fire(win, 'insert:environment') },
+									{ label: label(s, 'rawLatex', 'Raw LaTeX block'), click: () => fire(win, 'insert:rawlatex') },
+									{ label: label(s, 'inlineLatex', 'Inline LaTeX'), click: () => fire(win, 'insert:inlinelatex') },
+									{ label: label(s, 'comment', 'Comment'), click: () => fire(win, 'insert:comment') }
+								]
+							}
 						]
-					: [])
+					: dialect === 'typ'
+						? [
+								{ type: 'separator' as const },
+								{ ...pm, label: label(s, 'includeFile', 'Include file…'), click: () => fire(win, 'insert:include') },
+								{ ...pm, label: label(s, 'sourceComment', 'Source comment'), click: () => fire(win, 'insert:comment') }
+							]
+						: [])
 			]
 		},
 		{
@@ -292,6 +344,24 @@ function template(win: BrowserWindow, s: MenuState): MenuItemConstructorOptions[
 					? [{ ...pm, label: label(s, 'underline', 'Underline'), accelerator: 'CmdOrCtrl+U', click: () => fire(win, 'format:underline') }]
 					: []),
 				{ ...pm, label: label(s, 'inlineCode', 'Inline code'), click: () => fire(win, 'format:code') },
+				// the styles the visual editor draws that no mark gives
+				...(dialect === 'tex'
+					? [
+							{
+								...pm,
+								label: label(s, 'textStyle', 'Text style'),
+								submenu: [
+									{ label: label(s, 'smallCaps', 'Small caps'), click: () => fire(win, 'format:style:textsc') },
+									{ label: label(s, 'sansSerif', 'Sans serif'), click: () => fire(win, 'format:style:textsf') },
+									{ label: label(s, 'slanted', 'Slanted'), click: () => fire(win, 'format:style:textsl') },
+									{ label: label(s, 'textSize', 'Text size'), click: () => fire(win, 'format:style:large') },
+									{ type: 'separator' as const },
+									{ label: label(s, 'framed', 'Framed'), click: () => fire(win, 'format:style:fbox') },
+									{ label: label(s, 'together', 'Kept on one line'), click: () => fire(win, 'format:style:mbox') }
+								]
+							}
+						]
+					: []),
 				{ type: 'separator' },
 				{ ...pm, label: label(s, 'h1', 'Heading 1'), click: () => fire(win, 'format:h1') },
 				{ ...pm, label: label(s, 'h2', 'Heading 2'), click: () => fire(win, 'format:h2') },

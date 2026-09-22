@@ -11,6 +11,8 @@
 //
 //   in - a selection, as the same `menu:value` string the in-app menu would have produced, routed
 //   into the very same handlers. One implementation, two front ends.
+import { MENU_SYMBOLS } from '$lib/chrome/menubar/menuBarInsertDrawn';
+import { SYMBOLS } from '$lib/languages/latex/texCharacters';
 import { browser } from '$lib/runtime';
 import { isMac } from '$lib/platform';
 import { recentFolders } from './workspaceStore';
@@ -113,6 +115,33 @@ function labels(tool: 'latexindent' | 'typstyle'): Record<string, string> {
 		image: m.menubar_insert_image(),
 		table: m.menubar_insert_table(),
 		citation: m.menubar_insert_citation(),
+		crossRef: m.menubar_insert_cross_reference(),
+		footnote: m.drawn_chip_footnote_label(),
+		label: m.menubar_insert_label(),
+		pageBreak: m.drawn_chip_page_label(),
+		verticalSpace: m.drawn_chip_space_vertical(),
+		horizontalSpace: m.drawn_chip_space_horizontal(),
+		abstract: m.blockmenu_abstract(),
+		appendix: m.drawn_chip_appendix_title(),
+		bibliography: m.drawn_chip_bib_title(),
+		includeFile: m.menubar_insert_include_file(),
+		sourceComment: m.menubar_insert_source_comment(),
+		hrefLink: m.drawn_chip_hyperref_title(),
+		references: m.menubar_insert_references(),
+		breaksSpaces: m.menubar_insert_breaks_spaces(),
+		symbol: m.menubar_insert_symbol(),
+		documentParts: m.menubar_insert_document_parts(),
+		latexSource: m.menubar_insert_latex_source(),
+		comment: m.drawn_chip_comment_title(),
+		textStyle: m.menubar_format_text_style(),
+		smallCaps: m.drawn_chip_style_small_caps(),
+		sansSerif: m.drawn_chip_style_sans_serif(),
+		slanted: m.drawn_chip_style_slanted(),
+		textSize: m.drawn_chip_style_size(),
+		framed: m.drawn_chip_style_framed(),
+		together: m.drawn_chip_style_together(),
+		// the Symbol submenu is built from these keys, in this order, so main keeps no list of its own
+		...Object.fromEntries(MENU_SYMBOLS.map((name) => [`symbol:${name}`, `${SYMBOLS[name]}   \\${name}`])),
 		link: m.menubar_insert_link(),
 		codeBlock: m.menubar_insert_code_block(),
 		hrule: m.menubar_insert_hrule(),
