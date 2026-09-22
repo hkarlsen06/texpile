@@ -1,14 +1,15 @@
 // a suggestion is a comment thread carrying the words it took out
+import type { Node as PMNode } from 'prosemirror-model';
 import type { CommentThread } from './log';
-import type { AnchorDialect } from './anchorNormalize';
-import { renderSource } from './renderedWords';
+import type { RegionParser } from '$lib/editor/visual/sourceSpans';
+import { m } from '$lib/paraglide/messages';
 
 export type SuggestionKind = 'replace' | 'insert' | 'delete';
 
 /** the same words with other formatting; `added` and `removed` name what changed, when the words say */
 export type FormatChange = { words: string; added: string[]; removed: string[] };
 
-const FORMAT_TAGS = new Map([
+const FORMAT_NAMES = new Map([
 	['strong', 'bold'],
 	['em', 'italic'],
 	['u', 'underline'],
@@ -16,42 +17,43 @@ const FORMAT_TAGS = new Map([
 	['sup', 'superscript'],
 	['sub', 'subscript'],
 	['s', 'strikethrough'],
-	['a', 'link']
+	['strike', 'strikethrough'],
+	['link', 'link'],
+	['textcolor', 'color'],
+	['highlight', 'highlight']
 ]);
 
-// formatting that leaves no tag on the words, told from the source instead
-const TEX_MARKERS: [RegExp, string][] = [
-	[/\\textcolor\b/, 'color'],
-	[/\\hl\{/, 'highlight']
-];
-
-function formats(source: string, dialect: AnchorDialect) {
-	const rendered = renderSource(source, dialect);
-	if (!rendered) return null;
-	const names = new Set<string>();
-	for (const run of rendered.words.flat()) for (const tag of run.tags) if (FORMAT_TAGS.has(tag)) names.add(FORMAT_TAGS.get(tag)!);
-	if (dialect === 'tex') for (const [marker, name] of TEX_MARKERS) if (marker.test(source)) names.add(name);
-	const text = rendered.words
-		.map((p) =>
-			p
-				.map((run) => run.text)
-				.join('')
-				.trim()
-		)
-		.filter(Boolean)
-		.join('\n');
-	return { text, names, balance: rendered.closed.join() + '|' + rendered.open.join(), chips: !!rendered.chips };
+function wordsOf(doc: PMNode): string {
+	let out = '';
+	doc.descendants((node) => {
+		if (node.isText) out += node.text;
+		else if (node.isInline) out += '￼';
+		else if (node.isBlock && out && !out.endsWith('\n')) out += '\n';
+		return !node.isInline;
+	});
+	return out.trim();
 }
 
-export function formatChange(quote: string, restore: string, dialect: AnchorDialect): FormatChange | null {
-	if (!quote || !restore) return null;
-	const fresh = formats(quote, dialect);
-	const gone = formats(restore, dialect);
-	if (!fresh || !gone || !fresh.text || fresh.text !== gone.text || fresh.balance !== gone.balance) return null;
-	// \'e written as é is another spelling of the letter, not other formatting
-	if (fresh.chips !== gone.chips && !fresh.names.size && !gone.names.size) return null;
-	const only = (a: Set<string>, b: Set<string>) => [...a].filter((name) => !b.has(name));
-	return { words: fresh.text, added: only(fresh.names, gone.names), removed: only(gone.names, fresh.names) };
+function formatsOf(doc: PMNode): Set<string> {
+	const names = new Set<string>();
+	doc.descendants((node) => {
+		for (const mark of node.marks) names.add(FORMAT_NAMES.get(mark.type.name) ?? mark.type.name);
+	});
+	return names;
+}
+
+/** the same words read through the file's own parser with other formatting, or null when more changed */
+export function formatChange(quote: string, restore: string, parse: RegionParser | null): FormatChange | null {
+	if (!parse || !quote || !restore) return null;
+	const fresh = parse(quote).doc;
+	const gone = parse(restore).doc;
+	const words = wordsOf(fresh);
+	if (!words || words !== wordsOf(gone)) return null;
+	const now = formatsOf(fresh);
+	const was = formatsOf(gone);
+	// another spelling of the same letters is not formatting
+	if (!now.size && !was.size) return null;
+	return { words, added: [...now].filter((n) => !was.has(n)), removed: [...was].filter((n) => !now.has(n)) };
 }
 
 export function isSuggestion(t: CommentThread): boolean {
@@ -84,5 +86,9 @@ export function spotRanks(placed: { id: string; from: number; to: number }[]): M
 
 export function shownWords(words: string): string {
 	if (!words || /\S/.test(words)) return words;
-	return words.replace(/\n/g, '↵').replace(/\t/g, '⇥').replace(/ /g, '·');
+	// a break has no glyph a reader already knows, so it is named. Spaces and tabs keep theirs: those
+	// are ordinary in a diff and say how many there were
+	if (/\n[ \t]*\n/.test(words)) return m.comments_suggest_paragraph_break();
+	if (words.includes('\n')) return m.comments_suggest_line_break();
+	return words.replace(/\t/g, '⇥').replace(/ /g, '·');
 }

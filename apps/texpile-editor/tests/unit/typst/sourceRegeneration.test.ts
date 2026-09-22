@@ -113,7 +113,9 @@ describe('headings (T18, T20)', () => {
 	it('a label beside a heading belongs to the heading', () => {
 		const doc = typstToProseMirror('= Intro\n<sec:intro>\n\nBody.\n').doc;
 		expect(doc.child(0).attrs.label).toBe('sec:intro');
-		expect(regen('= Intro\n<sec:intro>\n\nBody.\n')).toBe('= Intro <sec:intro>\n\nBody.');
+		// written back on the line the file gave it, beside or under the heading
+		expect(regen('= Intro\n<sec:intro>\n\nBody.\n')).toBe('= Intro\n<sec:intro>\n\nBody.');
+		expect(regen('= Intro <sec:intro>\n\nBody.\n')).toBe('= Intro <sec:intro>\n\nBody.');
 		// and it no longer merges the heading's neighbour into one raw island
 		expect(shape('= Refs\n<sec:refs>\n\n#bibliography("refs.bib")\n')).toEqual(['heading', 'raw_latex']);
 	});

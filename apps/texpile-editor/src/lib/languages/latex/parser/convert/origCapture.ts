@@ -1,30 +1,22 @@
-// verbatim `orig` capture: source extents, raw-slice recovery, and the capture state the
+// verbatim source capture: source extents, raw-slice recovery, and the capture state the
 // top-level block pass consumes (armed by latexToProseMirror)
 import type { Node, Macro, Environment } from '@unified-latex/unified-latex-types';
-import { type PmNode } from '../builders';
+import { textNode, type PmNode } from '../builders';
+import { bytesSpan, type LeafSpan } from '$lib/editor/visual/sourceSpans';
 
 export type CaptureHolder = {
 	pending: CaptureState | null;
-	last: CaptureState | null;
 	rawSource: string | null;
 };
 
-export const capture: CaptureHolder = { pending: null, last: null, rawSource: null };
+export const capture: CaptureHolder = { pending: null, rawSource: null };
 
 export type CaptureState = {
 	/** The exact source string the AST positions index into. */
 	source: string;
-	/** Next top-level block index. EVERY pushed block gets a seq, even span-less ones, so the
-	 *  serializer can tell pristine neighbours from a deletion (re-joining across a deletion
-	 *  with `pre` would resurrect the deleted source). */
-	seq: number;
 	/** End offset of the previous block's span (start of the current inter-block gap). */
 	prevEnd: number;
-	/** Next group id for one-source-construct to many-blocks results. */
-	group: number;
 };
-// stashed by the top-level convertNodesToBlocks right before it returns so latexToProseMirror
-// can read the final prevEnd/seq for the body's trailing gap. grab-and-null, like capture.pending.
 
 /** Min/max offsets over `n`'s position (+ content/args), REJECTING any start before `floor`:
  *  never a legitimate undershoot, always a synthetic/corrupt offset (math script groups have no
@@ -61,13 +53,6 @@ export function nodeExtent(node: Node, floor = 0): { min: number; max: number } 
 	const top = (node as unknown as { position?: { start?: { offset?: number } } }).position;
 	if (typeof top?.start?.offset === 'number' && top.start.offset >= floor && acc.min < top.start.offset) acc.min = top.start.offset;
 	return acc;
-}
-
-/** Recreate `node` with an `orig` attr. Types that don't declare `orig` are returned as-is
- *  (fail-safe: such a block simply always regenerates). */
-export function withOrig(node: PmNode, orig: Record<string, unknown>): PmNode {
-	if (!node.type.spec.attrs || !('orig' in node.type.spec.attrs)) return node;
-	return node.type.create({ ...node.attrs, orig }, node.content, node.marks);
 }
 
 // byte-faithful raw fallback: raw preservation slices the ORIGINAL bytes via source offsets
@@ -189,15 +174,17 @@ export function envArgsRawSource(env: Environment): string | null {
 	return src.slice(begin, end).trim();
 }
 
-/** The node's exact original source slice, or null when no trustworthy span exists. */
-export function nodeRawSource(node: Node): string | null {
+/** a slice of the original source and where it sits */
+export type RawSpan = { text: string; from: number; to: number };
+
+/** The node's exact original source slice and its offsets, or null when no trustworthy span exists. */
+export function nodeRawSpan(node: Node): RawSpan | null {
 	if (!capture.rawSource) return null;
 	const ext = nodeExtent(node);
 	if (!ext || !Number.isFinite(ext.min) || ext.min < 0 || ext.max > capture.rawSource.length || ext.min >= ext.max) return null;
 
 	let end: number = ext.max;
-	const hasArgs = !!(node as Macro).args?.length;
-	if (hasArgs) end = repairArgTail(node, capture.rawSource, ext.max) ?? ext.max;
+	if ((node as Macro).args?.length) end = repairArgTail(node, capture.rawSource, ext.max) ?? ext.max;
 	end = closeUnbalanced(capture.rawSource, ext.min, end);
 	if (end > capture.rawSource.length) return null;
 
@@ -205,7 +192,46 @@ export function nodeRawSource(node: Node): string | null {
 	// every construct sliced here starts with \ or {, and a faithful slice must be
 	// brace-balanced: refuse corrupt extents that landed mid-prose.
 	if (!/^[\\{]/.test(slice) || braceDebt(slice) !== 0) return null;
-	return slice;
+	return { text: slice, from: ext.min, to: end };
+}
+
+export function nodeRawSource(node: Node): string | null {
+	return nodeRawSpan(node)?.text ?? null;
+}
+
+/** the text node for a raw slice, mapped byte for byte; the fallback text maps to nothing */
+export function rawTextNode(raw: RawSpan | null, fallback: string): PmNode | null {
+	return raw ? textNode(raw.text, null, bytesSpan(raw.text.length, raw.from)) : textNode(fallback);
+}
+
+/** `text` mapped byte for byte when the source holds exactly it at `from`, else nothing */
+export function prefixSpans(text: string, from: number | undefined): LeafSpan[] | null {
+	const src = capture.rawSource;
+	return src && typeof from === 'number' && from >= 0 && src.startsWith(text, from) ? bytesSpan(text.length, from) : null;
+}
+
+/** the bytes an AST node's own position covers, when the parse recorded one */
+export function positionSpan(node: unknown): { from: number; to: number } | null {
+	const src = capture.rawSource;
+	const p = (node as { position?: { start?: { offset?: number }; end?: { offset?: number } } } | null)?.position;
+	const from = p?.start?.offset;
+	const to = p?.end?.offset;
+	if (!src || typeof from !== 'number' || typeof to !== 'number' || from < 0 || to > src.length || from >= to) return null;
+	return { from, to };
+}
+
+export function startOf(node: unknown): number | undefined {
+	return (node as { position?: { start?: { offset?: number } } } | null)?.position?.start?.offset;
+}
+
+/** the bytes a macro call covers, attached arguments included; the call itself must be there */
+export function macroSpan(macro: Macro): { from: number; to: number } | null {
+	const src = capture.rawSource;
+	const from = startOf(macro);
+	if (!src || typeof from !== 'number' || !src.startsWith('\\' + macro.content, from)) return null;
+	const ext = repairExtentTail(macro, nodeExtent(macro, from));
+	if (!ext || !Number.isFinite(ext.max) || ext.max > src.length || ext.max <= from) return null;
+	return { from, to: ext.max };
 }
 
 /**
@@ -217,7 +243,7 @@ export function nodeRawSource(node: Node): string | null {
  * its trailing argument (`y_\history{i}` becomes `y_{\history}{i}`, a fatal extra-} error).
  * null unless both delimiters match; caller falls back to printRaw.
  */
-export function mathBodyRawSource(node: Node, opens: string[], closes: string[]): string | null {
+export function mathBodyRawSpan(node: Node, opens: string[], closes: string[]): RawSpan | null {
 	if (!capture.rawSource) return null;
 	const src = capture.rawSource;
 	const pos = (node as { position?: { start?: { offset?: number }; end?: { offset?: number } } }).position;
@@ -228,14 +254,25 @@ export function mathBodyRawSource(node: Node, opens: string[], closes: string[])
 	const close = closes.find((c) => end - c.length >= start && src.startsWith(c, end - c.length));
 	if (!open || !close || start + open.length > end - close.length) return null;
 	const slice = src.slice(start + open.length, end - close.length);
-	return braceDebt(slice) === 0 ? slice : null;
+	return braceDebt(slice) === 0 ? { text: slice, from: start + open.length, to: end - close.length } : null;
+}
+
+export function mathBodyRawSource(node: Node, opens: string[], closes: string[]): string | null {
+	return mathBodyRawSpan(node, opens, closes)?.text ?? null;
+}
+
+/** `raw` with the whitespace at its ends dropped, still mapped */
+export function trimmedRaw(raw: RawSpan): RawSpan {
+	const lead = raw.text.length - raw.text.trimStart().length;
+	const text = raw.text.trim();
+	return { text, from: raw.from + lead, to: raw.from + lead + text.length };
 }
 
 /**
  * Extend ext.max over a macro's attached-arg tail when the source confirms it (repairArgTail).
- * used by the orig block capture: a block ending inside an attached argument otherwise gets a
- * truncated orig.latex, and the missing closer lands in the inter-block gap, silently lost
- * whenever the next block has no verbatim slice to re-join `pre` across.
+ * used by the block span capture: a block ending inside an attached argument otherwise gets a
+ * truncated span, and the missing closer lands in the inter-block gap, silently lost
+ * whenever the next block has no span to re-join the gap across.
  */
 export function repairExtentTail(node: Node, ext: { min: number; max: number } | null): { min: number; max: number } | null {
 	if (!ext || !capture.rawSource || !Number.isFinite(ext.max) || !Number.isFinite(ext.min)) return ext;

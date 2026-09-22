@@ -3,8 +3,7 @@ import { SelectionRefiner, refiner } from '$lib/ai/selectionRefiner';
 import { collabHost } from '$lib/collab/hostStore.svelte';
 import { fileMode } from '$lib/workspace/fileMode.svelte';
 import { editorViewStore, sourceCmView } from '$lib/stores/editorStore';
-import { buildPmAnchor } from '$lib/editor/visual/extensions/pmComments';
-import { dialectOfPath, toSourceAnchor } from '$lib/comments/anchor';
+import { sourceAnchorFor } from '$lib/editor/visual/extensions/pmComments';
 import { hasVisualMode, type DocumentBuffer, type FileKind } from '$lib/workspace/documentBuffer.svelte';
 import type { ViewModeSwitch } from '$lib/workspace/viewModeSwitch.svelte';
 import type { WorkspaceComments } from './workspaceComments.svelte';
@@ -22,12 +21,10 @@ function selectionSpan(d: RefinerWiring): { from: number; to: number } | null {
 	if (d.modes.mode === 'visual' && hasVisualMode(d.kind())) {
 		const view = editorViewStore.current;
 		const s = view?.state.selection;
-		if (!view || !s || s.empty) return null;
-		const rendered = buildPmAnchor(view.state.doc, s.from, s.to);
-		if (!rendered) return null;
-		// a selection only found as its whole paragraph would rewrite more than the reader chose
-		const { anchor, tier } = toSourceAnchor(text, dialectOfPath(d.doc.path ?? ''), rendered);
-		return tier === 'precise' ? { from: anchor.start, to: anchor.end } : null;
+		if (!view || !s || s.empty || text !== d.doc.texSource) return null;
+		// exact at both ends or nothing: a span guessed wider would rewrite more than the reader chose
+		const anchor = sourceAnchorFor(view.state.doc, d.doc.sourceMap, text, s.from, s.to);
+		return anchor && anchor.end > anchor.start ? { from: anchor.start, to: anchor.end } : null;
 	}
 	const cm = sourceCmView.current;
 	if (!cm || cm.state.doc.length !== text.length) return null;

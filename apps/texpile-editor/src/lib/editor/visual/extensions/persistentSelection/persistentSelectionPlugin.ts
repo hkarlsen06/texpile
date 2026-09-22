@@ -80,7 +80,7 @@ export function createPersistentSelectionPlugin() {
 					);
 					return DecorationSet.create(state.doc, [widget]);
 				}
-				return DecorationSet.create(state.doc, [Decoration.inline(sel.from, sel.to, { class: 'pm-blur-selection' })]);
+				return DecorationSet.create(state.doc, [Decoration.inline(sel.from, sel.to, { class: 'pm-blur-selection pm-selection-band' })]);
 			}
 		}
 	});

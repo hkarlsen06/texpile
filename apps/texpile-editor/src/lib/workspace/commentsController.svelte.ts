@@ -5,17 +5,7 @@
 // this needs anything from it but the workspace root and a way to open a file.
 import { untrack } from 'svelte';
 import { CommentStore, relativeTo } from '$lib/comments/store.svelte';
-import {
-	buildAnchor,
-	dialectOfPath,
-	prepareLoose,
-	resolveAnchor,
-	resolveAnchorLoose,
-	resolveAnchorLooseIn,
-	toSourceAnchor,
-	type CommentAnchor,
-	type LooseHaystack
-} from '$lib/comments/anchor';
+import { buildAnchor, resolveAnchor, type CommentAnchor } from '$lib/comments/anchor';
 import { MIN_QUOTE, POINT_WEAK, searchContext, searchQuote } from '$lib/comments/anchorSearch';
 import {
 	anchorEvent,
@@ -293,11 +283,6 @@ export class CommentsController {
 		return this.text;
 	}
 
-	/** the open file's markup family, for the normalized quote search */
-	private dialect() {
-		return dialectOfPath(this.file ?? '');
-	}
-
 	/** recompute the active file's ranges from the current log and text */
 	private resolve(): void {
 		if (!this.file) {
@@ -318,8 +303,6 @@ export class CommentsController {
 		const handed = carried && carried.text === text ? carried.anchors : null;
 		const known = new Map(untrack(() => this.knownAnchors));
 		let knownChanged = false;
-		// normalized once for the whole file, and only if something actually misses the fast path
-		let hay: LooseHaystack | null = null;
 		for (const t of this.store.forFile(this.file)) {
 			if (isSuggestion(t)) continue;
 			let exact = live?.get(t.id) ?? handed?.get(t.id) ?? null;
@@ -343,15 +326,9 @@ export class CommentsController {
 				}
 				continue;
 			}
-			// loose second: an anchor authored in the visual editor is rendered-dialect, and only the
-			// normalized search can carry it back onto source with its wraps, escapes and ligatures
 			let hit = null;
 			for (const a of prior ? [prior, t.anchor] : [t.anchor]) {
 				hit = resolveAnchor(text, a);
-				if (!hit) {
-					hay ??= prepareLoose(text, this.dialect());
-					hit = resolveAnchorLooseIn(hay, a);
-				}
 				if (hit) break;
 			}
 			if (hit) {
@@ -472,17 +449,12 @@ export class CommentsController {
 	}
 
 	/**
-	 * The visual editor's version of beginAdd: it hands over a rendered-dialect anchor because its
-	 * own positions mean nothing to anyone else. Converted to SOURCE dialect right here, at the
-	 * gesture, against the live text - the source file is the source of truth, and a stored quote
-	 * sliced from it resolves exactly in the source editor and survives the loose search back into
-	 * every visual view. Precise when the quote crosses only markup, the enclosing block when it
-	 * crossed an atom, detached only when nothing at all is locatable (see toSourceAnchor).
+	 * The visual editor's version of beginAdd: it hands over an anchor it built through the source
+	 * map, a range of the file like any other, so nothing here converts.
 	 */
 	beginAddAnchored(anchor: CommentAnchor | null): void {
 		if (!this.file || !anchor) return;
-		const converted = toSourceAnchor(this.fresh(), this.dialect(), anchor);
-		this.pending = { quote: converted.anchor.quote, anchor: converted.anchor };
+		this.pending = { quote: anchor.quote, anchor };
 		this.selected = null;
 	}
 
@@ -539,8 +511,7 @@ export class CommentsController {
 
 	async reattachAnchored(thread: CommentThread, anchor: CommentAnchor): Promise<void> {
 		if (!this.file) return;
-		const converted = toSourceAnchor(this.fresh(), this.dialect(), anchor);
-		await this.moveAnchor(thread, converted.anchor, this.file);
+		await this.moveAnchor(thread, anchor, this.file);
 	}
 
 	async syncAnchorsToText(absPath: string, text: string): Promise<void> {
@@ -584,9 +555,7 @@ export class CommentsController {
 	/** one thread's range on the active file, from the live text; lost there when the quote is not */
 	private placeOne(id: string, anchor: CommentAnchor, resolved: boolean): void {
 		const text = this.fresh();
-		const hit = anchor.quote
-			? (resolveAnchor(text, anchor) ?? resolveAnchorLoose(text, anchor, this.dialect()))
-			: { from: anchor.start, to: anchor.end, exact: true, weak: false };
+		const hit = anchor.quote ? resolveAnchor(text, anchor) : { from: anchor.start, to: anchor.end, exact: true, weak: false };
 		const rest = this.ranges.filter((r) => r.id !== id);
 		this.ranges = hit ? [...rest, { id, from: hit.from, to: hit.to, resolved }] : rest;
 		if (hit) this.activeLost.delete(id);

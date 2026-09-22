@@ -34,6 +34,8 @@ type DocDeps = {
 export class WorkspaceDoc {
 	// macro-defining text from the main file's include chain, fed to the parser (see workspace/project.ts)
 	projectMacros = $state('');
+	/** files whose save the check could not parse in time, told once each */
+	private uncheckedSaves = new Set<string>();
 
 	// worker parse + sequencing live in lib/workspace/visualParse.svelte.ts
 	readonly parser = new VisualParser(() => this.projectMacros);
@@ -51,7 +53,27 @@ export class WorkspaceDoc {
 			rebuildVisual: () => this.rebuildVisualFromSource(),
 			isVisualMode: () => this.modes.mode === 'visual',
 			noteLocalEdit: () => d.visualCollab()?.noteLocalEdit(),
-			clearPendingAnchor: () => (this.modes.pendingVisualAnchor = null)
+			clearPendingAnchor: () => (this.modes.pendingVisualAnchor = null),
+			projectMacros: () => this.projectMacros,
+			reparse: (text, format) => this.parser.reparse(text, format),
+			// once per file: a file too slow to parse twice is slow on every save
+			noteSaveUnchecked: (path) => {
+				console.warn(`[save] ${path} was saved unchecked: it could not be parsed again in time`);
+				if (this.uncheckedSaves.has(path)) return;
+				this.uncheckedSaves.add(path);
+				toaster.info({ title: m.wsview_toast_save_unchecked_title(), description: m.wsview_toast_save_unchecked_desc() });
+			},
+			noteSaveRewrite: (rewritten, difference) => {
+				if (difference === null) {
+					toaster.warning({
+						title: m.wsview_toast_save_rewritten_title(),
+						description: m.wsview_toast_save_rewritten_desc({ count: rewritten })
+					});
+					return;
+				}
+				console.warn(`[save] the saved file does not read back as the editor shows: ${difference}`);
+				toaster.error({ title: m.wsview_toast_save_unverified_title(), description: m.wsview_toast_save_unverified_desc() });
+			}
 		});
 		// view mode, scroll anchors and cross-mode history live in lib/workspace/viewModeSwitch.svelte.ts
 		this.modes = new ViewModeSwitch({
@@ -61,6 +83,7 @@ export class WorkspaceDoc {
 			setSource: (t) => (this.doc.texSource = t),
 			getDocMeta: () => this.doc.docMeta,
 			getMountedSource: () => this.doc.lastDocSource,
+			getSourceMap: () => this.doc.sourceMap,
 			getEncodingIssue: () => this.doc.encodingIssue,
 			rebuildVisual: () => this.rebuildVisualFromSource(),
 			captureDiffSnapshot: () => void this.diff.snapshot(),

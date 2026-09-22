@@ -9,8 +9,9 @@ import { convertNodesToBlocks } from '../converter';
 import { macroHandlers } from './macroHandlers';
 import { envHandlers, transparentEnvironments } from './envHandlers';
 import { VERBATIM_ENVS } from './blockKinds';
-import { nodeRawSource, mathBodyRawSource, envBeginEnd } from './origCapture';
+import { nodeRawSpan, mathBodyRawSpan, envBeginEnd, prefixSpans, rawTextNode, trimmedRaw, macroSpan } from './origCapture';
 import { createBlockMath } from './mathConvert';
+import { bytesSpan, noteSpans, spansOf, standsFor } from '$lib/editor/visual/sourceSpans';
 
 /**
  * An environment with no registered signature gets its arguments parsed as body: `[1]` after
@@ -69,8 +70,7 @@ export function convertNodeToBlock(node: Node, ctx: ConversionContext, options: 
 			const env = node as unknown as Environment;
 			const envHandler = envHandlers[env.env];
 			if (envHandler) return envHandler(env, ctx, options);
-			const latexSource = nodeRawSource(node) ?? nodeToLatexString(node);
-			return [buildNode('raw_latex', null, [textNode(latexSource)])];
+			return [buildNode('raw_latex', null, [rawTextNode(nodeRawSpan(node), nodeToLatexString(node))])];
 		}
 		case 'environment': {
 			const env = node as Environment;
@@ -82,8 +82,7 @@ export function convertNodeToBlock(node: Node, ctx: ConversionContext, options: 
 
 			// verbatim-like / structural environments stay raw, byte-sliced when possible
 			if (VERBATIM_ENVS.has(env.env)) {
-				const latexSource = nodeRawSource(node) ?? nodeToLatexString(node);
-				return [buildNode('raw_latex', null, [textNode(latexSource)])];
+				return [buildNode('raw_latex', null, [rawTextNode(nodeRawSpan(node), nodeToLatexString(node))])];
 			}
 			if (options.unknownHandling === 'ignore') return null;
 
@@ -123,10 +122,12 @@ export function convertNodeToBlock(node: Node, ctx: ConversionContext, options: 
 		}
 		case 'displaymath': {
 			// slice the exact source between the delimiters; printRaw fallback
-			const displayMathContent = mathBodyRawSource(node, ['\\[', '$$'], ['\\]', '$$']) ?? printRaw(node.content || []);
+			const body = mathBodyRawSpan(node, ['\\[', '$$'], ['\\]', '$$']);
+			const sliced = body ? trimmedRaw(body) : null;
+			const content = sliced ? sliced.text : String(printRaw(node.content || []) || '').trim();
 			return [
 				buildNode('block_math', { label: null, numbered: false, environment: null, lineLabels: [] }, [
-					textNode(String(displayMathContent || '').trim())
+					textNode(content, null, sliced ? bytesSpan(content.length, sliced.from) : null)
 				])
 			];
 		}
@@ -135,7 +136,10 @@ export function convertNodeToBlock(node: Node, ctx: ConversionContext, options: 
 			const macro = node as Macro;
 			// a commented call captured verbatim by the heuristics: emit as-is
 			const rawMacro = macro as RawStamped<Macro>;
-			if (rawMacro._raw != null) return [buildNode('raw_latex', null, [textNode(String(rawMacro._raw))])];
+			if (rawMacro._raw != null) {
+				const raw = String(rawMacro._raw);
+				return [buildNode('raw_latex', null, [textNode(raw, null, prefixSpans(raw, startOf(macro)))])];
+			}
 			if (ignoredMacros.has(macro.content)) return null;
 
 			const handler = macroHandlers[macro.content];
@@ -148,13 +152,18 @@ export function convertNodeToBlock(node: Node, ctx: ConversionContext, options: 
 					result.length > 0 &&
 					['heading', 'horizontal_rule', 'includedoc', 'abstract', 'image'].includes(result[0].type.name)
 				) {
+					// a block that is a chip of its own (\input, \hrule) stands for the call's bytes
+					const span = macroSpan(macro);
+					if (span) for (const n of result) if (n.childCount === 0 && !spansOf(n)) noteSpans(n, standsFor(1, span.from, span.to));
 					return result;
 				}
 			}
 			const handling = options.unknownHandling ?? 'raw_latex';
 			if (handling === 'raw_latex') {
-				const latexSource = nodeRawSource(node) ?? nodeToLatexString(node);
-				if (String(latexSource || '').trim()) return [buildNode('raw_latex', null, [textNode(latexSource)])];
+				const raw = nodeRawSpan(node);
+				const latexSource = raw?.text ?? nodeToLatexString(node);
+				if (String(latexSource || '').trim())
+					return [buildNode('raw_latex', null, [textNode(latexSource, null, raw ? bytesSpan(latexSource.length, raw.from) : null)])];
 			}
 			return null;
 		}

@@ -2,6 +2,7 @@
 import type { SyntaxNode } from '@lezer/common';
 import { buildNode, textNodes, collapseTextNodes, realMarks, type PmNode, type PmMark } from './builders';
 import { typstMathToLatex } from './mathTranslate';
+import { alignedSpans, bytesSpan, noteSpans, spansOf, standsFor } from '$lib/editor/visual/sourceSpans';
 
 export function children(node: SyntaxNode): SyntaxNode[] {
 	const out: SyntaxNode[] = [];
@@ -55,16 +56,17 @@ export function unescape(slice: string): string {
 }
 
 export function withMarks(node: PmNode, marks: PmMark[]): PmNode {
-	return marks.length > 0 ? node.mark(realMarks(marks)) : node;
+	return marks.length > 0 ? noteSpans(node.mark(realMarks(marks)), spansOf(node)) : node;
 }
 
-/** an inline raw-source chip; the escape hatch every unknown inline construct falls into. */
-export function chip(text: string, marks: PmMark[]): PmNode[] {
-	return text ? [withMarks(buildNode('inline_latex', { lang: 'typst' }, textNodes(text)), marks)] : [];
+/** an inline raw-source chip, the escape hatch every unknown inline construct falls into; `from` is where its text starts in the source */
+export function chip(text: string, marks: PmMark[], from?: number): PmNode[] {
+	const spans = from === undefined ? null : bytesSpan(text.length, from);
+	return text ? [withMarks(buildNode('inline_latex', { lang: 'typst' }, textNodes(text, null, spans)), marks)] : [];
 }
 
-export function rawBlock(text: string): PmNode {
-	return buildNode('raw_latex', { lang: 'typst' }, textNodes(text));
+export function rawBlock(text: string, from?: number): PmNode {
+	return buildNode('raw_latex', { lang: 'typst' }, textNodes(text, null, from === undefined ? null : bytesSpan(text.length, from)));
 }
 
 /** the source between an Equation's dollar delimiters, exactly as written. */
@@ -119,6 +121,15 @@ export function rawCallText(call: SyntaxNode, src: string): string | null {
 	const parts = singleArgCall(call, src, 'raw');
 	if (!parts || parts.content || parts.arg.name !== 'Str') return null;
 	return unquote(src.slice(parts.arg.from, parts.arg.to));
+}
+
+/** `#link("https://...")` with no body, which the serializer writes for a bare url that the text
+ *  after it would otherwise extend: the url chip a bare url is, standing for the call's bytes */
+export function bareLinkHref(call: SyntaxNode, src: string): string | null {
+	const parts = singleArgCall(call, src, 'link');
+	if (!parts || parts.content || parts.arg.name !== 'Str') return null;
+	const href = unquote(src.slice(parts.arg.from, parts.arg.to));
+	return /^https?:\/\/\S+$/.test(href) ? href : null;
 }
 
 /** `#link("...")[...]` and nothing fancier; any other shape stays a chip. */
@@ -243,11 +254,11 @@ export function convertInline(nodes: SyntaxNode[], src: string, marks: PmMark[])
 		const slice = src.slice(k.from, k.to);
 		switch (k.name) {
 			case 'Text':
-				out.push(...textNodes(slice, marks));
+				out.push(...textNodes(slice, marks, bytesSpan(slice.length, k.from)));
 				break;
 			case 'Space':
 			case 'Parbreak': // only reachable in odd nests; a wrap is semantically a space
-				out.push(...textNodes(' ', marks));
+				out.push(...textNodes(' ', marks, standsFor(1, k.from, k.to)));
 				break;
 			case 'Strong':
 			case 'Emph': {
@@ -255,7 +266,7 @@ export function convertInline(nodes: SyntaxNode[], src: string, marks: PmMark[])
 				if (markup) {
 					out.push(...convertInline(children(markup), src, [...marks, { type: k.name === 'Strong' ? 'strong' : 'em' }]));
 				} else {
-					out.push(...chip(slice, marks));
+					out.push(...chip(slice, marks, k.from));
 				}
 				break;
 			}
@@ -263,55 +274,64 @@ export function convertInline(nodes: SyntaxNode[], src: string, marks: PmMark[])
 				const delims = children(k).filter((c) => c.name === 'RawDelim');
 				if (delims.length < 2 || delims[0].to - delims[0].from >= 3) {
 					// unterminated, or a block fence stuck mid-line: keep it literal
-					out.push(...chip(slice, marks));
+					out.push(...chip(slice, marks, k.from));
 				} else {
-					out.push(...textNodes(src.slice(delims[0].to, delims[delims.length - 1].from), [...marks, { type: 'code' }]));
+					const inner = src.slice(delims[0].to, delims[delims.length - 1].from);
+					out.push(...textNodes(inner, [...marks, { type: 'code' }], bytesSpan(inner.length, delims[0].to)));
 				}
 				break;
 			}
 			case 'Linebreak': {
-				out.push(buildNode('hard_break', { lineBreak: true }));
+				out.push(noteSpans(buildNode('hard_break', { lineBreak: true }), standsFor(1, k.from, k.to)));
 				// the newline ending the broken line is part of the break, not a leading space
 				// on the continuation; a same-line space after `\` is real text
 				const sp = nodes[i + 1];
 				if (sp?.name === 'Space') {
 					i++;
-					if (!/[\r\n]/.test(src.slice(sp.from, sp.to))) out.push(...textNodes(' ', marks));
+					if (!/[\r\n]/.test(src.slice(sp.from, sp.to))) out.push(...textNodes(' ', marks, standsFor(1, sp.from, sp.to)));
 				}
 				break;
 			}
 			case 'Escape':
-				out.push(...textNodes(unescape(slice), marks));
+				out.push(...textNodes(unescape(slice), marks, alignedSpans(unescape(slice), k.from, slice)));
 				break;
 			case 'SmartQuote':
-				out.push(...textNodes(slice, marks));
+				out.push(...textNodes(slice, marks, bytesSpan(slice.length, k.from)));
 				break;
 			case 'Shorthand':
-				out.push(...textNodes(SHORTHANDS[slice] ?? slice, marks));
+				out.push(...textNodes(SHORTHANDS[slice] ?? slice, marks, alignedSpans(SHORTHANDS[slice] ?? slice, k.from, slice)));
 				break;
 			case 'Hash': {
 				const next = nodes[i + 1];
 				if (!next) {
-					out.push(...chip('#', marks));
+					out.push(...chip('#', marks, k.from));
 					break;
 				}
 				const link = linkParts(next, src);
 				const markCall = link ? null : markCallParts(next, src);
 				const refTarget = link || markCall ? null : refCallTarget(next, src);
 				const rawText = link || markCall || refTarget != null ? null : rawCallText(next, src);
-				if (link) {
+				const bareHref = link || markCall || refTarget != null || rawText != null ? null : bareLinkHref(next, src);
+				if (bareHref != null) {
+					out.push(
+						withMarks(
+							noteSpans(buildNode('inline_latex', { lang: 'typst' }, textNodes(bareHref)), standsFor(bareHref.length, k.from, next.to)),
+							marks
+						)
+					);
+				} else if (link) {
 					const linkMark: PmMark = { type: 'link', attrs: { href: link.href, title: null, bare: false } };
 					out.push(...convertInline(children(link.markup), src, [...marks, linkMark]));
 				} else if (markCall) {
 					out.push(...convertInline(children(markCall.markup), src, [...marks, markCall.mark]));
 				} else if (refTarget != null) {
-					out.push(withMarks(buildNode('typ_ref', { target: refTarget }), marks));
+					out.push(withMarks(noteSpans(buildNode('typ_ref', { target: refTarget }), standsFor(1, k.from, next.to)), marks));
 				} else if (rawText != null) {
-					out.push(...textNodes(rawText, [...marks, { type: 'code' }]));
+					out.push(...textNodes(rawText, [...marks, { type: 'code' }], standsFor(rawText.length, k.from, next.to)));
 				} else {
 					// a terminating semicolon belongs to the expression (`#a; text`)
 					const end = expressionEnd(nodes, i + 1, src);
-					out.push(...chip(src.slice(k.from, nodes[end].to), marks));
+					out.push(...chip(src.slice(k.from, nodes[end].to), marks, k.from));
 					i = end - 1;
 				}
 				i++;
@@ -323,9 +343,15 @@ export function convertInline(nodes: SyntaxNode[], src: string, marks: PmMark[])
 				const inner = equationInner(k, src);
 				const latex = typstMathToLatex(inner);
 				if (latex != null) {
-					out.push(withMarks(buildNode('inline_math', { typst: inner, latexOrig: latex }, textNodes(latex)), marks));
+					// the formula stands for its bytes whole: its content is a translation, not the source
+					out.push(
+						withMarks(
+							noteSpans(buildNode('inline_math', { typst: inner, latexOrig: latex }, textNodes(latex)), standsFor(1, k.from, k.to)),
+							marks
+						)
+					);
 				} else {
-					out.push(...chip(slice, marks));
+					out.push(...chip(slice, marks, k.from));
 				}
 				break;
 			}
@@ -334,15 +360,15 @@ export function convertInline(nodes: SyntaxNode[], src: string, marks: PmMark[])
 				// a chip - the atom's serializer has no slot for it
 				const refKids = children(k);
 				if (refKids.length === 1 && refKids[0].name === 'RefMarker') {
-					out.push(withMarks(buildNode('typ_ref', { target: slice.slice(1) }), marks));
+					out.push(withMarks(noteSpans(buildNode('typ_ref', { target: slice.slice(1) }), standsFor(1, k.from, k.to)), marks));
 				} else {
-					out.push(...chip(slice, marks));
+					out.push(...chip(slice, marks, k.from));
 				}
 				break;
 			}
 			// labels, equations, comments and anything unforeseen: verbatim chips
 			default:
-				out.push(...chip(slice, marks));
+				out.push(...chip(slice, marks, k.from));
 		}
 	}
 	return collapseTextNodes(out);

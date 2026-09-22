@@ -3,16 +3,53 @@ import { join } from 'node:path';
 import type { Node as PMNode, MarkType } from 'prosemirror-model';
 import type { EditorState, Transaction } from 'prosemirror-state';
 import { canSplit } from 'prosemirror-transform';
-import { parseLatexFile, serializeLatexFile, type ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
-import { parseMarkdownFile, serializeMarkdownFile } from '$lib/languages/markdown/visual/roundtrip';
-import { parseTypstFile, serializeTypstFile } from '$lib/languages/typst/visual/roundtrip';
+import { bodyOffsetOf, parseLatexFile, parseLatexRegion, serializeLatexFile, type ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
+import { parseMarkdownFile, parseMarkdownRegion, serializeMarkdownFile } from '$lib/languages/markdown/visual/roundtrip';
+import { parseTypstFile, parseTypstRegion, serializeTypstFile } from '$lib/languages/typst/visual/roundtrip';
+import type { RegionParser } from '$lib/editor/visual/sourceSpans';
+import type { OldRun, PmSuggestionRange, SuggestionSource } from '$lib/editor/visual/extensions/pmSuggestionsPlace';
 
 export type Format = {
 	name: 'tex' | 'md' | 'typ';
 	parse: (text: string) => ParsedLatexFile;
 	serialize: (meta: ParsedLatexFile, doc: PMNode) => string;
+	/** parses a stretch of the body as `parse` parsed the file */
+	region: (meta: ParsedLatexFile) => RegionParser;
 	files: string[];
 };
+
+/** what a placement reads: the file as parsed, its text, and the stretch of it the document is */
+export function suggestionSource(f: Format, meta: ParsedLatexFile, text: string): SuggestionSource {
+	const from = bodyOffsetOf(meta);
+	const to = meta.hadDocumentEnv ? text.length - meta.postamble.length : text.length;
+	return { text, map: meta.map, body: { from, to }, parse: f.region(meta) };
+}
+
+/** a drawn range's old content the way renderedText reads a document: one # per node that is not text */
+/**
+ * What a drawn range reads as once put back, for renderedText: a break mark is the break itself, a
+ * node outline is the node it was (a block on its own line, an inline one as the # the reading gives
+ * any inline node), a block that only changed kind reads the same, and words are the old words
+ */
+export function drawnReading(r: PmSuggestionRange): { from: number; to: number; words: string } | null {
+	if (r.partial) return null;
+	if (r.brk)
+		return r.brk === 'removed'
+			? { from: r.from, to: r.to, words: `\n${oldWordsOf(r)}` }
+			: { from: r.from, to: r.from + 2, words: oldWordsOf(r) };
+	if (r.node) {
+		if (r.format) return null;
+		const was = r.was ? (r.was.isInline ? '#' : `\n${renderedText(r.was)}`) : oldWordsOf(r);
+		return { from: r.from, to: r.to, words: was };
+	}
+	return { from: r.from, to: r.to, words: oldWordsOf(r) };
+}
+
+export function oldWordsOf(r: PmSuggestionRange): string {
+	const runs = (old: OldRun[]) => old.map((run) => (run.node ? '#' : run.text)).join('');
+	if (r.gone) return `${runs(r.gone.head)}\n${r.gone.blocks.map((b) => renderedText(b)).join('\n')}\n${runs(r.gone.tail)}`;
+	return runs(r.old);
+}
 
 const FIXTURES = join(__dirname, '../../../fixtures');
 const LIVE = join(__dirname, '../../../live/fixtures');
@@ -35,18 +72,21 @@ export const FORMATS: Format[] = [
 		name: 'tex',
 		parse: (t) => parseLatexFile(t),
 		serialize: serializeLatexFile,
+		region: (meta) => (src) => parseLatexRegion(src, meta.preamble),
 		files: [join(FIXTURES, 'comments/feature-sweep.tex'), ...walk(LIVE, /\.tex$/, process.env.VISUAL_FUZZ_RUNS ? 120_000 : 16_000)]
 	},
 	{
 		name: 'md',
 		parse: (t) => parseMarkdownFile(t),
 		serialize: serializeMarkdownFile,
+		region: () => parseMarkdownRegion,
 		files: [join(FIXTURES, 'comments/feature-sweep.md'), join(FIXTURES, 'comments/guide.md'), ...walk(DOCS, /\.md$/)]
 	},
 	{
 		name: 'typ',
 		parse: (t) => parseTypstFile(t),
 		serialize: serializeTypstFile,
+		region: () => parseTypstRegion,
 		files: [join(FIXTURES, 'comments/feature-sweep.typ')]
 	}
 ];
@@ -160,7 +200,9 @@ export function renderedText(doc: PMNode, drawn: { from: number; to: number; wor
 	});
 	for (const r of [...drawn].sort((a, b) => b.from - a.from || b.to - a.to)) {
 		const kept = chars.filter((c) => c.old || !(c.pos >= r.from && c.pos < r.to));
-		const at = kept.findIndex((c) => c.pos >= r.from);
+		// past any words already put at this very spot, so two of them keep the order they were given
+		// in: the editor draws them that way, and it is the order the file holds them in
+		const at = kept.findIndex((c) => c.pos >= r.from && !(c.old && c.pos === r.from));
 		kept.splice(at < 0 ? kept.length : at, 0, ...[...r.words].map((ch) => ({ ch, pos: r.from, old: true })));
 		chars = kept;
 	}
@@ -174,8 +216,61 @@ export function renderedText(doc: PMNode, drawn: { from: number; to: number; wor
 
 export type Edit = { label: string; tr: Transaction };
 
-export function randomEdit(state: EditorState, rnd: () => number): Edit | null {
+// A formula's content is its source and mathlive draws it, so spotIn can never land in one and without
+// this no edit ever reaches the tier that draws a changed formula. Chips are left out on purpose: their
+// content is the DIALECT's source, latex in a .tex file and typst in a .typ one, so nothing written here
+// would be right for both.
+const OWN_SOURCE = new Set(['inline_math', 'block_math']);
+
+// Only ever at the END, and only things that are valid after any balanced formula. An equation editor
+// writes a whole formula back, so an edit in one never leaves half a command or an environment with
+// something wedged between its name and its argument - and latex that will not parse tests the parser,
+// which has its own oracles, rather than what draws the change.
+const SOURCE_BITS = [' + 1', ' = 0', ' x', ' - y', ' \\alpha', ' 2'];
+
+function sourceNodes(doc: PMNode): { node: PMNode; pos: number }[] {
+	const out: { node: PMNode; pos: number }[] = [];
+	doc.descendants((node, pos) => {
+		if (!OWN_SOURCE.has(node.type.name)) return true;
+		// an environment's body ends at \end{...}, so nothing typed after it is in the maths at all
+		if (node.content.size && !node.textContent.includes('\\begin{')) out.push({ node, pos });
+		return false;
+	});
+	return out;
+}
+
+function editSource(state: EditorState, rnd: () => number): Edit | null {
+	const inside = sourceNodes(state.doc);
+	if (!inside.length) return null;
+	const { node, pos } = pick(rnd, inside);
+	const from = pos + 1;
+	const tr = state.tr;
+	const src = node.textContent;
+	const where = `${node.type.name}@${pos} ${JSON.stringify(src.slice(0, 24))}`;
+	const end = from + node.content.size;
+	// backspace at the end of a formula, when what it takes is one plain character and what is left is
+	// still a formula: emptying one, or leaving a ^ with nothing under it, is not an edit an equation
+	// editor makes and the latex it leaves is nobody's to parse
+	if (rnd() < 0.4 && /[a-zA-Z0-9+\-=]$/.test(src) && !/\\[a-zA-Z]$/.test(src) && /[^\s^_\\{]\s*.$/.test(src)) {
+		tr.delete(end - 1, end);
+		return { label: `cut ${JSON.stringify(src.slice(-1))} from the end of ${where}`, tr };
+	}
+	const bit = pick(rnd, SOURCE_BITS);
+	tr.insertText(bit, end);
+	return { label: `type ${JSON.stringify(bit)} at the end of ${where}`, tr };
+}
+
+/** `formulas` also edits inside maths. Off by default: the round-trip oracle reaches a latex
+ *  normalisation there that is nothing to do with what the edit was, and has its own oracles */
+export function randomEdit(state: EditorState, rnd: () => number, formulas = false): Edit | null {
 	const doc = state.doc;
+	// drawn whether or not it is used, so the same seed walks the same edits with maths on or off and a
+	// run that fails can be replayed both ways
+	const maths = rnd() < 0.12;
+	if (formulas && maths) {
+		const edit = editSource(state, rnd);
+		if (edit) return edit;
+	}
 	const blocks = proseBlocks(doc);
 	if (!blocks.length) return null;
 	const b = pick(rnd, blocks);

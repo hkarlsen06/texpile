@@ -3,13 +3,14 @@
 import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { parseMinimal, getParser } from '@unified-latex/unified-latex-util-parse';
+import { getParser } from '@unified-latex/unified-latex-util-parse';
+import { parseMinimal } from '$lib/languages/latex/parser/pegMinimal';
 import { parseMinimalChunked } from '$lib/languages/latex/parser/chunkedMinimalParse';
 import { parseLatex } from '$lib/languages/latex/parser/parser';
 import { MACRO_SIGNATURES, ENV_SIGNATURES } from '$lib/languages/latex/parser/macros';
 
-vi.mock('@unified-latex/unified-latex-util-parse', async (importOriginal) => {
-	const m = await importOriginal<typeof import('@unified-latex/unified-latex-util-parse')>();
+vi.mock('$lib/languages/latex/parser/pegMinimal', async (importOriginal) => {
+	const m = await importOriginal<typeof import('$lib/languages/latex/parser/pegMinimal')>();
 	return { ...m, parseMinimal: vi.fn(m.parseMinimal) };
 });
 
@@ -182,7 +183,9 @@ describe('parseMinimalChunked', () => {
 		doc += UNMATCHED;
 		vi.mocked(parseMinimal).mockClear();
 		const ours = JSON.stringify(parseLatex(doc, OPTS));
-		expect(vi.mocked(parseMinimal).mock.calls.length).toBeGreaterThan(1);
+		// the memo-free tokenizer takes the whole string in one call; the chunked one is for a
+		// tokenizer whose memo grows with the input
+		expect(vi.mocked(parseMinimal).mock.calls.length).toBe(1);
 		expect(firstDifference(ours, JSON.stringify(getParser(OPTS).parse(doc)))).toBeNull();
 	});
 });

@@ -8,7 +8,6 @@ import {
 	snapToWords,
 	textHunks,
 	whitespaceChange,
-	withWholeGroups,
 	type Hunk
 } from './suggestHunks';
 
@@ -18,6 +17,9 @@ export type WhitespaceChanges = 'exact' | 'paragraphs';
 
 export type TypingSide = 'before' | 'after';
 
+// a point deletion takes typed words INTO it, so replacing a word reads as one change rather than an
+// addition beside a deletion. Where the caret stands after a delete is not decided here: the gesture
+// pins a side of its own (see caretSide), and only a spot with no pinned side falls back to this
 export function defaultTypingSide(point: boolean, joins: boolean): TypingSide {
 	return point || joins ? 'after' : 'before';
 }
@@ -81,7 +83,7 @@ export function compareSuggestions(o: CompareInput): ComparedSuggestions {
 	const typing = mode === 'suggesting' ? (o.gestures ?? []) : [];
 	let hunks = clearOfSuggestions(textHunks(before, after), before, after, given, typing);
 	if (mode === 'suggesting') {
-		const words = withWholeGroups(snapToWords(hunks, before, after, given, exact), before, after, given);
+		const words = snapToWords(hunks, before, after, given, exact);
 		hunks = joinGestures(words, before, after, typing, exact);
 	}
 	if (hunks.length === 0) return { placed: given, changes: [] };
@@ -199,6 +201,21 @@ export function compareSuggestions(o: CompareInput): ComparedSuggestions {
 			return !isPoint(i) && entries[i].from >= h.aFrom && entries[i].to <= h.aTo;
 		}
 		const typed = h.aFrom === h.aTo;
+		// Words put back where they were taken from cancel that much of the deletion rather than
+		// standing beside it as new ones. An undo lands here, and without this it reads as a deletion
+		// of everything followed by an addition of the same thing, which is what the document already
+		// said before either. Retyping by hand lands here too, and means the same thing.
+		if (typed && inserted && mode === 'suggesting') {
+			const back = points.find((i) => entries[i].author === me && entries[i].from === h.aFrom && entries[i].restore.startsWith(inserted));
+			if (back !== undefined) {
+				const e = entries[back];
+				e.restore = e.restore.slice(inserted.length);
+				// what is left of it stands after the words that came back
+				e.point = h.bTo;
+				if (!e.restore) e.fate = 'withdraw';
+				return;
+			}
+		}
 		if (typed) for (const i of points) if (entries[i].from === h.aFrom && sideOf(i) === 'before') entries[i].point = h.bTo;
 
 		if (neutralHere(h, inserted, owners, acceptedGone)) {

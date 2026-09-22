@@ -6,3 +6,6 @@
  * the settings panel reads it back, so the slider cannot claim 100% over a `0.5\textwidth` line.
  */
 export const DEFAULT_FIGURE_FRACTION = 0.5;
+
+/** what a dragged figure snaps to, as a fraction of \textwidth */
+export const FIGURE_SIZE_STEP = 0.1;

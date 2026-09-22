@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Node } from 'prosemirror-model';
 import { parseLatexFile, serializeLatexFile } from '$lib/workspace/latexRoundtrip';
 import { serializeToLatex } from '$lib/languages/latex/serializer/latexSerializer';
+import { withoutOrigins } from '$lib/editor/visual/sourceSpans';
 
 function chipsOf(source: string): string[] {
 	const chips: string[] = [];
@@ -14,9 +15,7 @@ function chipsOf(source: string): string[] {
 
 /** every block through the deterministic rules, the path an edited block takes */
 function regenerated(doc: Node): string {
-	const kids: Node[] = [];
-	doc.forEach((child) => kids.push(child.type.create({ ...child.attrs, orig: null }, child.content, child.marks)));
-	return serializeToLatex(doc.type.create({ ...doc.attrs, docTail: null }, kids));
+	return serializeToLatex(withoutOrigins(doc));
 }
 
 const SENTENCE = String.raw`Poincar\'e met Erd\H{o}s and Ha\v cek in \AA ngstr\"om units, see \S 3.`;

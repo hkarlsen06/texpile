@@ -8,6 +8,11 @@ import { ACCENTS, SYMBOLS } from '../../texCharacters';
 import { HEAD, LINE_COMMANDS, drawnCommand } from '../../drawnCommands';
 import { buildNode, textNode, type PmNode } from '../builders';
 import { schema } from '../../schema/latexPMSchema';
+import { concatSpans, noteSpans, sliceSpans, spansOf, type LeafSpan } from '$lib/editor/visual/sourceSpans';
+
+function chipSpans(chip: PmNode): LeafSpan[] | undefined {
+	return chip.firstChild ? spansOf(chip.firstChild) : undefined;
+}
 
 const COMMAND = /^\\([a-zA-Z]+|[^a-zA-Z])$/;
 
@@ -51,7 +56,11 @@ function withArgumentGroups(nodes: PmNode[]): PmNode[] {
 		const chip = nodes[i];
 		const group = nodes[i + 1];
 		if (isChip(chip) && takesGroup(chip, group)) {
-			out.push(buildNode('inline_latex', chip.attrs, [textNode(chip.textContent + group.textContent)]).mark(chip.marks));
+			const spans = concatSpans([
+				{ len: chip.textContent.length, spans: chipSpans(chip) },
+				{ len: group.textContent.length, spans: chipSpans(group) }
+			]);
+			out.push(buildNode('inline_latex', chip.attrs, [textNode(chip.textContent + group.textContent, null, spans)]).mark(chip.marks));
 			i++;
 		} else out.push(chip);
 	}
@@ -71,9 +80,14 @@ export function bindTextToChips(input: PmNode[]): PmNode[] {
 			out.push(chip);
 			continue;
 		}
-		out.push(buildNode('inline_latex', chip.attrs, [textNode(chip.textContent + taken)]).mark(chip.marks));
+		const textSpans = spansOf(next);
+		const spans = concatSpans([
+			{ len: chip.textContent.length, spans: chipSpans(chip) },
+			{ len: taken.length, spans: sliceSpans(text, textSpans, 0, taken.length) }
+		]);
+		out.push(buildNode('inline_latex', chip.attrs, [textNode(chip.textContent + taken, null, spans)]).mark(chip.marks));
 		const rest = text.slice(taken.length);
-		if (rest) out.push(schema.text(rest, next.marks));
+		if (rest) out.push(noteSpans(schema.text(rest, next.marks), sliceSpans(text, textSpans, taken.length, text.length)));
 		i++;
 	}
 	return out;

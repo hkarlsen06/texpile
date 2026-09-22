@@ -11,7 +11,7 @@ export function measurePmAnchors(view: ProseMirrorView, rail: HTMLElement, pendi
 	const top = rail.getBoundingClientRect().top;
 	const out = new Map<string, number>();
 	for (const el of root.querySelectorAll<HTMLElement>(
-		'.pm-comment[data-comment], .pm-suggest-old[data-comment], .pm-suggest-new[data-comment], .pm-suggest-partial[data-comment]'
+		'.pm-comment[data-comment], .pm-suggest-old[data-comment], .pm-suggest-new[data-comment], .pm-suggest-partial[data-comment], .pm-suggest-break[data-comment]'
 	)) {
 		const id = el.dataset.comment;
 		if (!id || out.has(id)) continue;

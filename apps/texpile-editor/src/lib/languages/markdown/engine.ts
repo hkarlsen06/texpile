@@ -5,11 +5,13 @@ import type { MarkdownIt } from 'markdown-it';
 import { mathPlugin } from './visual/math';
 import { footnotePlugin } from './visual/footnotes';
 import { referenceDefinitionPlugin } from './visual/referenceDefinitions';
+import { positionsPlugin } from './positions';
 
 export function createMarkdownEngine(): MarkdownIt {
 	const md = markdownit({ html: true, linkify: false, typographer: false });
 	md.use(mathPlugin);
 	md.use(footnotePlugin);
 	md.use(referenceDefinitionPlugin);
+	md.use(positionsPlugin);
 	return md;
 }

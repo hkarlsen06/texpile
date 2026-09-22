@@ -4,7 +4,7 @@
 const ENTITY = /&(?=[a-zA-Z][a-zA-Z0-9]{0,31};|#\d{1,7};|#[xX][0-9a-fA-F]{1,6};)/g;
 const ASCII_PUNCT_AHEAD = /\\(?=[!-/:-@[-`{-~])/g;
 
-function escLineStart(line: string): string {
+export function escLineStart(line: string): string {
 	return line
 		.replace(/^[#\-+>]/, '\\$&')
 		.replace(/^(\d+)([.)])/, '$1\\$2')

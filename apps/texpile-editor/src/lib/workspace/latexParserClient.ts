@@ -4,7 +4,8 @@ import { schema } from '$lib/languages/latex/schema/latexPMSchema';
 import { mdSchema } from '$lib/languages/markdown/visual/schema';
 import type { Node as PMNode } from 'prosemirror-model';
 import { latexParserWorker, resetLatexParserWorker } from './latexParserWorker';
-import type { ParsedLatexFile, ParsePhase } from './latexRoundtrip';
+import { parseBodyOf, type ParsedLatexFile, type ParsePhase } from './latexRoundtrip';
+import { rememberParseMap, warnMapDefects, type SourceMap } from '$lib/editor/visual/sourceSpans';
 
 type PendingRequest = {
 	resolve: (value: ParsedLatexFile) => void;
@@ -13,6 +14,8 @@ type PendingRequest = {
 	onProgress?: (phase: ParsePhase) => void;
 	/** which schema rehydrates the result: each dialect's docs live in its own Schema object */
 	format: 'tex' | 'md';
+	/** the text sent for parsing: the origins of the rehydrated document slice it */
+	source: string;
 };
 
 type ProgressMessage = {
@@ -34,6 +37,7 @@ type ResultMessage = {
 	postamble: string;
 	hadDocumentEnv: boolean;
 	warnings: string[];
+	map: SourceMap;
 	docJSON: Record<string, unknown>;
 };
 
@@ -76,13 +80,11 @@ function ensureWorker(): Worker {
 		if (msg.type === 'result') {
 			try {
 				const doc: PMNode = (pend.format === 'md' ? mdSchema : schema).nodeFromJSON(msg.docJSON);
-				pend.resolve({
-					doc,
-					preamble: msg.preamble,
-					postamble: msg.postamble,
-					hadDocumentEnv: msg.hadDocumentEnv,
-					warnings: msg.warnings
-				});
+				// the map crossed as data; the nodes it describes are these, not the worker's
+				const meta = { preamble: msg.preamble, postamble: msg.postamble, hadDocumentEnv: msg.hadDocumentEnv };
+				const origins = rememberParseMap(doc, msg.map, parseBodyOf(meta, pend.source));
+				warnMapDefects('latexParserClient', origins);
+				pend.resolve({ doc, ...meta, warnings: msg.warnings, map: msg.map, origins });
 			} catch (err) {
 				pend.reject(err instanceof Error ? err : new Error(String(err)));
 			}
@@ -128,7 +130,7 @@ export function parseLatexFileAsync(
 			dropWorker();
 			reject(new Error(PARSE_TIMEOUT));
 		}, timeoutMs);
-		pending.set(id, { resolve, reject, timeoutId, onProgress, format });
+		pending.set(id, { resolve, reject, timeoutId, onProgress, format, source });
 		w.postMessage({ id, source, projectMacros, maxNodes, format });
 	});
 }

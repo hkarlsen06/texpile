@@ -5,7 +5,7 @@ import { observe } from '$lib/runes/observe.svelte';
 import { selectionToolbarRow } from '$lib/editor/selectionToolbarRow';
 import type { CommentAnchor } from '$lib/comments/anchor';
 import { visibleBox } from '../visibleBox';
-import { buildPmAnchor, setPmCommentPending } from './pmComments';
+import { setPmCommentPending, type SourceAnchorFn } from './pmComments';
 
 /** the row fades in rather than flashing under the pointer for every drag it passes through */
 const SHOW_DELAY = 120;
@@ -24,7 +24,7 @@ const HEIGHT = 26;
  * move the text without an editor update, so a capture-phase scroll listener and a ResizeObserver
  * cover what update() cannot see.
  */
-export function pmSelectionToolbar(onAdd: (anchor: CommentAnchor | null) => void, label: string): Plugin {
+export function pmSelectionToolbar(onAdd: (anchor: CommentAnchor | null) => void, label: string, sourceAnchor: SourceAnchorFn): Plugin {
 	return new Plugin({
 		view(view) {
 			const row = selectionToolbarRow(
@@ -32,7 +32,7 @@ export function pmSelectionToolbar(onAdd: (anchor: CommentAnchor | null) => void
 				() => {
 					const sel = view.state.selection;
 					if (!(sel instanceof TextSelection) || sel.empty) return;
-					const anchor = buildPmAnchor(view.state.doc, sel.from, sel.to);
+					const anchor = sourceAnchor(view.state.doc, sel.from, sel.to);
 					onAdd(anchor);
 					// the composer is about to take focus and the browser will hide the native
 					// selection with it; pin the commented text under a decoration until it closes

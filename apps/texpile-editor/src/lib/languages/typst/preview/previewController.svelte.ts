@@ -233,7 +233,7 @@ export class TypstPreviewController {
 
 	/**
 	 * Visual-mode follow: the PM caret has no source line of its own, so it goes through the
-	 * view's orig block map - block-granular from the parse stamps, refined inside the block by
+	 * view's source map - block-granular from the parse's block runs, refined inside the block by
 	 * text anchoring, the same machinery the mode switch uses to carry the caret across.
 	 */
 	private readonly sendVisualCaretScroll = trailingDebounce(150, (_: null) => {

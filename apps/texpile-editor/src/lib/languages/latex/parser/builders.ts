@@ -3,6 +3,7 @@ import type { Node } from '@unified-latex/unified-latex-types';
 import { printRaw } from '@unified-latex/unified-latex-util-print-raw';
 import { Node as PMNodeT, Mark as PMMarkT } from 'prosemirror-model';
 import { schema } from '$lib/languages/latex/schema/latexPMSchema';
+import { concatSpans, noteSpans, spansOf, type LeafSpan } from '$lib/editor/visual/sourceSpans';
 
 export type PmNode = PMNodeT;
 
@@ -42,14 +43,14 @@ export function realMarks(marks?: PmMark[] | null): readonly PMMarkT[] {
 	return set;
 }
 
-/** Build a real text node, or null for the empty string (PM forbids empty text). */
-export function textNode(text: string, marks?: PmMark[] | null): PMNodeT | null {
-	return text.length > 0 ? schema.text(text, realMarks(marks)) : null;
+/** Build a real text node, or null for the empty string (PM forbids empty text). `spans` say which bytes it came from */
+export function textNode(text: string, marks?: PmMark[] | null, spans?: LeafSpan[] | null): PMNodeT | null {
+	return text.length > 0 ? noteSpans(schema.text(text, realMarks(marks)), spans) : null;
 }
 
-/** Like `txt`, but returns a (possibly empty) array for handlers that return PmNode[]. */
-export function textNodes(text: string, marks?: PmMark[] | null): PMNodeT[] {
-	const t = textNode(text, marks);
+/** Like `textNode`, but returns a (possibly empty) array for handlers that return PmNode[]. */
+export function textNodes(text: string, marks?: PmMark[] | null, spans?: LeafSpan[] | null): PMNodeT[] {
+	const t = textNode(text, marks, spans);
 	return t ? [t] : [];
 }
 
@@ -64,7 +65,8 @@ export function buildNode(
 	attrs?: Record<string, unknown> | null,
 	content?: ReadonlyArray<PMNodeT | null | undefined> | null
 ): PMNodeT {
-	const kids = (content ?? []).filter((c): c is PMNodeT => c != null);
+	// joined here rather than by ProseMirror, which would make new text nodes and lose where they came from
+	const kids = collapseTextNodes((content ?? []).filter((c): c is PMNodeT => c != null));
 	const nodeType = schema.nodes[type];
 	if (STRICT_NODES) {
 		try {
@@ -97,10 +99,12 @@ export function collapseTextNodes(nodes: PmNode[]): PmNode[] {
 	const result: PmNode[] = [];
 	let buf = '';
 	let bufMarks: readonly PMMarkT[] = PMMarkT.none;
+	let parts: { len: number; spans: LeafSpan[] | undefined }[] = [];
 	function flush() {
-		if (buf.length > 0) result.push(schema.text(buf, bufMarks));
+		if (buf.length > 0) result.push(noteSpans(schema.text(buf, bufMarks), concatSpans(parts)));
 		buf = '';
 		bufMarks = PMMarkT.none;
+		parts = [];
 	}
 
 	for (const node of nodes) {
@@ -113,6 +117,7 @@ export function collapseTextNodes(nodes: PmNode[]): PmNode[] {
 				buf = node.text;
 				bufMarks = node.marks;
 			}
+			parts.push({ len: node.text.length, spans: spansOf(node) });
 		} else {
 			flush();
 			result.push(node);

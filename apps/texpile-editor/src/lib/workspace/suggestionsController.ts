@@ -1,6 +1,6 @@
 // turning edits to the open file into suggestions, and accepting or rejecting them
 import { buildAnchor, type CommentAnchor } from '$lib/comments/anchor';
-import { copyIndex, resolveExactly, withoutEdgeSpace } from '$lib/comments/anchorSearch';
+import { resolveExactly } from '$lib/comments/anchorSearch';
 import {
 	anchorEvent,
 	deleteEvent,
@@ -71,7 +71,10 @@ export class SuggestionsController {
 		const same = !reopened && sameSuggestions(known.placed, kept);
 		this.states.set(file, { text: against, placed: kept });
 		if (!same && file === this.deps.activeFile()) this.show(against, kept);
-		if (this.me === null && kept.length) void this.learnAuthor();
+		// warmed whether or not anything is placed yet: resolving it spawns git, and the first comparison
+		// awaits it, so the words deleted while it runs are already gone from the file with nothing drawn
+		// where they were
+		if (this.me === null) void this.learnAuthor();
 		return lost;
 	}
 
@@ -374,16 +377,7 @@ export class SuggestionsController {
 
 	private show(text: string, placed: PlacedSuggestion[]): void {
 		const marks = placed.map((s) => {
-			const anchor = buildAnchor(text, s.from, s.to);
-			return {
-				id: s.id,
-				from: s.from,
-				to: s.to,
-				restore: s.restore,
-				mine: s.author === this.me,
-				anchor,
-				copy: () => copyIndex(text, withoutEdgeSpace(anchor))
-			};
+			return { id: s.id, from: s.from, to: s.to, restore: s.restore, mine: s.author === this.me, anchor: buildAnchor(text, s.from, s.to) };
 		});
 		const shown = activeSuggestions.current;
 		if (marks.length === shown.length && marks.every((m, i) => sameMark(m, shown[i]))) return;

@@ -160,9 +160,9 @@ html {
 	--proof-style: var(--secondary-ink);
 	--proof-repetition: var(--warning-ink);
 
-	/* review comments: the thread tint, and the selection a composer is open for */
+	/* review comments: the thread tint. The selection a composer is open for wears the editor's own
+	   selection color (app.css), so it has no token of its own */
 	--comment-tint: var(--color-warning-500);
-	--comment-pending-tint: var(--color-primary-500);
 
 	/* the "you are here" flash after a SyncTeX, mode-switch or reference jump */
 	--jump-flash: var(--color-warning-400);

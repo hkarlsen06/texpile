@@ -17,9 +17,11 @@
 	import { tableViewOnly } from '$lib/editor/visual/extensions/table/tableViewOnly';
 	import { createListPlugins, listInputRules, listKeymap, createIndentListCommand, createDedentListCommand } from 'prosemirror-flat-list';
 	import { inputRules, textblockTypeInputRule, wrappingInputRule, InputRule, undoInputRule } from 'prosemirror-inputrules';
+	import { selectFigureBackward, selectFigureForward } from '$lib/editor/visual/figureDeleteGuard';
 	import { search } from 'prosemirror-search';
 	import { mdSchema } from './schema';
 	import { markdownCopyPlugin } from './clipboard';
+	import { parseCarryPlugin } from '$lib/editor/visual/parseCarry';
 	import { listAttrInheritance } from './listAttrInheritance';
 	import { isMac } from '$lib/platform';
 	import { editorViewStore, referenceStore } from '$lib/stores/editorStore';
@@ -45,6 +47,7 @@
 	import { createPersistentSelectionPlugin } from '$lib/editor/visual/extensions/persistentSelection/persistentSelectionPlugin';
 	import { proofreadPlugin, spellClickBoundaryPlugin } from '$lib/editor/spellcheck/spellcheckplugin';
 	import { createBoundaryClickPlugin } from '$lib/editor/visual/extensions/boundary-click-plugin';
+	import { wordSelectionTrim } from '$lib/editor/visual/extensions/wordSelectionTrim';
 	import { createBlockHandlePlugin } from '$lib/editor/visual/extensions/block-handle-plugin.svelte';
 	import { wholeBlockDragPlugin } from '$lib/editor/visual/extensions/wholeBlockDrag';
 	import { createNodeFlashPlugin } from '$lib/editor/visual/extensions/flash-plugin';
@@ -57,7 +60,9 @@
 	import { pmComments } from '$lib/editor/visual/extensions/pmComments';
 	import { syncPmComments } from '$lib/editor/visual/extensions/pmCommentsSync.svelte';
 	import type { CommentAnchor } from '$lib/comments/anchor';
-	import type { CommentThread } from '$lib/comments/log';
+	import type { SourceAnchorFn } from '$lib/editor/visual/extensions/pmComments';
+	import type { CommentRange } from '$lib/editor/visual/extensions/comments';
+	import type { RegionParser, SourceMap } from '$lib/editor/visual/sourceSpans';
 	import type { BiblatexReference } from '$lib/languages/bib/biblatex';
 	import 'prosemirror-view/style/prosemirror.css';
 	import 'prosemirror-tables/style/tables.css';
@@ -83,7 +88,14 @@
 		 * markdown link), false to fall through to the browser. */
 		onOpenLink?: (href: string) => boolean;
 		/** review comments, same contract as the latex EditorView; see extensions/pmComments */
-		commentThreads?: CommentThread[];
+		commentRanges?: CommentRange[];
+		sourceMap?: SourceMap;
+		/** the file's text, the stretch of it the document is, and its parser: what suggestions are drawn from */
+		texSource?: string;
+		bodyRange?: { from: number; to: number };
+		regionParser?: RegionParser | null;
+		/** the selection as a range of the file; see pmComments */
+		sourceAnchor?: SourceAnchorFn;
 		selectedComment?: string | null;
 		onSelectComment?: (id: string) => void;
 		onAddComment?: (anchor: CommentAnchor | null) => void;
@@ -104,7 +116,12 @@
 		onHistoryBoundary,
 		onReady,
 		onOpenLink,
-		commentThreads = [],
+		commentRanges = [],
+		sourceMap = { leaves: [], blocks: [] },
+		texSource = '',
+		bodyRange = { from: 0, to: 0 },
+		regionParser = null,
+		sourceAnchor,
 		selectedComment = null,
 		onSelectComment,
 		onAddComment,
@@ -134,6 +151,7 @@
 		const { mathlivePlugin, mlarrowHandlers } = await import('$lib/editor/visual/extensions/mathlivebridge/mlplugin');
 
 		const plugins = [
+			parseCarryPlugin,
 			markdownCopyPlugin,
 			gapCursor(),
 			dropCursor({ color: 'var(--color-primary-500)', width: 2 }),
@@ -146,6 +164,8 @@
 			...createListPlugins({ schema: mdSchema }),
 			listAttrInheritance,
 			history(),
+			// before the list keymap, whose Backspace and Delete act at a block edge and would join into the figure first
+			keymap({ Backspace: selectFigureBackward, Delete: selectFigureForward }),
 			keymap(listKeymap),
 			inputRules({ rules: [...listInputRules, ...mdInputRules] }),
 			keymap({
@@ -192,6 +212,7 @@
 			spellClickBoundaryPlugin, // must precede proofreadPlugin; see its comment
 			proofreadPlugin,
 			createBoundaryClickPlugin(),
+			wordSelectionTrim(),
 			// the Notion-style + / drag / delete gutter, with the markdown insert set
 			createBlockHandlePlugin({ items: MD_BLOCK_INSERT_ITEMS }),
 			wholeBlockDragPlugin(),
@@ -201,6 +222,7 @@
 			...pmComments({
 				onSelect: (id) => onSelectComment?.(id),
 				onAdd: onAddComment,
+				sourceAnchor,
 				addLabel: addCommentLabel
 			})
 		];
@@ -267,8 +289,11 @@
 	// after the swap effect, so the sync reads the newly-installed document
 	syncPmComments({
 		view: () => editorView,
-		threads: () => commentThreads,
-		dialect: 'md',
+		ranges: () => commentRanges,
+		map: () => sourceMap,
+		text: () => texSource,
+		body: () => bodyRange,
+		parse: () => regionParser,
 		epoch: () => docEpoch,
 		selected: () => selectedComment,
 		onPlaced: (lost) => onCommentsPlaced?.(lost),
@@ -291,7 +316,7 @@
      nothing, so the viewport upgrades could not run until after it was already on screen -->
 <main bind:this={editor} class={BUILDING_CLASS}></main>
 
-<ContextMenu dialect="markdown" {onAddComment} />
+<ContextMenu dialect="markdown" {onAddComment} {sourceAnchor} />
 
 <style lang="postcss">
 	@reference "../../../../app.css";

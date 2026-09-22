@@ -63,9 +63,11 @@
 <svelte:window onkeydown={onEscape} />
 
 <div class="app-scrim fixed inset-0 z-1300 flex items-center justify-center bg-black/40 p-4 backdrop-blur-md">
+	<!-- one height for every step: the card must not resize under the reader when Continue changes what is in it, so it
+	     is the tallest step's height and the shorter ones carry the slack -->
 	<div
 		bind:this={card}
-		class="card bg-surface-50-950 border-surface-300-700 relative flex h-[min(46rem,90vh)] w-full max-w-[64rem] flex-col border shadow-2xl"
+		class="card bg-surface-50-950 border-surface-300-700 relative flex h-[min(40rem,90vh)] w-full max-w-[52rem] flex-col border shadow-2xl"
 		role="dialog"
 		aria-modal="true"
 		aria-label={m.setup_welcome()}

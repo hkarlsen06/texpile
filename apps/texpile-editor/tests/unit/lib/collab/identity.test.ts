@@ -20,6 +20,15 @@ describe('presence identity', () => {
 		expect(presenceIdentity('guest', 1)).toEqual({ name: 'Mei', color: colorFor('Mei') });
 	});
 
+	// the visual editor lets only hex through before a peer's color reaches a style string, so an
+	// hsl one rendered every named peer in the same fallback grey (see remoteCursors.ts)
+	it('hands out a color the editors will draw', () => {
+		for (const name of ['Mei', 'Louis', 'a', 'Ada Lovelace', '张伟']) {
+			updateUserData({ collabName: name });
+			expect(presenceIdentity('host').color).toMatch(/^#[0-9a-f]{6}$/i);
+		}
+	});
+
 	it('takes the name handed to it over the stored one', () => {
 		updateUserData({ collabName: 'Mei' });
 		expect(presenceIdentity('guest', 0, 'Louis').name).toBe('Louis');

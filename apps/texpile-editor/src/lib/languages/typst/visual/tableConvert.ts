@@ -5,7 +5,8 @@ import type { SyntaxNode } from '@lezer/common';
 import { buildNode, type PmNode } from './builders';
 import { children, childOf, convertInline } from './inlineConvert';
 import { ensureBlocks, restOnlySpace } from './converter';
-import { convertMarkup, type Seg } from './converter';
+import { convertMarkup, notedBlocks, type Seg } from './converter';
+import { blockSpanOf, noteBlockSpan, type BlockSpan } from '$lib/editor/visual/sourceSpans';
 
 export const ARG_PUNCT = ['LeftParen', 'RightParen', 'Comma', 'Space'];
 
@@ -13,17 +14,23 @@ export const ARG_PUNCT = ['LeftParen', 'RightParen', 'Comma', 'Space'];
  * One table cell. `[content]` is the ordinary form; a bare expression is equally legal Typst and
  * shows up constantly in real tables (`$x$, [Position], [m]`), so an Equation is accepted too and
  * normalised to a one-paragraph cell. An edited table re-emits it as `[$x$]`, which Typst lays out
- * identically - and an UNEDITED one never regenerates at all, because the orig machinery re-emits
+ * identically - and an UNEDITED one never regenerates at all, because the serializer re-emits
  * its original bytes.
  */
 function contentBlockCell(cb: SyntaxNode, src: string, headerCell: boolean, attrs: Record<string, unknown> | null = null): PmNode | null {
 	const type = headerCell ? 'table_header' : 'table_cell';
-	if (cb.name === 'Equation') return buildNode(type, attrs, [buildNode('paragraph', null, convertInline([cb], src, []))]);
+	// the cell's bytes are the whole content block, brackets included: written afresh, it is one
+	if (cb.name === 'Equation')
+		return noteBlockSpan(buildNode(type, attrs, [buildNode('paragraph', null, convertInline([cb], src, []))]), {
+			srcFrom: cb.from,
+			srcTo: cb.to,
+			size: 1
+		});
 	if (cb.name !== 'ContentBlock') return null;
 	const markup = childOf(cb, 'Markup');
-	const blocks = markup ? convertMarkup(children(markup), src).flatMap((s) => s.blocks) : [];
+	const blocks = markup ? notedBlocks(convertMarkup(children(markup), src)) : [];
 	const body = cellBlocks(blocks);
-	return body ? buildNode(type, attrs, body) : null;
+	return body ? noteBlockSpan(buildNode(type, attrs, body), { srcFrom: cb.from, srcTo: cb.to, size: 1 }) : null;
 }
 
 /**
@@ -87,7 +94,8 @@ function spannedCell(call: SyntaxNode, src: string, headerCell: boolean): { cell
 	}
 	if (!body) return null;
 	const cell = contentBlockCell(body, src, headerCell, { colspan, rowspan, colwidth: null });
-	return cell ? { cell, colspan, rowspan } : null;
+	// a merged cell's bytes are its whole table.cell(...) call
+	return cell ? { cell: noteBlockSpan(cell, { srcFrom: call.from, srcTo: call.to, size: 1 }), colspan, rowspan } : null;
 }
 
 /** `columns: 3` or `columns: (auto, 1fr, ...)` -> how many columns the cell stream wraps at. */
@@ -260,7 +268,20 @@ export function tableParts(call: SyntaxNode, src: string): TableParts | null {
 
 export function buildTableNode(t: TableParts): PmNode | null {
 	const rowNodes: PmNode[] = [];
-	t.rows.forEach((cells, i) => rowNodes.push(buildNode('table_row', { topRules: '', typRules: t.rowRules[i] ?? [] }, cells)));
+	t.rows.forEach((cells, i) => {
+		const row = buildNode('table_row', { topRules: '', typRules: t.rowRules[i] ?? [] }, cells);
+		// the row's bytes: from its first cell's to its last, when every cell is the file's own
+		const placed = cells.map((c) => blockSpanOf(c)).filter((s): s is BlockSpan => !!s);
+		rowNodes.push(
+			placed.length > 0 && placed.length === cells.length
+				? noteBlockSpan(row, {
+						srcFrom: Math.min(...placed.map((s) => s.srcFrom)),
+						srcTo: Math.max(...placed.map((s) => s.srcTo)),
+						size: 1
+					})
+				: row
+		);
+	});
 	if (rowNodes.length === 0) return null;
 	return buildNode(
 		'table',

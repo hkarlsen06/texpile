@@ -2,12 +2,11 @@
 // non-typst dialect through sliceToLatex, and PM's schema check does NOT reject md-schema nodes
 // under the tex schema's doc - so `## Title` came off the clipboard as `\subsection{Title}`.
 import { describe, it, expect } from 'vitest';
-import { Slice, type Node } from 'prosemirror-model';
+import { Slice } from 'prosemirror-model';
 import { mdSchema } from '$lib/languages/markdown/visual/schema';
 import { sliceToMarkdown } from '$lib/languages/markdown/visual/clipboard';
 import { sliceToLatex } from '$lib/editor/visual/extensions/latexClipboard';
-
-const para = (text: string, attrs: Record<string, unknown> | null = null): Node => mdSchema.node('paragraph', attrs, [mdSchema.text(text)]);
+import { parseMarkdownFile } from '$lib/languages/markdown/visual/roundtrip';
 
 describe('sliceToMarkdown', () => {
 	it('serializes a block selection as markdown, not LaTeX', () => {
@@ -29,10 +28,9 @@ describe('sliceToMarkdown', () => {
 	});
 
 	it('re-serializes a partially selected paragraph rather than restoring its whole source', () => {
-		// the block carries orig from the importer; blockAssembly may only re-emit that verbatim
-		// while the block still matches its parse-time norm, which a truncated selection does not
-		const orig = { latex: 'the whole original sentence.', norm: 'the whole original sentence.', pre: '', seq: 0 };
-		const doc = mdSchema.node('doc', null, [para('the whole original sentence.', { orig })]);
+		// the parse knows the block by node; blockAssembly may only re-emit its bytes for that very
+		// block, and a truncated selection is another node with other content
+		const { doc } = parseMarkdownFile('the whole original sentence.\n');
 		expect(sliceToMarkdown(doc.slice(1, 10))).toBe('the whole');
 	});
 

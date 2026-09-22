@@ -2,12 +2,15 @@
 	// The Refine card the selection toolbar opens, laid out like Google Docs': quick actions, More for the rest, and a
 	// box for an instruction of the reader's own. Mounted once, at the app root, before the context menu host so the
 	// More menu opens over it
+	import { untrack } from 'svelte';
 	import { ArrowUp, ChevronDown } from '@lucide/svelte';
 	import { showContextMenu } from '$lib/menus/contextMenu.svelte';
 	import { m } from '$lib/paraglide/messages';
 	import { REFINE_ACTIONS, customRefineAction, type RefineAction } from './refineActions';
 	import { agentName, refiner } from './selectionRefiner';
 	import { closeRefineCard, refineCard } from './refineCardState.svelte';
+	import { editorViewStore } from '$lib/stores/editorStore';
+	import { setPmCommentPending } from '$lib/editor/visual/extensions/pmComments';
 
 	const EDGE = 8;
 	const QUICK = ['rephrase', 'shorten', 'grammar'];
@@ -30,6 +33,21 @@
 		placed = { x: Math.max(EDGE, Math.min(anchor.left, window.innerWidth - w - EDGE)), y, for: open };
 		// the toolbar button kept focus in the editor, where typing would overwrite the selected text
 		input?.focus();
+	});
+
+	// the box below takes focus, and the visual editor stops drawing its selection the moment it loses it, so the
+	// passage about to be rewritten would look like nothing was chosen. The source editor draws its own and needs none.
+	// untracked: marking it is a transaction, every transaction replaces the view box, and reading that box here would
+	// make the effect its own trigger
+	$effect(() => {
+		if (!refineCard.current) return;
+		return untrack(() => {
+			const view = editorViewStore.current;
+			const sel = view?.state.selection;
+			if (!view || !sel || sel.empty || !view.dom.checkVisibility()) return;
+			setPmCommentPending(view, { from: sel.from, to: sel.to });
+			return () => setPmCommentPending(view, null);
+		});
 	});
 
 	function run(action: RefineAction): void {
@@ -59,8 +77,11 @@
 	{@const open = refineCard.current}
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div class="fixed inset-0 z-dropdown" onpointerdown={closeRefineCard}></div>
+	<!-- data-keep-caret: the card holds focus while the passage it is about must stay marked, which
+	     is what persistentSelectionPlugin draws once the focus sits in an overlay it knows -->
 	<div
 		bind:this={card}
+		data-keep-caret
 		role="dialog"
 		aria-label={m.ai_refine_menu({ agent: agentName() })}
 		class="bg-surface-50-950 border-surface-300-700 z-dropdown fixed w-max min-w-96 max-w-[calc(100vw-16px)] card border shadow-lg"

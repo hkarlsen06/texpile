@@ -20,12 +20,30 @@ export type RemotePeerSel = {
 
 export const remoteCursorsKey = new PluginKey<DecorationSet>('remote-cursors');
 
-// a peer's color rides untrusted awareness; only hex passes before it reaches an inline style string,
-// so a crafted value (e.g. "red;background:url(https://evil/x)") can't inject extra CSS
+// a peer's color rides untrusted awareness; only these two shapes reach an inline style string,
+// so a crafted value (e.g. "red;background:url(https://evil/x)") can't inject extra CSS. The hsl
+// form is what a peer on a build before the palette sends, and showing their real color beats
+// showing everyone the same gray
 const HEX_COLOR = /^#[0-9a-fA-F]{3,8}$/;
+const HSL_COLOR = /^hsl\(\d{1,3}deg \d{1,3}% \d{1,3}%\)$/;
 function safeColor(c: string): string {
-	return HEX_COLOR.test(c) ? c : '#888888';
+	return HEX_COLOR.test(c) || HSL_COLOR.test(c) ? c : '#888888';
 }
+
+// what the browser paints no selection over, so a peer's range would break across it: the same set
+// cursor-plugin shades for the local selection, and for the same reason
+const SHADED_TYPES = new Set([
+	'raw_latex',
+	'code_block',
+	'block_math',
+	'inline_math',
+	'inline_latex',
+	'includedoc',
+	'horizontal_rule',
+	'image'
+]);
+/** a range wholly inside one of these is a peer editing its content, not crossing it */
+const EDITABLE_TYPES = new Set(['code_block', 'raw_latex', 'inline_latex', 'image']);
 
 function caretDom(name: string, color: string): HTMLElement {
 	const span = document.createElement('span');
@@ -50,12 +68,18 @@ function build(doc: PMNode, peers: RemotePeerSel[]): DecorationSet {
 		const anchor = clamp(p.anchor);
 		const head = clamp(p.head);
 		if (anchor !== head) {
-			decos.push(
-				Decoration.inline(Math.min(anchor, head), Math.max(anchor, head), {
-					class: 'pm-remote-sel',
-					style: `background-color: ${color}33`
-				})
-			);
+			const from = Math.min(anchor, head);
+			const to = Math.max(anchor, head);
+			decos.push(Decoration.inline(from, to, { class: 'pm-remote-sel', style: `--peer-color: ${color}` }));
+			doc.nodesBetween(from, to, (node, pos) => {
+				const start = pos;
+				const end = pos + node.nodeSize;
+				if (start === end || node.isText || !SHADED_TYPES.has(node.type.name)) return;
+				if (EDITABLE_TYPES.has(node.type.name) && from >= start && to <= end) return;
+				// data-band names an inline one for selectionBands.ts, which stretches its shade to the line box
+				const band = node.isInline ? { 'data-band': `peer${p.clientId}-${start}` } : {};
+				decos.push(Decoration.node(start, end, { class: 'pm-remote-sel-node', style: `--peer-color: ${color}`, ...band }));
+			});
 		}
 		decos.push(
 			Decoration.widget(head, () => caretDom(p.name, color), {

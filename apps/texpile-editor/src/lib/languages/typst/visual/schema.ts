@@ -15,7 +15,7 @@ import { baseNodes, baseMarks } from '$lib/editor/visual/schema/basePMSchema';
 const schemaImageSettings: SchemaImageSettings = {
 	hasTitle: true,
 	isBlock: true,
-	extraAttributes: { width: null, height: null, maxWidth: null, typGap: null }
+	extraAttributes: { width: null, height: null, maxWidth: null, typGap: null, labelGap: null }
 };
 
 // everything the converter can emit, nothing more. Tables and real math nodes arrive with their
@@ -58,10 +58,8 @@ for (const name of TYP_NODES) nodes[name] = base[name];
 // overrides build NEW spec objects — mutating the imported literals would leak into every dialect
 // a code block created without attrs (shared toolbar button, keybind) must be a FENCE here, not
 // tex's verbatim: typst raw fences take an info string, so the language picker works everywhere
-// Spread the base attrs first. ORIG_BLOCKS (baseNodes.ts) adds `orig` to code_block's spec, and
-// replacing attrs wholesale silently dropped it - so a fence could never be recognised as pristine
-// and always regenerated, which forced a blank line between it and its neighbour. `#set page(..)`
-// directly above a ```` fence came back with a blank line inserted on every save.
+// Spread the base attrs first: replacing them wholesale silently drops the ones the shared
+// extensions read.
 nodes.code_block = {
 	...base.code_block,
 	attrs: { ...base.code_block.attrs, lang: { default: '' }, env: { default: 'fence' }, args: { default: '' } }
@@ -104,13 +102,17 @@ nodes.block_math = { ...base.block_math, attrs: { ...base.block_math.attrs, ...m
 nodes.list = { ...base.list, attrs: { ...base.list.attrs, typNumber: { default: null } } };
 // a trailing <label> attaches to the heading in typst, so it lives on the node
 nodes.heading = { ...base.heading, attrs: { ...base.heading.attrs, label: { default: null } } };
+// labelGap: the bytes the source put between a labelled block and its <label> when they held a
+// line end (null = a space, or no label); the serializer writes the label back where it stood
+for (const name of ['heading', 'block_math', 'table_wrapper']) {
+	nodes[name] = { ...nodes[name], attrs: { ...nodes[name].attrs, labelGap: { default: null } } };
+}
 // typFile: what the bytes outside the markup looked like (a leading BOM, CRLF line endings)
 nodes.doc = { ...base.doc, attrs: { ...base.doc.attrs, typFile: { default: null } } };
 
 // Typst-only nodes, declared here the way mdSchema declares its `s` mark: term lists
 // (`/ term: description`) have no tex counterpart. The title is its own child textblock so
-// both halves are directly editable; orig is added by hand since the tex ORIG_BLOCKS loop
-// never saw this spec.
+// both halves are directly editable.
 nodes.term_title = {
 	content: 'inline*',
 	parseDOM: [{ tag: 'div[data-term-title]' }],
@@ -138,7 +140,6 @@ nodes.term_item = {
 	content: 'term_title block+',
 	group: 'block',
 	defining: true,
-	attrs: { orig: { default: null } },
 	parseDOM: [{ tag: 'div[data-term-item]' }],
 	toDOM: () => ['div', { 'data-term-item': '', class: 'term-item' }, 0]
 };

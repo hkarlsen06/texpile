@@ -1,0 +1,147 @@
+// unified-latex's macro-and-environment stage, with the math re-parse keeping the file's offsets.
+//
+// Upstream (unifiedLatexProcessMacrosAndEnvironmentsWithMathReparse) prints the content of a math
+// macro's argument or a math environment back to a string and parses that string afresh in math
+// mode, so every node inside carries an offset counted from the content's own start, not the
+// file's: `\frac{\act_i}{b}` reports its subscript at offset 0, and any span computed over it is
+// short or nonsense. Here the content's own bytes are parsed instead and every position moved to
+// where they sit in the file; content that cannot be found in the file is parsed as upstream does
+// and left without positions, since no position is better than a wrong one. Every other step is
+// upstream's, in upstream's order.
+import type { Plugin } from 'unified';
+import type * as Ast from '@unified-latex/unified-latex-types';
+import { visit } from '@unified-latex/unified-latex-util-visit';
+import { match } from '@unified-latex/unified-latex-util-match';
+import { printRaw } from '@unified-latex/unified-latex-util-print-raw';
+import { attachMacroArgsInArray, gobbleArguments } from '@unified-latex/unified-latex-util-arguments';
+import { parseMathMinimal } from '@unified-latex/unified-latex-util-parse';
+
+type Position = NonNullable<Ast.Node['position']>;
+type Positioned = { position?: Position; content?: unknown; args?: unknown[] };
+
+export type MacrosAndEnvironmentsOptions = {
+	macros: Record<string, Ast.MacroInfo>;
+	environments: Record<string, Ast.EnvInfo>;
+};
+
+/** the bytes `nodes` cover, from the positions they and their descendants carry */
+function extent(nodes: unknown[]): { from: number; to: number } | null {
+	let from = Infinity;
+	let to = -Infinity;
+	const walk = (n: unknown): void => {
+		if (!n || typeof n !== 'object') return;
+		const p = (n as Positioned).position;
+		if (p) {
+			if (typeof p.start?.offset === 'number') from = Math.min(from, p.start.offset);
+			if (typeof p.end?.offset === 'number') to = Math.max(to, p.end.offset);
+		}
+		for (const kids of [(n as Positioned).content, (n as Positioned).args]) if (Array.isArray(kids)) kids.forEach(walk);
+	};
+	nodes.forEach(walk);
+	return Number.isFinite(from) && Number.isFinite(to) && from < to ? { from, to } : null;
+}
+
+/** every position under `nodes` moved by `by`; with `by` null, dropped */
+function moved(nodes: unknown[], by: number | null): void {
+	const walk = (n: unknown): void => {
+		if (!n || typeof n !== 'object') return;
+		const node = n as Positioned;
+		if (node.position) {
+			if (by === null) delete node.position;
+			else {
+				node.position = {
+					start: { ...node.position.start, offset: node.position.start.offset + by },
+					end: { ...node.position.end, offset: node.position.end.offset + by }
+				};
+			}
+		}
+		for (const kids of [node.content, node.args]) if (Array.isArray(kids)) kids.forEach(walk);
+	};
+	nodes.forEach(walk);
+}
+
+/**
+ * Upstream's heuristic for content already read in math mode: a string longer than one character,
+ * or a `^` or `_` left as a string rather than a macro, says it was not.
+ */
+function wasParsedInMathMode(nodes: Ast.Node[]): boolean {
+	return !nodes.some((node) => (match.anyString(node) && node.content.length > 1) || match.string(node, '^') || match.string(node, '_'));
+}
+
+/** `nodes` read again in math mode: from their own bytes in `source` when they can be found there */
+function reparsedAsMath(nodes: Ast.Node[], source: string | undefined): Ast.Node[] {
+	const span = source !== undefined ? extent(nodes) : null;
+	if (span && span.to <= source!.length) {
+		const fresh = parseMathMinimal(source!.slice(span.from, span.to)) as Ast.Node[];
+		moved(fresh, span.from);
+		return fresh;
+	}
+	const fresh = parseMathMinimal(printRaw(nodes)) as Ast.Node[];
+	moved(fresh, null);
+	return fresh;
+}
+
+/** upstream's processEnvironment: arguments attached, render info merged, the body processed */
+function processEnvironment(env: Ast.Environment, info: Ast.EnvInfo): void {
+	if (info.signature && env.args == null) env.args = gobbleArguments(env.content, info.signature).args;
+	if (info.renderInfo != null) env._renderInfo = { ...(env._renderInfo || {}), ...info.renderInfo };
+	if (typeof info.processContent === 'function') env.content = info.processContent(env.content);
+}
+
+function mathOnly<T extends { renderInfo?: { inMathMode?: boolean } }>(table: Record<string, T>): Record<string, T> {
+	return Object.fromEntries(Object.entries(table).filter(([, info]) => info.renderInfo?.inMathMode === true));
+}
+
+export const processMacrosAndEnvironments: Plugin<[MacrosAndEnvironmentsOptions], Ast.Root, Ast.Root> = function (options) {
+	const { environments, macros } = options;
+	const mathMacros = mathOnly(macros);
+	const mathEnvs = mathOnly(environments);
+	const isMathEnvironment = match.createEnvironmentMatcher(Object.keys(mathEnvs));
+	const isMathMacro = match.createMacroMatcher(Object.keys(mathMacros));
+	const isRelevantEnvironment = match.createEnvironmentMatcher(environments);
+	const isRelevantMathEnvironment = match.createEnvironmentMatcher(mathEnvs);
+	const processEnv = (node: Ast.Environment): void => {
+		const name = printRaw(node.env);
+		const info = environments[name];
+		if (!info) throw new Error(`Could not find environment info for environment "${name}"`);
+		processEnvironment(node, info);
+	};
+	return (tree, file) => {
+		const source = typeof file.value === 'string' ? file.value : undefined;
+		visit(
+			tree,
+			{
+				enter: (nodes) => {
+					if (Array.isArray(nodes)) attachMacroArgsInArray(nodes, mathMacros);
+				},
+				leave: (node) => {
+					if (isRelevantMathEnvironment(node)) processEnv(node);
+				}
+			},
+			{ includeArrays: true }
+		);
+		visit(
+			tree,
+			(node) => {
+				if (match.anyMacro(node)) {
+					for (const arg of node.args || [])
+						if (arg.content.length > 0 && !wasParsedInMathMode(arg.content)) arg.content = reparsedAsMath(arg.content, source);
+				}
+				if (match.anyEnvironment(node) && !wasParsedInMathMode(node.content)) node.content = reparsedAsMath(node.content, source);
+			},
+			{ test: (node) => isMathEnvironment(node) || isMathMacro(node) }
+		);
+		visit(
+			tree,
+			{
+				enter: (nodes) => {
+					if (Array.isArray(nodes)) attachMacroArgsInArray(nodes, macros);
+				},
+				leave: (node) => {
+					if (isRelevantEnvironment(node)) processEnv(node);
+				}
+			},
+			{ includeArrays: true }
+		);
+	};
+};

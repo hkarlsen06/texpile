@@ -44,3 +44,20 @@ it('puts what is typed in front of old words when the arrow key put the caret th
 	expect(takeTypedSides()).toEqual({ r: 'before' });
 	view.destroy();
 });
+
+it('puts what is typed in front of old words a delete has just struck out', () => {
+	editMode.current = 'suggesting';
+	const doc = 'driven by an estimator of the error';
+	const at = doc.indexOf('estimator');
+	const view = new EditorView({ parent: document.body, state: EditorState.create({ doc, extensions: [cmSuggestions()] }) });
+	view.dispatch({
+		effects: setSuggestionRanges.of([{ id: 'r', from: at, to: at, restore: 'adaptive ', mine: true }]),
+		selection: { anchor: at }
+	});
+	takeTypedSides();
+	view.dispatch({ changes: { from: at - 1, to: at }, selection: { anchor: at - 1 }, userEvent: 'delete.backward' });
+	const head = view.state.selection.main.head;
+	view.dispatch({ changes: { from: head, insert: 'x' }, selection: { anchor: head + 1 }, userEvent: 'input.type' });
+	expect(takeTypedSides()).toEqual({ r: 'before' });
+	view.destroy();
+});

@@ -13,7 +13,9 @@ import { describe, it, beforeAll, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Node } from 'prosemirror-model';
-import { parseLatexFile, serializeLatexFile } from '$lib/workspace/latexRoundtrip';
+import { parseLatexFile, serializeLatexFile, type ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
+import { Fragment } from 'prosemirror-model';
+import { compareSuggestions } from '$lib/comments/suggestCompare';
 
 const CORPUS = process.env.CORPUS_DIR;
 const HOOK_TIMEOUT_MS = 30 * 60 * 1000;
@@ -102,9 +104,14 @@ interface FileResult {
 	inlineLatexNodes: number;
 	totalNodes: number;
 	wordRatio: number;
+	// suggestions: one word typed into a paragraph at a quarter, half and three quarters of the
+	// document, the file diffed as Suggesting mode diffs it. `suggestExact` counts the edits that
+	// yield exactly one suggestion covering exactly the typed word, `suggestEdits` the edits made
+	suggestEdits: number;
+	suggestExact: number;
 	missingWords: string[];
 	firstDiff: string | null;
-	// untouched-save fidelity (the `orig` attr): a no-edit save (R1) must equal the source
+	// untouched-save fidelity (the verbatim layer): a no-edit save (R1) must equal the source
 	// byte-for-byte. strictly stronger than convergence: byteIdentical proves pass 1 changed
 	// nothing, so the compiled PDF is provably unaffected.
 	byteIdentical: boolean;
@@ -120,12 +127,16 @@ interface FileResult {
 	firstByteDiff: string | null;
 	// top-level doc children that are raw_latex blocks: the block-level "demoted to raw" count
 	rawBlocksTop: number;
-	// fraction of top-level body blocks carrying a full `orig` stamp (latex + norm both present).
+	// fraction of top-level body blocks the parse could place (their bytes known).
 	// low coverage explains a non-identical result without opening the file: the gap is in which
 	// constructs get spans, not in the substitution logic.
 	origCoverage: number;
 	origBlocks: number;
 	totalBlocks: number;
+	// blocks whose leaf runs contradicted their bytes at load: not placed, written afresh even
+	// untouched (see MapDefect). each one names a parser position bug. hard-gated to zero
+	mapDefects: number;
+	firstDefect: string | null;
 	// doc.check() failure or null. lenient builders (NodeType.create) can emit schema-invalid
 	// nodes; the doc loads and serializes fine but the first structural edit throws and freezes
 	// ProseMirror. hard-gated to zero.
@@ -177,13 +188,52 @@ function classifyDiff(src: string, r1: string): 'inert-whitespace' | 'structural
 	return sameParas && sameVerbatim ? 'inert-whitespace' : 'structural-whitespace';
 }
 
-function origCoverageOf(doc: Node): { coverage: number; withOrig: number; total: number } {
-	let withOrig = 0;
-	const total = doc.childCount;
-	for (let i = 0; i < total; i++) {
-		const orig = (doc.child(i).attrs as { orig?: { latex?: unknown; norm?: unknown } | null }).orig;
-		if (orig && typeof orig.latex === 'string' && typeof orig.norm === 'string') withOrig++;
+/** the paragraph at top-level index `i` with ' zq' typed after its first word, or null */
+function typedInto(doc: Node, i: number): Node | null {
+	const block = doc.child(i);
+	if (block.type.name !== 'paragraph') return null;
+	const kids: Node[] = [];
+	let done = false;
+	block.forEach((c) => {
+		if (!done && c.isText && c.text!.trim().length > 3) {
+			kids.push(c.type.schema.text(c.text!.replace(/(\S+)/, '$1 zq'), c.marks));
+			done = true;
+		} else kids.push(c);
+	});
+	if (!done) return null;
+	const fresh = block.type.create(block.attrs, Fragment.fromArray(kids), block.marks);
+	const top: Node[] = [];
+	doc.forEach((c, _o, k) => top.push(k === i ? fresh : c));
+	return doc.type.create(doc.attrs, Fragment.fromArray(top), doc.marks);
+}
+
+/** how many one-word edits Suggesting mode would show as exactly that word */
+function suggestionPrecision(src: string, parsed: ParsedLatexFile): { edits: number; exact: number } {
+	const n = parsed.doc.childCount;
+	let edits = 0;
+	let exact = 0;
+	let id = 0;
+	for (const i of new Set([Math.floor(n / 4), Math.floor(n / 2), Math.floor((3 * n) / 4)])) {
+		const edited = typedInto(parsed.doc, i);
+		if (!edited) continue;
+		let after: string;
+		try {
+			after = serializeLatexFile(parsed, edited);
+		} catch {
+			continue;
+		}
+		if (after === src) continue;
+		edits++;
+		const { placed } = compareSuggestions({ before: src, after, pending: [], mode: 'suggesting', author: 'me', newId: () => String(++id) });
+		if (placed.length === 1 && after.slice(placed[0].from, placed[0].to).trim() === 'zq' && placed[0].restore.trim() === '') exact++;
 	}
+	return { edits, exact };
+}
+
+function origCoverageOf(parsed: ParsedLatexFile): { coverage: number; withOrig: number; total: number } {
+	let withOrig = 0;
+	const total = parsed.doc.childCount;
+	for (const o of parsed.origins.origins) if (typeof o.text === 'string') withOrig++;
 	return { coverage: total === 0 ? 1 : withOrig / total, withOrig, total };
 }
 
@@ -216,6 +266,8 @@ describe('stress: real LaTeX round-trip', () => {
 				inlineLatexNodes: 0,
 				totalNodes: 0,
 				wordRatio: 1,
+				suggestEdits: 0,
+				suggestExact: 0,
 				missingWords: [],
 				firstDiff: null,
 				byteIdentical: false,
@@ -225,6 +277,8 @@ describe('stress: real LaTeX round-trip', () => {
 				origCoverage: 0,
 				origBlocks: 0,
 				totalBlocks: 0,
+				mapDefects: 0,
+				firstDefect: null,
 				schemaViolation: null
 			};
 			try {
@@ -258,7 +312,10 @@ describe('stress: real LaTeX round-trip', () => {
 					r.diffKind = classifyDiff(src, r1);
 					r.firstByteDiff = firstStringDiff(src, r1, 'src/R1');
 				}
-				const cov = origCoverageOf(p1.doc);
+				r.mapDefects = p1.origins.defects.length;
+				const d0 = p1.origins.defects[0];
+				r.firstDefect = d0 ? `${d0.kind} ${d0.srcFrom}..${d0.srcTo}: ${d0.detail}` : null;
+				const cov = origCoverageOf(p1);
 				r.origCoverage = cov.coverage;
 				r.origBlocks = cov.withOrig;
 				r.totalBlocks = cov.total;
@@ -278,6 +335,9 @@ describe('stress: real LaTeX round-trip', () => {
 				// prose the editor is responsible for preserving
 				const wp = wordPreservation(stripComments(srcBody), r1);
 				r.wordRatio = wp.ratio;
+				const sg = suggestionPrecision(src, p1);
+				r.suggestEdits = sg.edits;
+				r.suggestExact = sg.exact;
 				r.missingWords = wp.missing;
 
 				if (r.convergedAt !== 1) {
@@ -327,10 +387,19 @@ describe('stress: real LaTeX round-trip', () => {
 		);
 		lines.push(`  CONTENT diff (investigate): ${live.filter((r) => r.diffKind === 'content').length}`);
 		lines.push(`avg top-level block orig-coverage (span capture succeeded): ${(avgCoverage * 100).toFixed(1)}%`);
+		lines.push(
+			`files with map defects (a run contradicting its block's bytes; each one a parser position bug): ${live.filter((r) => r.mapDefects > 0).length} / ${live.length}, ${live.reduce((s, r) => s + r.mapDefects, 0)} blocks`
+		);
 		lines.push('');
 		// editability metric: how much of each document is demoted to raw LaTeX vs modelled,
 		// tracked at two granularities: top-level blocks (visible uneditable chunks) and all
 		// nodes (including inline chips inside paragraphs)
+		const sgEdits = live.reduce((s, r) => s + r.suggestEdits, 0);
+		const sgExact = live.reduce((s, r) => s + r.suggestExact, 0);
+		lines.push(
+			`suggestions: one typed word shown as exactly that word: ${sgExact} / ${sgEdits} edits (${sgEdits ? ((100 * sgExact) / sgEdits).toFixed(0) : 0}%)`
+		);
+		lines.push('');
 		const sumBlocks = live.reduce((s, r) => s + r.totalBlocks, 0);
 		const sumRawTop = live.reduce((s, r) => s + r.rawBlocksTop, 0);
 		const sumNodes = live.reduce((s, r) => s + r.totalNodes, 0);
@@ -357,6 +426,8 @@ describe('stress: real LaTeX round-trip', () => {
 				`| ${r.file} | ${r.bytes} | ${r.crash ? 'YES' : ''} | ${stable} | ${r.byteIdentical ? 'YES' : ''} | ${r.diffKind} | ${(r.origCoverage * 100).toFixed(0)}% (${r.origBlocks}/${r.totalBlocks}) | ${r.rawBlocksTop}/${r.totalBlocks} | ${r.rawNodes} | ${r.inlineLatexNodes} | ${r.totalNodes} | ${r.wordRatio.toFixed(3)} |`
 			);
 		}
+		lines.push('\n## Map defects (blocks not believed at load)\n');
+		for (const r of results.filter((x) => x.mapDefects > 0)) lines.push(`- ${r.file}: ${r.mapDefects}: ${r.firstDefect}`);
 		lines.push('\n## Crashes\n');
 		for (const r of results.filter((x) => x.crash)) lines.push(`### ${r.file}\n\n\`\`\`\n${r.crash}\n\`\`\`\n`);
 		lines.push('\n## DIVERGING / compounding — real bugs (never settles, not a bounded oscillation)\n');
@@ -426,7 +497,7 @@ describe('stress: real LaTeX round-trip', () => {
 
 	// a content diff on an untouched save is always a real bug (a span-capture gap or a
 	// substitution-assembly mistake). hard gate, no threshold: this is the entire promise
-	// of the `orig` mechanism.
+	// of the verbatim layer.
 	it('no CONTENT diff on an untouched save (verbatim preservation must never alter meaning)', () => {
 		const bad = results
 			.filter((r) => !r.crash && r.diffKind === 'content')

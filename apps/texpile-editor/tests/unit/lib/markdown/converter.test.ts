@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { markdownToProseMirror } from '$lib/languages/markdown/visual/converter';
+import { blockSpanOf } from '$lib/editor/visual/sourceSpans';
 
 const names = (doc: ReturnType<typeof markdownToProseMirror>['doc']) => {
 	const out: string[] = [];
@@ -17,26 +18,26 @@ describe('markdownToProseMirror', () => {
 		expect(doc.child(3).child(0).type.name).toBe('paragraph');
 	});
 
-	it('stamps orig slices that tile the source', () => {
+	it('notes block spans that tile the source', () => {
 		const src = '# Title\n\nSecond paragraph.\n\nThird.\n';
 		const { doc } = markdownToProseMirror(src);
-		const origs: { latex: string; pre: string; seq: number; start: number }[] = [];
-		doc.forEach((c) => origs.push(c.attrs.orig));
-		expect(origs.map((o) => o.latex)).toEqual(['# Title', 'Second paragraph.', 'Third.']);
-		expect(origs.map((o) => o.pre)).toEqual(['', '\n\n', '\n\n']);
-		expect(origs.map((o) => o.seq)).toEqual([0, 1, 2]);
-		// reassembling pre+latex chains plus docTail reproduces the file byte-for-byte
-		const tail = (doc.attrs.docTail as { text: string }).text;
-		expect(origs.map((o) => o.pre + o.latex).join('') + tail).toBe(src);
+		const spans: { srcFrom: number; srcTo: number }[] = [];
+		doc.forEach((c) => spans.push(blockSpanOf(c)!));
+		expect(spans.map((s) => src.slice(s.srcFrom, s.srcTo))).toEqual(['# Title', 'Second paragraph.', 'Third.']);
+		// the gaps between the spans are the bytes the blocks are not: whitespace only
+		let end = 0;
+		for (const s of spans) {
+			expect(src.slice(end, s.srcFrom).trim()).toBe('');
+			end = s.srcTo;
+		}
+		expect(src.slice(end).trim()).toBe('');
 	});
 
-	it('lists become one flat-list node per item under a shared group', () => {
+	it('lists become one flat-list node per item under one span', () => {
 		const { doc } = markdownToProseMirror('- alpha\n- beta\n- gamma\n');
 		expect(names(doc)).toEqual(['list', 'list', 'list']);
-		const first = doc.child(0).attrs.orig;
-		expect(first.group).toBe(0);
-		expect(first.groupSize).toBe(3);
-		expect(doc.child(2).attrs.orig.groupIndex).toBe(2);
+		expect(blockSpanOf(doc.child(0))?.size).toBe(3);
+		expect(blockSpanOf(doc.child(2))).toBeUndefined();
 		expect(doc.child(0).attrs.kind).toBe('bullet');
 	});
 

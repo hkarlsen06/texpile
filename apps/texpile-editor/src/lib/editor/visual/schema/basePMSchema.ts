@@ -1,2 +1,2 @@
-export { baseNodes, withOrigAttr } from './baseNodes';
+export { baseNodes } from './baseNodes';
 export { baseMarks } from './baseMarks';

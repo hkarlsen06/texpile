@@ -3,9 +3,9 @@
 import type { Node, Macro, Environment } from '@unified-latex/unified-latex-types';
 import { printRaw } from '@unified-latex/unified-latex-util-print-raw';
 import { getTextContent, getMacroFirstArg } from '../ast-utils';
-import { buildNode, textNode, nodeToLatexString, type PmNode, type ConversionContext, type ConversionOptions } from '../builders';
+import { buildNode, nodeToLatexString, type PmNode, type ConversionContext, type ConversionOptions } from '../builders';
 import { convertNodesToInline } from './inlineConvert';
-import { nodeRawSource } from './origCapture';
+import { nodeRawSource, nodeRawSpan, rawTextNode } from './origCapture';
 import { macroHandlers, macroHasStar } from './macroHandlers';
 
 export const FIG_IMG_SLOT = '\\TexpileFigImageSlot';
@@ -98,5 +98,5 @@ export function createFigureWrapper(env: Environment, ctx: ConversionContext, _o
 	}
 
 	// tier 2/3 (subfigures, tikz, no graphic): preserve the float verbatim
-	return [buildNode('raw_latex', null, [textNode(nodeRawSource(env) ?? nodeToLatexString(env))])];
+	return [buildNode('raw_latex', null, [rawTextNode(nodeRawSpan(env), nodeToLatexString(env))])];
 }

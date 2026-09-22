@@ -4,7 +4,7 @@
 // from the source, so an unknown token type can never crash a file open or lose bytes.
 //
 // Verbatim capture is far simpler than the LaTeX side: block tokens carry map = [startLine,
-// endLineExclusive), so orig slices come straight off a line-offset table. One markdown list of
+// endLineExclusive), so block spans come straight off a line-offset table. One markdown list of
 // N items becomes N flat-list nodes sharing one group (same model as itemize), so substitution
 // stays all-or-nothing and an item edit regenerates the whole list.
 import type { Token } from 'markdown-it';
@@ -13,9 +13,59 @@ import { type Cap, buildLineStarts, offsetOfLine, sliceEnd, trimBlankTail, const
 import { attrStr, dest, imageMarkdown, imageBlock } from './tokenAttrs';
 import { formatLinkDest, formatLinkTitle } from './inlineSyntax';
 import { createMarkdownEngine } from '../engine';
+import { cellLocator, contentLocator, locateLines, rangeOf, textSpans, type Locator, type SourceLines } from '../positions';
+import {
+	bytesSpan,
+	concatSpans,
+	collectMap,
+	noteBlockSpan,
+	type BlockSpan,
+	rememberParseMap,
+	noteSpans,
+	sliceSpans,
+	spansOf,
+	standsFor,
+	type LeafSpan
+} from '$lib/editor/visual/sourceSpans';
 
 function withMarks(node: PmNode, marks: PmMark[]): PmNode {
-	return marks.length > 0 ? node.mark(realMarks(marks)) : node;
+	return marks.length > 0 ? noteSpans(node.mark(realMarks(marks)), spansOf(node)) : node;
+}
+
+/** the file a block's content was read from, and where its offsets are in it */
+type Src = SourceLines & { at: Locator | null };
+
+/** the bytes a token was read from, when its content is somewhere in the file */
+function bytesOf(src: Src, tok: Token): { from: number; to: number; slice: string } | null {
+	const r = src.at && rangeOf(tok);
+	if (!r) return null;
+	const from = src.at!(r.from);
+	const to = src.at!(r.to);
+	if (from === null || to === null || to < from) return null;
+	return { from, to, slice: src.source.slice(from, to) };
+}
+
+function leafSpans(src: Src, tok: Token, text: string): LeafSpan[] | null {
+	const b = bytesOf(src, tok);
+	return b ? textSpans(text, b.from, b.slice) : null;
+}
+
+function standingFor(src: Src, tok: Token, len: number): LeafSpan[] | null {
+	const b = bytesOf(src, tok);
+	return b ? standsFor(len, b.from, b.to) : null;
+}
+
+/** the block's lines as its bytes, each line ending standing for the line break it replaced */
+function lineSpans(src: SourceLines, first: number, last: number, content: string): LeafSpan[] | null {
+	const lines = content.split('\n');
+	const starts = locateLines(src, first, last, lines);
+	if (starts.some((s) => s === null)) return null;
+	const parts: { len: number; spans: LeafSpan[] }[] = [];
+	lines.forEach((line, i) => {
+		if (i > 0) parts.push({ len: 1, spans: standsFor(1, starts[i - 1]! + lines[i - 1].length, starts[i]!) });
+		parts.push({ len: line.length, spans: bytesSpan(line.length, starts[i]!) });
+	});
+	return concatSpans(parts);
 }
 
 /** attrGet returns string | number | null; normalize to a string ('' when absent). */
@@ -25,7 +75,7 @@ const MARK_TOKENS: Record<string, string> = {
 	s: 's'
 };
 
-function convertInline(children: Token[], marks: PmMark[]): PmNode[] {
+function convertInline(children: Token[], marks: PmMark[], src: Src): PmNode[] {
 	const out: PmNode[] = [];
 	for (let i = 0; i < children.length; i++) {
 		const tok = children[i];
@@ -36,7 +86,9 @@ function convertInline(children: Token[], marks: PmMark[]): PmNode[] {
 			if (open === 'link' && end === i + 1) {
 				// `[](u)`: a mark needs text to sit on, so an empty link stays a literal chip
 				const literal = `[](${formatLinkDest(dest(tok, 'href'))}${formatLinkTitle(attrStr(tok, 'title'))})`;
-				out.push(withMarks(buildNode('inline_latex', { lang: 'markdown' }, textNodes(literal)), marks));
+				out.push(
+					withMarks(buildNode('inline_latex', { lang: 'markdown' }, textNodes(literal, null, standingFor(src, tok, literal.length))), marks)
+				);
 				i = end;
 				continue;
 			}
@@ -51,7 +103,7 @@ function convertInline(children: Token[], marks: PmMark[]): PmNode[] {
 							}
 						}
 					: { type: MARK_TOKENS[open] };
-			out.push(...convertInline(children.slice(i + 1, end), [...marks, mark]));
+			out.push(...convertInline(children.slice(i + 1, end), [...marks, mark], src));
 			i = end;
 			continue;
 		}
@@ -59,43 +111,66 @@ function convertInline(children: Token[], marks: PmMark[]): PmNode[] {
 
 		switch (tok.type) {
 			case 'text':
-				out.push(...textNodes(tok.content, marks));
+				// an entity's characters stand for the whole of it: `&` is the first byte of `&amp;`
+				// too, which is not the same as being written as it
+				out.push(
+					...textNodes(
+						tok.content,
+						marks,
+						tok.info === 'entity' ? standingFor(src, tok, tok.content.length) : leafSpans(src, tok, tok.content)
+					)
+				);
 				break;
 			case 'softbreak':
-				out.push(...textNodes(' ', marks)); // a source line-wrap is semantically a space
+				out.push(...textNodes(' ', marks, standingFor(src, tok, 1))); // a source line-wrap is semantically a space
 				break;
 			case 'hardbreak':
-				out.push(buildNode('hard_break', { lineBreak: true }));
+				out.push(noteSpans(buildNode('hard_break', { lineBreak: true }), standingFor(src, tok, 1)));
 				break;
 			case 'code_inline':
-				out.push(...textNodes(tok.content, [...marks, { type: 'code' }]));
+				out.push(...textNodes(tok.content, [...marks, { type: 'code' }], leafSpans(src, tok, tok.content)));
 				break;
 			case 'math_inline':
-				out.push(withMarks(buildNode('inline_math', null, textNodes(tok.content)), marks));
+				// the formula stands for its bytes whole
+				out.push(withMarks(noteSpans(buildNode('inline_math', null, textNodes(tok.content)), standingFor(src, tok, 1)), marks));
 				break;
 			case 'html_inline':
 				if (/^<br\s*\/?>$/i.test(tok.content)) {
-					out.push(buildNode('hard_break', { lineBreak: true, command: 'br' }));
+					out.push(noteSpans(buildNode('hard_break', { lineBreak: true, command: 'br' }), standingFor(src, tok, 1)));
 					break;
 				}
 				// chip per tag (not per element): the prose between <span> and </span> stays
 				// editable text instead of getting swallowed into one opaque chip
-				out.push(withMarks(buildNode('inline_latex', { lang: 'html' }, textNodes(tok.content)), marks));
+				out.push(
+					withMarks(buildNode('inline_latex', { lang: 'html' }, textNodes(tok.content, null, leafSpans(src, tok, tok.content))), marks)
+				);
 				break;
-			case 'image':
+			case 'image': {
 				// image mixed into a text line: no block figure can sit here, keep it literal
-				out.push(withMarks(buildNode('inline_latex', { lang: 'markdown' }, textNodes(imageMarkdown(tok))), marks));
+				const literal = imageMarkdown(tok);
+				out.push(
+					withMarks(buildNode('inline_latex', { lang: 'markdown' }, textNodes(literal, null, standingFor(src, tok, literal.length))), marks)
+				);
 				break;
+			}
 			default:
 				// unknown inline token: keep its content as a literal chip rather than dropping it
-				if (tok.content) out.push(withMarks(buildNode('inline_latex', { lang: 'markdown' }, textNodes(tok.content)), marks));
+				if (tok.content)
+					out.push(
+						withMarks(
+							buildNode('inline_latex', { lang: 'markdown' }, textNodes(tok.content, null, leafSpans(src, tok, tok.content))),
+							marks
+						)
+					);
 		}
 	}
 	return collapseTextNodes(out);
 }
 
-function paragraphContent(inline: Token | undefined): PmNode[] {
-	return inline?.children ? convertInline(inline.children, []) : [];
+/** the inline content of a block whose lines are [first, last) of the source */
+function paragraphContent(inline: Token | undefined, src: SourceLines, first: number, last: number): PmNode[] {
+	if (!inline?.children) return [];
+	return convertInline(inline.children, [], { ...src, at: contentLocator(src, first, last, inline.content) });
 }
 
 /** GFM task marker on the item's first paragraph: strip it and lift into kind/checked attrs.
@@ -109,7 +184,8 @@ function detectTask(blocks: PmNode[], raw: string): { blocks: PmNode[]; checked:
 	if (!m) return { blocks, checked: null };
 	const rest = lead.text.slice(m[0].length);
 	const kids: PmNode[] = [];
-	if (rest) kids.push(lead.type.schema.text(rest, lead.marks));
+	if (rest)
+		kids.push(noteSpans(lead.type.schema.text(rest, lead.marks), sliceSpans(lead.text, spansOf(lead), m[0].length, lead.text.length)));
 	for (let i = 1; i < first.childCount; i++) kids.push(first.child(i));
 	const para = buildNode('paragraph', { ...first.attrs }, kids);
 	return { blocks: [para, ...blocks.slice(1)], checked: m[1] !== ' ' };
@@ -122,7 +198,7 @@ function isLoose(tokens: Token[], i: number, j: number): boolean {
 	return false;
 }
 
-function listItems(tokens: Token[], i: number, j: number): PmNode[] {
+function listItems(tokens: Token[], i: number, j: number, src: SourceLines): PmNode[] {
 	const open = tokens[i];
 	const kind = open.type === 'ordered_list_open' ? 'ordered' : 'bullet';
 	const start = kind === 'ordered' ? Number(open.attrGet('start') ?? 1) : null;
@@ -137,9 +213,14 @@ function listItems(tokens: Token[], i: number, j: number): PmNode[] {
 			continue;
 		}
 		const e = constructEnd(tokens, k);
-		const inner = convertTokens(tokens, k + 1, e);
+		const inner = convertTokens(tokens, k + 1, e, src);
 		const raw = tokens[k + 1]?.type === 'paragraph_open' && tokens[k + 2]?.type === 'inline' ? tokens[k + 2].content : '';
-		const { blocks, checked } = detectTask(inner.length > 0 ? inner : [buildNode('paragraph')], raw);
+		// an item with nothing in it gets a paragraph of its own, with no bytes: it stands after the
+		// marker on the item's line, so a caret in it lands there and not in a neighbour
+		const { blocks, checked } = detectTask(
+			inner.length > 0 ? inner : [noteBlockSpan(buildNode('paragraph'), emptyItemAt(tokens[k], src))],
+			raw
+		);
 		items.push(
 			buildNode(
 				'list',
@@ -165,11 +246,14 @@ function listItems(tokens: Token[], i: number, j: number): PmNode[] {
 	return items;
 }
 
-function tableNode(tokens: Token[], i: number, j: number): PmNode {
+function tableNode(tokens: Token[], i: number, j: number, src: SourceLines): PmNode {
 	const rows: PmNode[] = [];
 	const aligns: string[] = [];
 	let inHead = false;
 	let cells: PmNode[] = [];
+	// cells are read left to right along their row's line
+	let rowLine = -1;
+	let cursor = 0;
 	for (let k = i + 1; k < j; k++) {
 		const tok = tokens[k];
 		switch (tok.type) {
@@ -181,6 +265,8 @@ function tableNode(tokens: Token[], i: number, j: number): PmNode {
 				break;
 			case 'tr_open':
 				cells = [];
+				rowLine = tok.map ? tok.map[0] : -1;
+				cursor = 0;
 				break;
 			case 'tr_close':
 				rows.push(buildNode('table_row', { topRules: '' }, cells));
@@ -194,7 +280,13 @@ function tableNode(tokens: Token[], i: number, j: number): PmNode {
 					const align = style.includes('right') ? '---:' : style.includes('center') ? ':--:' : style.includes('left') ? ':---' : '---';
 					aligns.push(align);
 				}
-				cells.push(buildNode(inHead ? 'table_header' : 'table_cell', null, [buildNode('paragraph', null, paragraphContent(inline))]));
+				let content: PmNode[] = [];
+				if (inline?.children) {
+					const cell = rowLine >= 0 ? cellLocator(src, rowLine, inline.content, cursor) : null;
+					if (cell) cursor = cell.cursor;
+					content = convertInline(inline.children, [], { ...src, at: cell?.at ?? null });
+				}
+				cells.push(buildNode(inHead ? 'table_header' : 'table_cell', null, [buildNode('paragraph', null, content)]));
 				k = e;
 				break;
 			}
@@ -204,89 +296,169 @@ function tableNode(tokens: Token[], i: number, j: number): PmNode {
 	return buildNode('table', { env: null, colspec: aligns.join('|') || null }, rows);
 }
 
-function fenceNode(tok: Token): PmNode {
+function fenceNode(tok: Token, src: SourceLines): PmNode {
 	const infoString = (tok.info ?? '').trim();
 	const content = tok.content.replace(/\n$/, '');
+	// the fence lines are stepped over: the content's lines are found one by one
+	const spans = tok.map ? lineSpans(src, tok.map[0], tok.map[1], content) : null;
 	// no infoString string means NO language: highlighting a bare fence as Markdown painted noise over
 	// plain text, and the settings chip claimed a language the source never recorded
 	return buildNode(
 		'code_block',
 		{ lang: infoString, env: tok.type === 'fence' ? 'fence' : 'indented', args: infoString },
-		textNodes(content)
+		textNodes(content, null, spans)
 	);
 }
 
+/** a block whose bytes are its source lines whole, for a node that draws itself: the run ends
+ *  where the block's own span does, before the line break and the blank lines after it */
+function blockSpan(src: SourceLines, tok: Token): LeafSpan[] | null {
+	if (!tok.map) return null;
+	const from = tok.map[0] < src.lineStarts.length ? src.lineStarts[tok.map[0]] : src.source.length;
+	const end = tok.map[1] < src.lineStarts.length ? src.lineStarts[tok.map[1]] : src.source.length;
+	const to = trimBlankTail(src.source, from, end);
+	return from < to ? standsFor(1, from, to) : null;
+}
+
 /** one construct starting at tokens[i] (ending at j inclusive) -> block nodes. */
-function convertConstruct(tokens: Token[], i: number, j: number, cap: Cap | null): PmNode[] {
+function convertConstruct(tokens: Token[], i: number, j: number, cap: Cap | null, src: SourceLines): PmNode[] {
 	const tok = tokens[i];
+	const [first, last] = tok.map ?? [0, 0];
 	switch (tok.type) {
 		case 'paragraph_open': {
 			const inline = tokens[i + 1]?.type === 'inline' ? tokens[i + 1] : undefined;
 			// a paragraph that IS one image becomes a block figure
-			if (inline?.children?.length === 1 && inline.children[0].type === 'image') return [imageBlock(inline.children[0])];
-			return [buildNode('paragraph', { indent: 'auto' }, paragraphContent(inline))];
+			if (inline?.children?.length === 1 && inline.children[0].type === 'image')
+				return [noteSpans(imageBlock(inline.children[0]), blockSpan(src, tok))];
+			return [buildNode('paragraph', { indent: 'auto' }, paragraphContent(inline, src, first, last))];
 		}
 		case 'heading_open': {
 			const inline = tokens[i + 1]?.type === 'inline' ? tokens[i + 1] : undefined;
-			return [buildNode('heading', { level: Number(tok.tag.slice(1)) || 1, numbered: true }, paragraphContent(inline))];
+			return [buildNode('heading', { level: Number(tok.tag.slice(1)) || 1, numbered: true }, paragraphContent(inline, src, first, last))];
 		}
 		case 'blockquote_open':
-			return [buildNode('blockquote', null, ensureBlocks(convertTokens(tokens, i + 1, j)))];
+			return [buildNode('blockquote', null, ensureBlocks(convertTokens(tokens, i + 1, j, src)))];
 		case 'bullet_list_open':
 		case 'ordered_list_open':
-			return listItems(tokens, i, j);
+			return listItems(tokens, i, j, src);
 		case 'table_open':
-			return [tableNode(tokens, i, j)];
+			return [tableNode(tokens, i, j, src)];
 		case 'fence':
 		case 'code_block':
-			return [fenceNode(tok)];
+			return [fenceNode(tok, src)];
 		case 'hr':
-			return [buildNode('horizontal_rule')];
+			return [noteSpans(buildNode('horizontal_rule'), blockSpan(src, tok))];
 		case 'html_block':
-			return [buildNode('raw_latex', { lang: 'html' }, textNodes(tok.content.replace(/\n$/, '')))];
+			return [
+				buildNode(
+					'raw_latex',
+					{ lang: 'html' },
+					textNodes(tok.content.replace(/\n$/, ''), null, tok.map ? lineSpans(src, first, last, tok.content.replace(/\n$/, '')) : null)
+				)
+			];
 		case 'math_block':
-			return [buildNode('block_math', { label: null, numbered: false, environment: null, lineLabels: [] }, textNodes(tok.content.trim()))];
+			return [
+				noteSpans(
+					buildNode('block_math', { label: null, numbered: false, environment: null, lineLabels: [] }, textNodes(tok.content.trim())),
+					blockSpan(src, tok)
+				)
+			];
 		// link reference and footnote definitions are invisible to the reader but load-bearing
 		// for the file: blocks of their own, verbatim, never a neighbour's gap
 		case 'reference_definition':
 		case 'footnote_definition':
-			return rawBlock(tok, cap);
+			return rawBlock(tok, cap, src);
 		default:
 			// unknown block construct: preserve its exact source lines as a raw markdown block
-			return rawBlock(tok, cap);
+			return rawBlock(tok, cap, src);
 	}
 }
 
 /** the construct's exact source lines (top level), else the content its rule recorded */
-function rawBlock(tok: Token, cap: Cap | null): PmNode[] {
+function rawBlock(tok: Token, cap: Cap | null, src: SourceLines): PmNode[] {
 	if (cap && tok.map) {
 		const min = offsetOfLine(cap, tok.map[0]);
 		const end = trimBlankTail(cap.source, min, sliceEnd(cap, tok.map[1]));
-		if (end > min) return [buildNode('raw_latex', { lang: 'markdown' }, textNodes(cap.source.slice(min, end)))];
+		if (end > min)
+			return [buildNode('raw_latex', { lang: 'markdown' }, textNodes(cap.source.slice(min, end), null, bytesSpan(end - min, min)))];
 	}
-	return tok.content ? [buildNode('raw_latex', { lang: 'markdown' }, textNodes(tok.content.replace(/\n$/, '')))] : [];
+	const content = tok.content.replace(/\n$/, '');
+	return content
+		? [
+				buildNode(
+					'raw_latex',
+					{ lang: 'markdown' },
+					textNodes(content, null, tok.map ? lineSpans(src, tok.map[0], tok.map[1], content) : null)
+				)
+			]
+		: [];
 }
 
 function ensureBlocks(blocks: PmNode[]): PmNode[] {
 	return blocks.length > 0 ? blocks : [buildNode('paragraph')];
 }
 
-/** nested walker (blockquote bodies, list items): no orig stamping below the top level. */
-function convertTokens(tokens: Token[], from: number, to: number): PmNode[] {
+/** where an empty list item's content would begin: after the marker on its first line */
+function emptyItemAt(item: Token, src: SourceLines): BlockSpan | null {
+	if (!item.map || item.map[0] >= src.lineStarts.length) return null;
+	const start = src.lineStarts[item.map[0]];
+	const line = src.source.slice(start, item.map[0] + 1 < src.lineStarts.length ? src.lineStarts[item.map[0] + 1] : src.source.length);
+	const at = start + /^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]*)?/.exec(line)![0].length;
+	return { srcFrom: at, srcTo: at, size: 1 };
+}
+
+/** the bytes of a construct below the top level: a paragraph's from where its content starts,
+ *  any other's from past the line's prefix (indentation, a quote's `>`) to the end of its last
+ *  line, blank lines trimmed. Null when the lines cannot be placed */
+function nestedSpan(tokens: Token[], i: number, src: SourceLines): BlockSpan | null {
+	const tok = tokens[i];
+	if (!tok.map) return null;
+	const [first, last] = tok.map;
+	if (first >= src.lineStarts.length) return null;
+	const inline = tok.type === 'paragraph_open' && tokens[i + 1]?.type === 'inline' ? tokens[i + 1] : null;
+	if (inline && inline.content === '') {
+		// an empty paragraph (an item with nothing typed yet) has no bytes of its own: it stands
+		// after the marker on its line, so a caret in it lands there and not in a neighbour
+		const line = src.source.slice(src.lineStarts[first], last < src.lineStarts.length ? src.lineStarts[last] : src.source.length);
+		const at = src.lineStarts[first] + /^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]*(?:\[[ xX]\][ \t]*)?)?/.exec(line)![0].length;
+		return { srcFrom: at, srcTo: at, size: 1 };
+	}
+	if (inline) {
+		const lines = inline.content.split('\n');
+		const starts = locateLines(src, first, last, lines);
+		const a = starts[0];
+		const z = starts[starts.length - 1];
+		if (a == null || z == null) return null;
+		const to = z + lines[lines.length - 1].length;
+		return to > a ? { srcFrom: a, srcTo: to, size: 1 } : null;
+	}
+	const line = src.source.slice(src.lineStarts[first], last < src.lineStarts.length ? src.lineStarts[last] : src.source.length);
+	let prefix = /^[ \t]*(?:>[ \t]*)*/.exec(line)![0];
+	// a quote's own marker is its first byte, not its container's frame: back off to the last >
+	if (tok.type === 'blockquote_open' && prefix.includes('>')) prefix = prefix.slice(0, prefix.lastIndexOf('>'));
+	const from = src.lineStarts[first] + prefix.length;
+	const end = last < src.lineStarts.length ? src.lineStarts[last] : src.source.length;
+	const to = trimBlankTail(src.source, from, end);
+	return to > from ? { srcFrom: from, srcTo: to, size: 1 } : null;
+}
+
+/** nested walker (blockquote bodies, list items): each construct's first block carries its span
+ *  below the top level too, so a container keeps its untouched children as their bytes */
+function convertTokens(tokens: Token[], from: number, to: number, src: SourceLines): PmNode[] {
 	const out: PmNode[] = [];
 	let i = from;
+	let prevEnd = 0;
 	while (i < to) {
 		const j = constructEnd(tokens, i);
-		out.push(...convertConstruct(tokens, i, Math.min(j, to), null));
+		const blocks = convertConstruct(tokens, i, Math.min(j, to), null, src);
+		const span = nestedSpan(tokens, i, src);
+		if (span && blocks.length > 0 && span.srcFrom >= prevEnd && (span.srcTo > span.srcFrom || blocks.length === 1)) {
+			out.push(noteBlockSpan(blocks[0], { ...span, size: blocks.length }), ...blocks.slice(1));
+			prevEnd = span.srcTo;
+		} else out.push(...blocks);
 		i = j + 1;
 	}
 	return out;
-}
-
-/** Recreate `node` with an `orig` attr; types that don't declare it pass through unchanged. */
-function withOrig(node: PmNode, orig: Record<string, unknown>): PmNode {
-	if (!node.type.spec.attrs || !('orig' in node.type.spec.attrs)) return node;
-	return node.type.create({ ...node.attrs, orig }, node.content, node.marks);
 }
 
 export type MarkdownParseResult = {
@@ -296,48 +468,35 @@ export type MarkdownParseResult = {
 export function markdownToProseMirror(source: string): MarkdownParseResult {
 	const md = createMarkdownEngine();
 	const tokens = md.parse(source, {}) as Token[];
-	const cap: Cap = { source, lineStarts: buildLineStarts(source), seq: 0, prevEnd: 0, group: 0 };
+	const cap: Cap = { source, lineStarts: buildLineStarts(source), prevEnd: 0 };
+	const src: SourceLines = { source, lineStarts: cap.lineStarts };
 
 	const result: PmNode[] = [];
 	let i = 0;
 	while (i < tokens.length) {
 		const j = constructEnd(tokens, i);
-		const blocks = convertConstruct(tokens, i, j, cap);
+		const blocks = convertConstruct(tokens, i, j, cap, src);
 		const map = tokens[i].map;
-		// stamp-and-push, the LaTeX converter's pushBlocks contract: every block gets a seq;
-		// only a trustworthy span gets the slice. multi-block constructs (a list) share it
-		// under a group id so substitution is all-or-nothing.
+		// note-and-push, the LaTeX converter's pushBlocks contract: only a trustworthy span is
+		// noted, on the construct's first block. a multi-block construct (a list) is one span, so
+		// substitution is all-or-nothing.
 		const min = map ? offsetOfLine(cap, map[0]) : NaN;
 		const end = map ? trimBlankTail(source, min, sliceEnd(cap, map[1])) : NaN;
 		const spanOk = map != null && Number.isFinite(min) && min >= cap.prevEnd && end <= source.length && min < end;
-		const slice = spanOk ? source.slice(min, end) : null;
-		const pre = spanOk ? source.slice(cap.prevEnd, min) : null;
-		const group = spanOk && blocks.length > 1 ? cap.group++ : null;
-		for (let b = 0; b < blocks.length; b++) {
-			const seq = cap.seq++;
-			if (slice == null) {
-				result.push(withOrig(blocks[b], { seq }));
-				continue;
-			}
-			const orig: Record<string, unknown> = { latex: slice, pre: b === 0 ? pre : '', seq, norm: null, start: min };
-			if (group != null) {
-				orig.group = group;
-				orig.groupIndex = b;
-				orig.groupSize = blocks.length;
-			}
-			result.push(withOrig(blocks[b], orig));
-		}
+		if (spanOk && blocks.length > 0)
+			result.push(noteBlockSpan(blocks[0], { srcFrom: min, srcTo: end, size: blocks.length }), ...blocks.slice(1));
+		else result.push(...blocks);
 		if (spanOk) cap.prevEnd = Math.max(cap.prevEnd, end);
 		i = j + 1;
 	}
 
-	// trailing bytes past the last block (usually just "\n") belong to no node; stash them on
-	// the doc so a pristine save reproduces the file's exact tail. an EMPTY tail is stashed
-	// too: it protects a missing final newline from being "fixed" on a no-edit save
 	const docAttrs: Record<string, unknown> = {
-		docTail: result.length > 0 ? { text: source.slice(cap.prevEnd), afterSeq: cap.seq - 1 } : null,
 		// a file that is CRLF throughout gets its regenerated blocks written the same way
 		eol: source.includes('\r\n') && !/(^|[^\r])\n/.test(source) ? '\r\n' : null
 	};
-	return { doc: buildNode('doc', docAttrs, ensureBlocks(result)) };
+	const doc = buildNode('doc', docAttrs, ensureBlocks(result));
+	// the document knows its blocks' gaps and constructs from here; parseMarkdownFile registers it
+	// against the file, where the bytes are written back from
+	rememberParseMap(doc, collectMap(doc), { text: source, from: 0, to: source.length }, false);
+	return { doc };
 }

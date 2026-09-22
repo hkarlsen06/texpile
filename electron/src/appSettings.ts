@@ -20,7 +20,6 @@ const DEFAULT_SETTINGS = {
 	transparentWindow: false, // the window's grounds let the blurred desktop through (windowGlass.ts)
 	mathPreview: true, // live math preview tooltip in source mode
 	sourceLineWrap: true, // soft-wrap long lines in Source mode
-	visualMaxWidth: 768, // widest the visual editor's text column may grow, in px
 	visualJustify: true, // paragraphs in the visual editor fill the column edge to edge
 	visualHyphenate: true, // long words may split at line ends in justified text
 	typstPreviewFollow: false,

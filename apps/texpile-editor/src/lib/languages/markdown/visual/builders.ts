@@ -3,6 +3,7 @@
 // objects must never mix in one doc, so each importer gets its own set.
 import { Node as PMNodeT, Mark as PMMarkT } from 'prosemirror-model';
 import { mdSchema } from './schema';
+import { concatSpans, noteSpans, spansOf, type LeafSpan } from '$lib/editor/visual/sourceSpans';
 
 export type PmNode = PMNodeT;
 
@@ -22,13 +23,13 @@ export function realMarks(marks?: PmMark[] | null): readonly PMMarkT[] {
 }
 
 /** Build a real text node, or null for the empty string (PM forbids empty text). */
-export function textNode(text: string, marks?: PmMark[] | null): PMNodeT | null {
-	return text.length > 0 ? mdSchema.text(text, realMarks(marks)) : null;
+export function textNode(text: string, marks?: PmMark[] | null, spans?: LeafSpan[] | null): PMNodeT | null {
+	return text.length > 0 ? noteSpans(mdSchema.text(text, realMarks(marks)), spans) : null;
 }
 
 /** Like `txt`, but returns a (possibly empty) array for handlers that return PmNode[]. */
-export function textNodes(text: string, marks?: PmMark[] | null): PMNodeT[] {
-	const t = textNode(text, marks);
+export function textNodes(text: string, marks?: PmMark[] | null, spans?: LeafSpan[] | null): PMNodeT[] {
+	const t = textNode(text, marks, spans);
 	return t ? [t] : [];
 }
 
@@ -63,10 +64,12 @@ export function collapseTextNodes(nodes: PmNode[]): PmNode[] {
 	const result: PmNode[] = [];
 	let buf = '';
 	let bufMarks: readonly PMMarkT[] = PMMarkT.none;
+	let parts: { len: number; spans: LeafSpan[] | undefined }[] = [];
 	function flush() {
-		if (buf.length > 0) result.push(mdSchema.text(buf, bufMarks));
+		if (buf.length > 0) result.push(noteSpans(mdSchema.text(buf, bufMarks), concatSpans(parts)));
 		buf = '';
 		bufMarks = PMMarkT.none;
+		parts = [];
 	}
 
 	for (const node of nodes) {
@@ -79,6 +82,7 @@ export function collapseTextNodes(nodes: PmNode[]): PmNode[] {
 				buf = node.text;
 				bufMarks = node.marks;
 			}
+			parts.push({ len: node.text.length, spans: spansOf(node) });
 		} else {
 			flush();
 			result.push(node);

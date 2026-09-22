@@ -11,9 +11,10 @@
 	import type { FileKind } from '$lib/workspace/documentBuffer.svelte';
 	import type { BiblatexReference } from '$lib/workspace/citations';
 	import type { CommentAnchor } from '$lib/comments/anchor';
-	import type { CommentThread } from '$lib/comments/log';
+	import type { CommentRange } from '$lib/editor/visual/extensions/comments';
+	import type { RegionParser, SourceMap } from '$lib/editor/visual/sourceSpans';
+	import { sourceAnchorFor, type SourceAnchorFn } from '$lib/editor/visual/extensions/pmComments';
 	import { dirname } from '$lib/workspace/fileSystem';
-	import { settings } from '$lib/settings';
 	import { m } from '$lib/paraglide/messages';
 
 	let {
@@ -30,7 +31,9 @@
 		onVisualReady,
 		onMdLink,
 		onEditFrontmatter,
-		commentThreads,
+		commentRanges,
+		sourceMap,
+		regionParser,
 		selectedComment,
 		onSelectComment,
 		onAddCommentAnchored,
@@ -53,7 +56,11 @@
 		onVisualReady: () => void;
 		onMdLink: (href: string) => boolean;
 		onEditFrontmatter: (kind: string, inner: string) => void;
-		commentThreads: CommentThread[];
+		/** the open file's threads as ranges of texSource, placed here through the map */
+		commentRanges: CommentRange[];
+		sourceMap: SourceMap;
+		/** parses a stretch of texSource as the file was parsed, for drawing suggestions */
+		regionParser: RegionParser | null;
 		selectedComment: string | null;
 		onSelectComment?: (id: string) => void;
 		onAddCommentAnchored?: (anchor: CommentAnchor | null) => void;
@@ -63,6 +70,15 @@
 		onCommentsPlaced?: (lost: string[]) => void;
 		commentPendingActive: boolean;
 	} = $props();
+
+	// the stretch of texSource the document is
+	const bodyRange = $derived(
+		docMeta?.hadDocumentEnv
+			? { from: docMeta.preamble.length, to: texSource.length - docMeta.postamble.length }
+			: { from: 0, to: texSource.length }
+	);
+	// a selection in any of the editors, as the range of texSource its characters are
+	const sourceAnchor: SourceAnchorFn = (doc, from, to) => sourceAnchorFor(doc, sourceMap, texSource, from, to);
 </script>
 
 <!-- texpile-main-editor scopes the editor's right-click context menu (ContextMenu.svelte) -->
@@ -72,13 +88,20 @@
      No bottom padding: the editor itself runs to the foot of the pane (app.css), so a drop or a
      click below the last block lands in it -->
 <div class="flex min-h-full flex-col px-12 pt-8">
-	<!-- the measure, from Preferences. Was a fixed max-w-3xl (768px), which is still the
-	     default; past it a wide window pads with empty space rather than stretching the
-	     line length, and how much of that is comfortable is a matter of taste -->
-	<div class="texpile-main-editor mx-auto w-full min-w-0" style="max-width: {settings.current.visualMaxWidth ?? 768}px">
+	<!-- the measure: past it a wide window pads with empty space rather than stretching the line length -->
+	<div class="texpile-main-editor mx-auto w-full max-w-3xl min-w-0">
 		{#if docMeta?.hadDocumentEnv && kind === 'tex'}
 			<!-- \title/\author fields are LaTeX; md frontmatter is YAML, edited in source mode -->
 			<PreambleFrontmatter preamble={docMeta.preamble} onEdit={onEditFrontmatter} />
+		{/if}
+		{#if showRenderBar}
+			<!-- no height of its own, so it hangs over the top of the editor root rather than moving it: that
+			     root grows to the foot of the pane (app.css), which had been pushing the bar off the bottom of
+			     the screen, and shifting it would throw off the screenful revealBuiltEditor measures.
+			     Nothing is covered, since the root holds nothing painted until it is revealed. -->
+			<div class="h-0 min-h-0">
+				<VisualLoading mounting format={kind} sizeBytes={texSource.length} />
+			</div>
 		{/if}
 		{#if kind === 'md'}
 			<MarkdownEditorView
@@ -92,7 +115,12 @@
 				{onHistoryBoundary}
 				onReady={onVisualReady}
 				onOpenLink={onMdLink}
-				{commentThreads}
+				{commentRanges}
+				{sourceMap}
+				{texSource}
+				{bodyRange}
+				{regionParser}
+				{sourceAnchor}
 				{selectedComment}
 				{onSelectComment}
 				onAddComment={onAddCommentAnchored}
@@ -112,7 +140,12 @@
 				{onHistoryBoundary}
 				onReady={onVisualReady}
 				onOpenLink={onMdLink}
-				{commentThreads}
+				{commentRanges}
+				{sourceMap}
+				{texSource}
+				{bodyRange}
+				{regionParser}
+				{sourceAnchor}
 				{selectedComment}
 				{onSelectComment}
 				onAddComment={onAddCommentAnchored}
@@ -132,7 +165,12 @@
 				placeholder={m.wsview_editor_placeholder()}
 				{onHistoryBoundary}
 				onReady={onVisualReady}
-				{commentThreads}
+				{commentRanges}
+				{sourceMap}
+				{texSource}
+				{bodyRange}
+				{regionParser}
+				{sourceAnchor}
 				{selectedComment}
 				{onSelectComment}
 				onAddComment={onAddCommentAnchored}

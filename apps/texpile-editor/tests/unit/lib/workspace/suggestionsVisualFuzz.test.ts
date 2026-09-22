@@ -2,12 +2,26 @@
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync, statSync } from 'node:fs';
 import { EditorState } from 'prosemirror-state';
-import { activeSuggestions } from '$lib/comments/activeSuggestions.svelte';
+import type { Node as PMNode } from 'prosemirror-model';
+import { activeSuggestions, takeTypedSides } from '$lib/comments/activeSuggestions.svelte';
 import { placePmSuggestions } from '$lib/editor/visual/extensions/pmSuggestionsPlace';
 import { padTables } from '$lib/editor/visual/padTables';
-import { computeBlockPatch, syncOrigAttrs } from '$lib/editor/visual/blockPatch';
+import { computeBlockPatch, syncParseAttrs } from '$lib/editor/visual/blockPatch';
+import { parseCarryPlugin } from '$lib/editor/visual/parseCarry';
+import { adoptParse } from '$lib/editor/visual/sourceSpans';
 import type { ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
-import { FORMATS, pick, prng, randomEdit, renderedText, typed, type Format } from './visualEditsFuzz';
+import {
+	FORMATS,
+	drawnReading,
+	oldWordsOf,
+	pick,
+	prng,
+	randomEdit,
+	renderedText,
+	suggestionSource,
+	typed,
+	type Format
+} from './visualEditsFuzz';
 
 let disk: Record<string, string> = {};
 
@@ -45,6 +59,9 @@ const paragraphs = (s: string) =>
 async function session(f: Format, original: string, run: number): Promise<{ text: string; refused: number; log: string[] }> {
 	disk = {};
 	activeSuggestions.current = [];
+	// the editors note a caret side on a module of their own, which the controller drains on its next
+	// comparison. A run that ends before that leaves one behind, and ids repeat between runs here
+	takeTypedSides();
 	const rnd = prng(run * 104729);
 	const rel = `doc.${f.name}`;
 	const FILE = `${ROOT}/${rel}`;
@@ -55,7 +72,8 @@ async function session(f: Format, original: string, run: number): Promise<{ text
 	let state!: EditorState;
 	const mount = () => {
 		meta = f.parse(text);
-		state = EditorState.create({ doc: padTables(meta.doc) });
+		// the editor's own plugin list hands the parse on to every document a transaction makes
+		state = EditorState.create({ doc: padTables(meta.doc), plugins: [parseCarryPlugin] });
 	};
 	mount();
 	const make = () =>
@@ -81,9 +99,11 @@ async function session(f: Format, original: string, run: number): Promise<{ text
 				const patch = computeBlockPatch(state.doc, parsed.doc);
 				const tr = state.tr;
 				if (patch) tr.replaceWith(patch.from, patch.to, patch.nodes);
-				syncOrigAttrs(tr, parsed.doc);
-				if (!tr.steps.length) return false;
-				state = state.apply(tr);
+				syncParseAttrs(tr, parsed.doc);
+				if (tr.steps.length) state = state.apply(tr);
+				// the document is the parse's from here on, steps or none: the same content may now
+				// come from other bytes (a restored "..." the parser reads as its ellipsis)
+				adoptParse(state.doc, parsed.origins);
 				text = f.serialize(meta, state.doc);
 				return true;
 			},
@@ -113,7 +133,7 @@ async function session(f: Format, original: string, run: number): Promise<{ text
 			continue;
 		}
 		if (visual) {
-			const edit = randomEdit(state, rnd);
+			const edit = randomEdit(state, rnd, true);
 			if (!edit) continue;
 			state = state.apply(edit.tr);
 			log.push(edit.label);
@@ -150,9 +170,10 @@ async function suggestTyping(f: Format, original: string, edits: Edit[]) {
 	disk = {};
 	who = 'me';
 	activeSuggestions.current = [];
+	takeTypedSides();
 	let text = original;
 	const meta = f.parse(text);
-	let state = EditorState.create({ doc: meta.doc });
+	let state = EditorState.create({ doc: meta.doc, plugins: [parseCarryPlugin] });
 	const ctl = new CommentsController({
 		root: () => ROOT,
 		preferredAuthor: () => who,
@@ -174,8 +195,26 @@ async function suggestTyping(f: Format, original: string, edits: Edit[]) {
 		await ctl.suggestions.settle();
 	}
 	const marks = activeSuggestions.current;
-	const shown = f.parse(text).doc;
-	return { text, marks, shown, placed: placePmSuggestions(shown, marks, f.name) };
+	const parsed = f.parse(text);
+	const shown = parsed.doc;
+	const placed = placePmSuggestions(shown, marks, suggestionSource(f, parsed, text));
+	if (process.env.SUGGEST_DEBUG)
+		console.log(
+			'PLACED ' +
+				JSON.stringify({
+					marks: marks.map((m) => ({ from: m.from, to: m.to, quote: m.anchor.quote, restore: m.restore })),
+					ranges: placed.ranges.map((r) => ({
+						...r,
+						old: oldWordsOf(r),
+						gone: undefined,
+						was: r.was?.type.name,
+						text: shown.textBetween(r.from, r.to, '|')
+					})),
+					partial: [...placed.partial],
+					hidden: [...placed.hidden]
+				})
+		);
+	return { text, marks, shown, placed };
 }
 
 function blockEnd(s: EditorState, block: number): number {
@@ -215,14 +254,91 @@ describe('suggestions made in the visual editor', () => {
 				});
 			}
 			const { placed } = await suggestTyping(f, sources[f.name], edits['words typed over a formatted phrase']);
-			expect(placed.ranges[0].old).toEqual([
-				{ text: 'An inline ', tags: [] },
-				{ text: 'quotation', tags: ['em'] },
-				{ text: ' sits in running', tags: [] }
+			expect(placed.ranges[0].old.map((run) => [run.text, run.marks.map((m) => m.type.name)])).toEqual([
+				['An inline ', []],
+				['quotation', ['em']],
+				[' sits in running', []]
 			]);
 		}
+		// two paragraphs joined with words taken from both: what was taken out stands where the text broke
 		const joined = await suggestTyping(FORMATS[0], sources.tex, [(s) => s.apply(s.tr.delete(blockEnd(s, 0) - 5, blockEnd(s, 0) + 8))]);
-		expect([...joined.placed.partial]).toHaveLength(1);
+		expect([...joined.placed.partial]).toHaveLength(0);
+		const gone = joined.placed.ranges.find((r) => r.gone)!;
+		expect(gone.gone!.head.map((r) => r.text).join('')).toBe('text.');
+		expect(gone.gone!.tail.map((r) => r.text).join('')).toBe('A seco');
+		expect(joined.shown.resolve(gone.from).parent.type.name).toBe('paragraph');
+	});
+
+	it('sets the formula a change was made in beside the one it was', async () => {
+		const sources = {
+			tex: '\\documentclass{article}\n\\begin{document}\nA line with an inline $\\alpha^{2}$ in it.\n\n\\[\n\\frac{a}{b} = c\n\\]\n\\end{document}\n',
+			md: 'A line with an inline $\\alpha^{2}$ in it.\n\n$$\n\\frac{a}{b} = c\n$$\n',
+			typ: 'A line with an inline $alpha^2$ in it.\n\n$ a/b = c $\n'
+		};
+		const append = (kind: string): Edit[] => [
+			(s) => {
+				let hit: { pos: number; node: PMNode } | null = null;
+				s.doc.descendants((node, pos) => {
+					if (!hit && node.type.name === kind) hit = { pos, node };
+					return !hit;
+				});
+				if (!hit) return s;
+				const { pos, node } = hit as { pos: number; node: PMNode };
+				return s.apply(s.tr.insertText('+1', pos + 1 + node.content.size));
+			}
+		];
+		for (const f of FORMATS) {
+			for (const [kind, was] of [
+				['inline_math', f.name === 'typ' ? '\\alpha^2' : '\\alpha^{2}'],
+				['block_math', '\\frac{a}{b} = c']
+			]) {
+				const { placed } = await suggestTyping(f, sources[f.name], append(kind));
+				const outline = placed.ranges.find((r) => r.node);
+				expect({ format: f.name, kind, was: outline?.was?.textContent, partial: placed.ranges.length === 1 && outline?.partial }).toEqual({
+					format: f.name,
+					kind,
+					was,
+					partial: false
+				});
+			}
+		}
+	});
+
+	it('stands a whole block that was taken out where it stood, rather than tinting its neighbour', async () => {
+		const sources = {
+			tex: '\\documentclass{article}\n\\begin{document}\nOpening words about the weather.\n\nA middle one naming several cities.\n\nThe last, which counts sheep.\n\\end{document}\n',
+			md: 'Opening words about the weather.\n\nA middle one naming several cities.\n\nThe last, which counts sheep.\n',
+			typ: 'Opening words about the weather.\n\nA middle one naming several cities.\n\nThe last, which counts sheep.\n'
+		};
+		const cut = (i: number): Edit[] => [
+			(s) => {
+				let pos = 0;
+				for (let k = 0; k < i; k++) pos += s.doc.child(k).nodeSize;
+				return s.apply(s.tr.delete(pos, pos + s.doc.child(i).nodeSize));
+			}
+		];
+		for (const f of FORMATS) {
+			for (const i of [1, 2, 0]) {
+				const { text, marks, shown, placed } = await suggestTyping(f, sources[f.name], cut(i));
+				const drawn = placed.ranges.filter((r) => r.gone);
+				expect({ format: f.name, i, drawn: drawn.length, regions: placed.partial.size }).toEqual({
+					format: f.name,
+					i,
+					drawn: 1,
+					regions: 0
+				});
+				// and it reads exactly as rejecting it does, the same rule the fuzz holds the words tier to
+				let rejected = text;
+				for (const m of marks.filter((x) => drawn.some((r) => r.id === x.id)).sort((a, b) => b.from - a.from))
+					rejected = rejected.slice(0, m.from) + m.restore + rejected.slice(m.to);
+				expect(
+					renderedText(
+						shown,
+						drawn.map((r) => ({ from: r.from, to: r.to, words: oldWordsOf(r) }))
+					)
+				).toBe(renderedText(f.parse(rejected).doc));
+			}
+		}
 	});
 
 	it('tints the paragraph that was typed in when typing makes it match another', async () => {
@@ -241,19 +357,22 @@ describe('suggestions made in the visual editor', () => {
 				const rnd = prng(run * 7919);
 				const original = readFileSync(files[run % files.length], 'utf8').replace(/\r\n/g, '\n');
 				const steps = Array.from({ length: 1 + Math.floor(rnd() * 4) }, () => (s: EditorState) => {
-					const edit = randomEdit(s, rnd);
+					const edit = randomEdit(s, rnd, true);
 					return edit ? s.apply(edit.tr) : s;
 				});
 				const { text, marks, shown, placed } = await suggestTyping(f, original, steps);
-				const drawn = placed.ranges.filter((r) => !r.partial && !r.chip);
-				if (!drawn.length) continue;
+				// every mark drawn in full is put back, a break mark or a chip outline included (they say
+				// nothing readable as text, and one edit can arrive as several marks that only read right
+				// together); what is read is the words and the blocks
+				const whole = marks.filter((m) => !placed.partial.has(m.id) && placed.ranges.some((r) => r.id === m.id));
+				const drawn = placed.ranges.filter((r) => whole.some((m) => m.id === r.id));
+				if (!whole.length) continue;
 				let rejected = text;
-				for (const m of marks.filter((x) => drawn.some((r) => r.id === x.id)).sort((a, b) => b.from - a.from))
-					rejected = rejected.slice(0, m.from) + m.restore + rejected.slice(m.to);
+				for (const m of [...whole].sort((a, b) => b.from - a.from)) rejected = rejected.slice(0, m.from) + m.restore + rejected.slice(m.to);
 				const want = renderedText(f.parse(rejected).doc);
 				const got = renderedText(
 					shown,
-					drawn.map((r) => ({ from: r.from, to: r.to, words: r.old.map((x) => x.text).join('') }))
+					drawn.flatMap((r) => drawnReading(r) ?? [])
 				);
 				if (want !== got) {
 					if (ONLY)
@@ -268,7 +387,23 @@ describe('suggestions made in the visual editor', () => {
 										prefix: m.anchor.prefix,
 										suffix: m.anchor.suffix
 									})),
-									drawn: drawn.map((r) => ({ from: r.from, to: r.to, old: r.old, text: shown.textBetween(r.from, r.to, '|') }))
+									drawn: placed.ranges.map((r) => ({
+										id: r.id.slice(0, 4),
+										from: r.from,
+										to: r.to,
+										old: oldWordsOf(r),
+										text: shown.textBetween(r.from, r.to, '|'),
+										node: r.node,
+										brk: r.brk,
+										partial: r.partial
+									})),
+									partial: [...placed.partial],
+									hidden: [...placed.hidden],
+									blocks: (() => {
+										const out: string[] = [];
+										shown.forEach((n, pos) => out.push(`${pos}:${n.type.name}:${JSON.stringify(n.textContent.slice(0, 50))}`));
+										return out;
+									})()
 								})
 						);
 					let s = 0;

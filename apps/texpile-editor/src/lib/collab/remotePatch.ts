@@ -1,11 +1,12 @@
 // Landing a re-parsed remote document in the live view: replace only the block range that
-// changed, re-anchor a caret inside it through the source, and hold the topmost visible line
-// still so the patch never reads as a scroll jump.
+// changed, carry a caret inside it through the file, and hold the topmost visible line still so
+// the patch never reads as a scroll jump.
 import { TextSelection } from 'prosemirror-state';
 import type { EditorView as PMEditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
-import { buildBlockMap, pmPosToSourceOffset, sourceOffsetToPmPos } from '$lib/editor/visual/sourceMap';
-import { computeBlockPatch, protectCaretBlock, syncOrigAttrs } from '$lib/editor/visual/blockPatch';
+import { adoptParse, type ParseOrigins, type SourceMap } from '$lib/editor/visual/sourceSpans';
+import { offsetAtPm, pmAtOffset } from '$lib/editor/visual/sourceMap';
+import { computeBlockPatch, protectCaretBlock, syncParseAttrs } from '$lib/editor/visual/blockPatch';
 import { spliceDiff } from './materialize';
 
 // same walk as EditorView's doc-swap helper: the pane that actually scrolls the editor
@@ -19,40 +20,44 @@ function scrollParent(el: HTMLElement | null): HTMLElement | null {
 	return null;
 }
 
+/** `oldMap` is the live doc's map of `oldSource`, `newMap` the parse's map of `newSource` and
+ *  `origins` what that parse knew about its blocks */
 export function applyRemotePatch(
 	v: PMEditorView,
 	parsedDoc: PMNode,
-	strip: ((s: string) => string) | undefined,
+	oldMap: SourceMap,
+	newMap: SourceMap,
+	origins: ParseOrigins,
 	oldSource: string,
-	newSource: string,
-	oldPreLen: number,
-	newPreLen: number
+	newSource: string
 ): void {
 	// the block being typed in must not lose its in-progress tail to the re-parse: trailing
 	// whitespace and still-empty paragraphs don't survive serialize->parse in any dialect
 	const newDoc = protectCaretBlock(v.state.doc, parsedDoc, v.state.selection.head);
 	const patch = computeBlockPatch(v.state.doc, newDoc);
-	// caret inside the replaced range: re-anchor it through the source (outside it, PM maps it)
+	// caret inside the replaced range: carry it through the file (outside it, PM maps it)
 	let srcOffset: number | null = null;
 	const head = v.state.selection.head;
 	if (patch && head > patch.from && head < patch.to) {
-		const map = buildBlockMap(v.state.doc, oldPreLen);
-		srcOffset = pmPosToSourceOffset(v.state.doc, map, head);
+		srcOffset = offsetAtPm(oldMap, head);
 		const d = srcOffset != null ? spliceDiff(oldSource, newSource) : null;
 		if (d && srcOffset != null && srcOffset > d.index) {
-			// carry the offset across the remote edit so the re-anchor searches the right region
+			// across the remote edit itself, so the offset means the same place in the new text
 			srcOffset = srcOffset >= d.index + d.remove ? srcOffset + d.insert.length - d.remove : d.index + d.insert.length;
 		}
 	}
 	const tr = v.state.tr;
 	if (patch) tr.replaceWith(patch.from, patch.to, patch.nodes);
-	syncOrigAttrs(tr, newDoc);
-	if (!tr.steps.length) return;
+	syncParseAttrs(tr, newDoc);
+	if (!tr.steps.length) {
+		// the same content, perhaps from other bytes: the document is the parse's all the same
+		adoptParse(v.state.doc, origins);
+		return;
+	}
 	tr.setMeta('addToHistory', false).setMeta('collabRemotePatch', true);
 	if (srcOffset != null) {
-		const map = buildBlockMap(tr.doc, newPreLen);
-		const pos = sourceOffsetToPmPos(tr.doc, map, srcOffset, strip);
-		if (pos != null) tr.setSelection(TextSelection.near(tr.doc.resolve(pos)));
+		const pos = pmAtOffset(newMap, srcOffset);
+		if (pos != null) tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(pos, tr.doc.content.size))));
 	}
 	// Hold the view still across the patch: replacing blocks changes heights, and everything
 	// below a resized block shifts on screen - the "jump". Anchor the topmost visible position
@@ -71,6 +76,9 @@ export function applyRemotePatch(
 		}
 	}
 	v.dispatch(tr);
+	// the patched document is the parse's from here on: its kept blocks equal the parse's, its new
+	// ones are the parse's own, and a grafted caret block is the one that regenerates
+	adoptParse(v.state.doc, origins);
 	if (scroller && anchor) {
 		try {
 			const mapped = Math.min(tr.mapping.map(anchor.pos), v.state.doc.content.size);

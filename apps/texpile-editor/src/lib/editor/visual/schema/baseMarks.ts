@@ -36,6 +36,10 @@ export const baseMarks = {
 	} as MarkSpec,
 
 	em: {
+		// which command wrote it, when the file said \emph rather than \textit. They are not the same
+		// thing to LaTeX (\emph toggles inside italic text) and rewriting one as the other churns the
+		// file on the first edit anywhere in the block
+		attrs: { cmd: { default: null } },
 		parseDOM: [
 			{ tag: 'i' },
 			{ tag: 'em' },

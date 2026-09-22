@@ -7,7 +7,7 @@
 // to be dropped silently, which is most of "sync works sometimes and not others". These pin the
 // rescue: same line, first word's end.
 import { describe, it, expect } from 'vitest';
-import { firstWordEndOnLine } from '$lib/editor/visual/sourceMap';
+import { firstWordEndOnLine } from '$lib/languages/typst/preview/caretRescue';
 
 describe('firstWordEndOnLine', () => {
 	it('lands just after the first word of a plain line', () => {

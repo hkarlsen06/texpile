@@ -15,12 +15,16 @@ export const gutterTheme = EditorView.theme({
 		minWidth: 'calc(3ch + 2px + 3px)',
 		textAlign: 'center'
 	},
-	'.cm-gutter-lint': { width: '1em' },
+	// both icon rails are cut close to their icon and the slack sits on the OUTER side, so the dot
+	// and the chevron gather in against the line numbers instead of out against the window and the text
+	'.cm-gutter-lint': { width: '1.3em' },
 	// pinned: a gutter is as wide as its widest marker, so the text would slide sideways the
 	// moment the first parse produced fold ranges
-	'.cm-foldGutter': { width: '14px' },
+	'.cm-foldGutter': { width: '18px' },
+	// all of it on the right: the chevron is a flex item, so any left pad shrinks the icon itself
+	'.cm-foldGutter .cm-gutterElement': { padding: '0 4px 0 0' },
 	// flex-centre: stock CM leaves the marker inline, sitting above the line-number baseline
-	'.cm-gutter-lint .cm-gutterElement': { padding: '0 1px', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+	'.cm-gutter-lint .cm-gutterElement': { padding: '0 2px 0 6px', display: 'flex', alignItems: 'center', justifyContent: 'center' },
 	'.cm-lint-marker': { width: '0.7em', height: '0.7em' },
 	'.cm-lint-marker-error': { content: lintMarker('<circle cx="20" cy="20" r="15" fill="#ef4444"/>') },
 	'.cm-lint-marker-warning': { content: lintMarker('<circle cx="20" cy="20" r="15" fill="#f59e0b"/>') },
@@ -30,7 +34,7 @@ export const gutterTheme = EditorView.theme({
 // y-codemirror.next's stock theme shifts text: its line selections and caret trade padding for
 // margins that do not cancel out. pin both so a peer's cursor can never move a glyph on this screen
 export const yRemoteLayoutFix = EditorView.theme({
-	'.cm-yLineSelection': { margin: '0', padding: '0 2px 0 6px' },
+	'.cm-yLineSelection': { margin: '0', padding: '0 2px 0 0' },
 	'.cm-ySelectionCaret': { border: 'none', margin: '0' },
 	'.cm-ySelectionCaret::before': {
 		content: "''",

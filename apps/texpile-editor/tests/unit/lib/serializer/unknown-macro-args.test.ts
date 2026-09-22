@@ -90,7 +90,7 @@ B.`)
 
 // regression guard: these three macros were absent from both the default DB and
 // MACRO_SIGNATURES, so their arguments detached (corpus repros: 1512.03385, 2103.00020,
-// 2006.11239; the `orig` verbatim layer hid the bug until a block regenerated)
+// 2006.11239; the verbatim layer hid the bug until a block regenerated)
 describe('newly-registered macro signatures round-trip', () => {
 	it('\\newcolumntype keeps its [n] arg-count and {body} intact (array package)', () => {
 		const src = String.raw`\newcolumntype{x}[1]{>{\centering}p{#1pt}}`;

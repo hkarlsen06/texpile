@@ -9,7 +9,7 @@ import { serializeToTypst } from './serializer';
 
 /** serialize a clipboard slice to Typst. Inline slices (a selection inside one paragraph) wrap
  *  in a paragraph first; block slices serialize as they are - a partially selected block fails
- *  its norm comparison and regenerates, so stale orig bytes never leak. */
+ *  the parse's origins and regenerates, so stale bytes never leak. */
 export function sliceToTypst(slice: Slice): string {
 	let frag = slice.content;
 	if (frag.childCount === 0) return '';

@@ -2,6 +2,7 @@
 // unsaved-edit gate, on-disk change detection, tab activation/closing, and the load-the-
 // active-file effect that ties them together.
 import { untrack } from 'svelte';
+import { noParse, parseOf } from '$lib/editor/visual/sourceSpans';
 import { SavePipeline } from '$lib/workspace/savePipeline.svelte';
 import { ExternalChangeWatcher } from '$lib/workspace/externalChange.svelte';
 import { UnsavedGuard } from '$lib/workspace/unsavedGuard.svelte';
@@ -11,7 +12,6 @@ import { flatFiles } from '$lib/workspace/treeRefresh';
 import { tabs, tabKey, type Tab } from '$lib/workspace/tabs.svelte';
 import { visualDocCache } from '$lib/workspace/visualDocCache';
 import { saveVisualPosition } from '$lib/workspace/visualPositions';
-import { bodyOffsetOf } from '$lib/workspace/latexRoundtrip';
 import { editorViewStore } from '$lib/stores/editorStore';
 import { hasVisualMode, isRawTextKind } from '$lib/workspace/documentBuffer.svelte';
 import { compileConfig } from '$lib/workspace/projectConfigSync.svelte';
@@ -125,7 +125,7 @@ export class WorkspaceEditFlow {
 					this.cacheOutgoingDoc();
 					const v = editorViewStore.current;
 					if (!v || modes.mode !== 'visual' || !doc.path || d.session().collabFor(doc.path)) return;
-					saveVisualPosition(v, doc.path, doc.texSource, doc.docMeta ? bodyOffsetOf(doc.docMeta) : 0);
+					saveVisualPosition(v, doc.path, doc.texSource, doc.sourceMap);
 				})
 			)
 		);
@@ -175,7 +175,10 @@ export class WorkspaceEditFlow {
 			preamble: doc.docMeta.preamble,
 			postamble: doc.docMeta.postamble,
 			hadDocumentEnv: doc.docMeta.hadDocumentEnv,
-			warnings: []
+			warnings: [],
+			map: doc.sourceMap,
+			// the parse the edited document still answers to, handed on by the editor's own plugin
+			origins: parseOf(doc.lastDoc) ?? noParse()
 		});
 	}
 

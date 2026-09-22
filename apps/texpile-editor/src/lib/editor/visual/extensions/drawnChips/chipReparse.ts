@@ -9,15 +9,11 @@ function isChipItself(nodes: Node[], chip: Node): boolean {
 	return nodes.length === 1 && nodes[0].type === chip.type && nodes[0].textContent === chip.textContent;
 }
 
-// the fragment's own source slices say nothing about where it now stands, so its blocks are written out afresh
-function withoutOrig(block: Node): Node {
-	return 'orig' in block.attrs ? block.type.create({ ...block.attrs, orig: null }, block.content, block.marks) : block;
-}
-
 export function chipReplacement(doc: Node | null, chip: Node, block: boolean): Node[] | null {
 	if (!doc) return null;
+	// the fragment's blocks know nothing of where they now stand (no parse origins), so they are written out afresh
 	const blocks: Node[] = [];
-	doc.forEach((child) => blocks.push(withoutOrig(child)));
+	doc.forEach((child) => blocks.push(child));
 	if (block) return isChipItself(blocks, chip) ? null : blocks;
 	if (blocks.length === 0) return [];
 	// a paragraph of chips alone reads back as a raw block: still the chip, perhaps with its commands regrouped

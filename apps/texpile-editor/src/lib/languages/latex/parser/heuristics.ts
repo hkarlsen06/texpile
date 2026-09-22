@@ -67,8 +67,9 @@ export function heuristicMarkCommentedMacroCalls(nodes: Node[] | undefined, sour
 			const text = source.slice(start, lastEnd);
 			// if the span ends inside a % comment, bake in a newline: a dangling comment marker
 			// would eat whatever the serializer puts next on that line and compound every save.
-			// (lexical tail check: comments don't nest or span lines.)
-			node._raw = /(^|[^\\])%[^\n]*$/.test(text) ? text + '\n' : text;
+			// (lexical tail check: comments don't nest or span lines.) At the end of the file
+			// there is no line end to take, and the span must stay the file's bytes
+			node._raw = lastEnd < source.length && /(^|[^\\])%[^\n]*$/.test(text) ? text + '\n' : text;
 			nodes.splice(i + 1, j - (i + 1)); // drop the consumed run; the span lives on `_raw` now
 		}
 	}
@@ -281,6 +282,35 @@ export function heuristicMarkDelimitedMacroSpans(nodes: Node[] | undefined, sour
 			node._raw = source.slice(start, end);
 			nodes.splice(i + 1, j - (i + 1));
 		}
+	}
+}
+
+const FILE_ARG_MACROS = new Set(['input', 'include', 'subfile', 'includeonly']);
+
+/**
+ * `\input section6.tex` with no braces: TeX reads the file name up to the next space, but the
+ * parser hands the macro one token (`section6`) and leaves `.tex` behind as prose. The strings
+ * glued to a bare argument are folded back into it, so the chip names the whole file
+ */
+export function heuristicGlueBareFileArgs(nodes: Node[] | undefined, source: string): void {
+	if (!nodes) return;
+	for (let i = 0; i < nodes.length; i++) {
+		const node = nodes[i] as LooseNode;
+		if (Array.isArray(node.content) && node.type !== 'group') heuristicGlueBareFileArgs(node.content as Node[], source);
+		if (node.type !== 'macro' || !FILE_ARG_MACROS.has(node.content as string) || !node.args?.length) continue;
+		const arg = node.args.find((a) => (a as { openMark?: string }).openMark === '{');
+		const first = arg?.content[0] as LooseNode | undefined;
+		const start = first?.position?.start?.offset;
+		if (!arg || typeof start !== 'number' || source[start - 1] === '{') continue;
+		let end = (arg.content[arg.content.length - 1] as LooseNode).position?.end?.offset ?? -1;
+		let j = i + 1;
+		for (; j < nodes.length; j++) {
+			const nx = nodes[j] as LooseNode;
+			if (nx.type !== 'string' || nx.position?.start?.offset !== end) break;
+			end = nx.position?.end?.offset ?? -1;
+			arg.content.push(nx as Node);
+		}
+		nodes.splice(i + 1, j - (i + 1));
 	}
 }
 

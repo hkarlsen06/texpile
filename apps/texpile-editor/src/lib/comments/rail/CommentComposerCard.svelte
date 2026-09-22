@@ -26,6 +26,20 @@
 		box?.focus({ preventScroll: true });
 	});
 
+	// going back to the text without writing anything takes the composer with it: the passage stays
+	// marked while this card is open, and a card nobody is writing in leaves a mark nobody asked for.
+	// A started note is never thrown away, so the card stays once there is anything in it
+	$effect(() => {
+		function onFocusIn(e: FocusEvent) {
+			const into = e.target as HTMLElement | null;
+			if (!into?.closest?.('.ProseMirror, .cm-editor')) return;
+			if (draft.trim()) return;
+			onCancel();
+		}
+		document.addEventListener('focusin', onFocusIn);
+		return () => document.removeEventListener('focusin', onFocusIn);
+	});
+
 	function submit() {
 		const body = draft.trim();
 		if (!body) return;

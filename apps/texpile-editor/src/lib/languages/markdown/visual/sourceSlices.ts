@@ -1,12 +1,10 @@
-// maps markdown-it's line-based token positions back to source offsets for orig capture
+// maps markdown-it's line-based token positions back to source offsets for block span capture
 import type { Token } from 'markdown-it';
 
 export type Cap = {
 	source: string;
 	lineStarts: number[];
-	seq: number;
 	prevEnd: number;
-	group: number;
 };
 
 // markdown-it turns \r\n and a bare \r into \n before it numbers lines, so the table has to

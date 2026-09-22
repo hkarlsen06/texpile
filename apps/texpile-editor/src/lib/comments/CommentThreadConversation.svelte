@@ -7,8 +7,7 @@
 	import type { CommentMessage, CommentThread } from '$lib/comments/log';
 	import { formatChange, isSuggestion, shownWords, suggestionKind } from '$lib/comments/suggest';
 	import { suggestionLabel } from '$lib/comments/suggestionLabel';
-	import { dialectOfPath } from '$lib/comments/anchorNormalize';
-	import { ATOM } from '$lib/comments/renderedWords';
+	import { regionParserForPath } from '$lib/comments/regionParser';
 	import { m } from '$lib/paraglide/messages';
 
 	let {
@@ -62,11 +61,11 @@
      that wide is unreadable. Prose wants a measure, not the space available -->
 {#snippet change(quote: string, restore: string)}
 	{@const kind = suggestionKind(quote, restore)}
-	{@const format = formatChange(quote, restore, dialectOfPath(thread.file))}
+	{@const format = formatChange(quote, restore, regionParserForPath(thread.file))}
 	<p class="leading-snug">
 		<span class="font-semibold">{suggestionLabel(thread.file, quote, restore)}</span>
 		{#if format}
-			<span class="text-muted line-clamp-3 italic">{format.words.replaceAll(ATOM, '…')}</span>
+			<span class="text-muted line-clamp-3 italic">{format.words.replaceAll('￼', '…')}</span>
 		{:else}
 			<span class="text-muted line-clamp-3 italic">{shownWords(kind === 'insert' ? quote : restore)}</span>
 			{#if kind === 'replace'}

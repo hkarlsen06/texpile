@@ -5,6 +5,7 @@ import type { EditorProps } from 'prosemirror-view';
 import { Fragment, Slice, type Node as PmNode } from 'prosemirror-model';
 import { typstToProseMirror } from './converter';
 import { typstCopyPlugin } from './clipboard';
+import { parseCarryPlugin } from '$lib/editor/visual/parseCarry';
 import { createSuggestPlugin } from '$lib/editor/visual/extensions/suggest/suggestPlugin';
 import { selectAllScoped } from '$lib/editor/visual/selectAllScoped';
 import { selectDocStart, selectDocEnd } from '$lib/editor/visual/selectDocBoundary';
@@ -27,6 +28,7 @@ import {
 	type ListAttributes
 } from 'prosemirror-flat-list';
 import { inputRules, textblockTypeInputRule, InputRule, undoInputRule, smartQuotes, ellipsis } from 'prosemirror-inputrules';
+import { selectFigureBackward, selectFigureForward } from '$lib/editor/visual/figureDeleteGuard';
 import { emDashRule, enDashRule, emDashUpgradeRule } from '$lib/editor/visual/extensions/inputrules/dashRules';
 import { search } from 'prosemirror-search';
 import { typSchema } from './schema';
@@ -51,6 +53,7 @@ import { createTocPlugin } from '$lib/editor/visual/extensions/tableofcontents/t
 import { createPersistentSelectionPlugin } from '$lib/editor/visual/extensions/persistentSelection/persistentSelectionPlugin';
 import { proofreadPlugin, spellClickBoundaryPlugin } from '$lib/editor/spellcheck/spellcheckplugin';
 import { createBoundaryClickPlugin } from '$lib/editor/visual/extensions/boundary-click-plugin';
+import { wordSelectionTrim } from '$lib/editor/visual/extensions/wordSelectionTrim';
 import { createBlockHandlePlugin } from '$lib/editor/visual/extensions/block-handle-plugin.svelte';
 import { wholeBlockDragPlugin } from '$lib/editor/visual/extensions/wholeBlockDrag';
 import { createNodeFlashPlugin } from '$lib/editor/visual/extensions/flash-plugin';
@@ -63,6 +66,7 @@ import { typstChipKind } from './extensions/typstChipKind';
 import { IncludeDocView } from '$lib/editor/visual/extensions/includedoc/includeDocView.svelte';
 import { pmComments } from '$lib/editor/visual/extensions/pmComments';
 import type { CommentAnchor } from '$lib/comments/anchor';
+import type { SourceAnchorFn } from '$lib/editor/visual/extensions/pmComments';
 
 // typst-flavored autoformat: = headings, ``` fences, - / + / 1. lists. Deliberately no task
 // rule: the serializer has no typst form for a checkbox, so a task list must not be creatable.
@@ -87,8 +91,8 @@ const typInputRules = [
 
 // Pasted TYPST SOURCE becomes rich nodes - the typst counterpart of the latex clipboard.
 // Gated on structural markers so ordinary prose still pastes as plain text; html-flavored
-// pastes keep ProseMirror's own path. Parse-time orig stamps are stripped: they describe the
-// clipboard bytes, not this document, and a stale slice must never reach the serializer.
+// pastes keep ProseMirror's own path. The parse knows nothing of this document, so the pasted
+// blocks carry no origins and are always written out afresh.
 const pasteTypstPlugin = new Plugin({
 	props: {
 		handlePaste(view, event) {
@@ -99,9 +103,7 @@ const pasteTypstPlugin = new Plugin({
 			try {
 				const { doc } = typstToProseMirror(text);
 				const blocks: PmNode[] = [];
-				doc.forEach((c) =>
-					blocks.push('orig' in (c.type.spec.attrs ?? {}) ? c.type.create({ ...c.attrs, orig: null }, c.content, c.marks) : c)
-				);
+				doc.forEach((c) => blocks.push(c));
 				if (blocks.length === 0) return false;
 				const frag = Fragment.fromArray(blocks);
 				// a single pasted paragraph merges inline into the current one; anything more
@@ -126,6 +128,8 @@ export type TypstEditorSetup = {
 	onOpenLink?: (href: string) => boolean;
 	onSelectComment?: (id: string) => void;
 	onAddComment?: (anchor: CommentAnchor | null) => void;
+	/** the selection as a range of the file; see pmComments */
+	sourceAnchor?: SourceAnchorFn;
 	addCommentLabel: string;
 };
 
@@ -139,9 +143,11 @@ export function typstEditorPlugins(setup: TypstEditorSetup): Plugin[] {
 		onOpenLink,
 		onSelectComment,
 		onAddComment,
+		sourceAnchor,
 		addCommentLabel
 	} = setup;
 	return [
+		parseCarryPlugin,
 		pasteTypstPlugin,
 		typstCopyPlugin,
 		gapCursor(),
@@ -159,6 +165,8 @@ export function typstEditorPlugins(setup: TypstEditorSetup): Plugin[] {
 		// The picker inserts typ_ref atoms (it keys off the mounted schema)
 		...createSuggestPlugin(),
 		drawnChipAtomsPlugin(),
+		// before the list keymap, whose Backspace and Delete act at a block edge and would join into the figure first
+		keymap({ Backspace: selectFigureBackward, Delete: selectFigureForward }),
 		keymap(listKeymap),
 		inputRules({ rules: typInputRules }),
 		keymap({
@@ -206,6 +214,7 @@ export function typstEditorPlugins(setup: TypstEditorSetup): Plugin[] {
 		spellClickBoundaryPlugin, // must precede proofreadPlugin; see its comment
 		proofreadPlugin,
 		createBoundaryClickPlugin(),
+		wordSelectionTrim(),
 		// the Notion-style + / drag / delete gutter, with the typst insert set
 		createBlockHandlePlugin({ items: TYP_BLOCK_INSERT_ITEMS }),
 		wholeBlockDragPlugin(),
@@ -215,6 +224,7 @@ export function typstEditorPlugins(setup: TypstEditorSetup): Plugin[] {
 		...pmComments({
 			onSelect: (id) => onSelectComment?.(id),
 			onAdd: onAddComment,
+			sourceAnchor,
 			addLabel: addCommentLabel
 		})
 	];

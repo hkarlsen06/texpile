@@ -65,8 +65,9 @@ export function buildSourceExtensions(deps: SourceSetupDeps): Extension[] {
 	return [
 		// gutters render in extension order: lint goes before lineNumbers so it lands on their left
 		...(!fileFor || /\.(tex|typ)$/i.test(fileFor) ? [lintGutter({ hoverTime: 0 })] : []),
-		// mounted only where the caller wants comments, so .bib and plain-text editors do not
-		// grow a gutter column for a feature they never show
+		// mounted only where the caller wants comments, so a standalone editor grows no gutter
+		// column for a feature nothing feeds. Suggestions ride in here too, and a file whose editor
+		// skips it still stages them, with nothing drawn to say so
 		...(onAddComment
 			? [
 					comments({

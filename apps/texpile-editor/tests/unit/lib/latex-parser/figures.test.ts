@@ -7,7 +7,7 @@ import { parseLatexFile, serializeLatexFile } from '$lib/workspace/latexRoundtri
 // inside figure* got promoted to a plain image node with no figureTemplate and serialized via
 // the synthetic single-figure fallback: wrong (unstarred) environment, illegal nesting inside
 // \begin{center} ("Not in outer par mode"), real \caption dropped. byte-level round-trip checks
-// can't see this because the `orig` verbatim layer masks untouched saves; it only surfaces once
+// can't see this because the verbatim layer masks untouched saves; it only surfaces once
 // the block regenerates. corpus repro: 1810.04805/related.tex.
 describe('figure* / table* starred float variants', () => {
 	const REAL_CAPTION = 'Overall pre-training and fine-tuning procedure.';
@@ -26,7 +26,7 @@ describe('figure* / table* starred float variants', () => {
 	});
 
 	// byte-identity is a property of the real pipeline (parseLatexFile/serializeLatexFile and its
-	// `orig` verbatim mechanism), not the raw converter/serializer: figureTemplate re-prints the
+	// verbatim mechanism), not the raw converter/serializer: figureTemplate re-prints the
 	// AST, valid but not byte-exact. that is why this file's bug was invisible to the earlier
 	// byte-fidelity corpus sweep, which only exercised the untouched-save path.
 	it('round-trips figure* byte-identically on an untouched save (real app pipeline)', () => {
@@ -35,7 +35,7 @@ describe('figure* / table* starred float variants', () => {
 		expect(serializeLatexFile(parsed, parsed.doc)).toBe(file);
 	});
 
-	// latexToProseMirror alone never fills `orig.norm` (only parseLatexFile does), so this doc
+	// latexToProseMirror alone records no parse origins (only parseLatexFile does), so this doc
 	// always serializes through the deterministic path, the exact path the pre-fix bug broke on
 	// any real edit
 	it('serializes a starred, correctly-nested, caption-preserving figure* through the deterministic path', () => {

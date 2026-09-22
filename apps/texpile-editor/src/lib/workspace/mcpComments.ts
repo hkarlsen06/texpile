@@ -7,7 +7,7 @@ import { readTextFile, toLf } from './fileSystem';
 import { relativeTo } from '$lib/comments/store.svelte';
 import { inOpenTree, resolveInWorkspace } from './mcpWorkspacePath';
 import { fileKind, hasVisualMode, isRawTextKind } from './documentBuffer.svelte';
-import { dialectOfPath, prepareLoose, resolveAnchor, resolveAnchorLooseIn, type LooseHaystack } from '$lib/comments/anchor';
+import { resolveAnchor } from '$lib/comments/anchor';
 import { lineOf, locateQuote } from '$lib/comments/anchorLocate';
 import type { CommentsController } from './commentsController.svelte';
 import type { CommentThread } from '$lib/comments/log';
@@ -92,7 +92,7 @@ export async function readTarget(deps: McpCommentDeps, rel: string): Promise<{ o
 export function locate(src: FileText, rel: string, a: Args) {
 	const quote = str(a.quote);
 	if (!quote) return fail('quote is required');
-	const r = locateQuote(src.text, { quote, prefix: str(a.prefix), suffix: str(a.suffix), line: num(a.line) }, dialectOfPath(rel));
+	const r = locateQuote(src.text, { quote, prefix: str(a.prefix), suffix: str(a.suffix), line: num(a.line) });
 	if (r.ok) return r;
 	const reason = src.unsaved
 		? `${r.reason} (the file is open with unsaved changes, so the search ran against the editor buffer, not disk; see get_unsaved)`
@@ -113,13 +113,13 @@ type ThreadReport = {
 };
 
 /** where a thread sits in `text`, or null when its quote is gone */
-function place(text: string, t: CommentThread, hay: () => LooseHaystack) {
+function place(text: string, t: CommentThread) {
 	const hit = isSuggestion(t)
 		? (() => {
 				const at = resolveExactly(text, t.anchor);
 				return at && { ...at, exact: true, weak: false };
 			})()
-		: (resolveAnchor(text, t.anchor) ?? resolveAnchorLooseIn(hay(), t.anchor));
+		: resolveAnchor(text, t.anchor);
 	if (!hit) return null;
 	return {
 		line: lineOf(text, hit.from),
@@ -144,17 +144,8 @@ export async function commentsPayload(
 	// counts follow the path filter, or a one-file reply reads as a truncated workspace one
 	const inScope = ctl.threads.filter((t) => !filter || t.file === filter);
 	const wanted = inScope.filter((t) => includeResolved || !t.resolved);
-	// each file read and normalized once, however many threads sit on it
+	// each file read once, however many threads sit on it
 	const texts = new Map<string, FileText | null>();
-	const hays = new Map<string, LooseHaystack>();
-	function hayOf(file: string, text: string): LooseHaystack {
-		let h = hays.get(file);
-		if (!h) {
-			h = prepareLoose(text, dialectOfPath(file));
-			hays.set(file, h);
-		}
-		return h;
-	}
 	const threads: ThreadReport[] = [];
 	for (const t of wanted) {
 		if (!texts.has(t.file)) texts.set(t.file, await textOf(deps, t.file));
@@ -166,7 +157,7 @@ export async function commentsPayload(
 			resolved: t.resolved,
 			fileExists: src !== null,
 			// null means detached: the quote is gone from the file, or the file is gone
-			placed: src ? place(src.text, t, () => hayOf(t.file, src.text)) : null,
+			placed: src ? place(src.text, t) : null,
 			// the open file with unsaved changes: lines refer to the buffer, not to disk
 			unsaved: src?.unsaved ?? false,
 			suggestion: t.restore === undefined ? null : { oldWords: t.restore, decision: t.decision ?? null },

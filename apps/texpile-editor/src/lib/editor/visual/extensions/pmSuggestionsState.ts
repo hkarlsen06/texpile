@@ -19,7 +19,9 @@ export type PmSuggestionsMeta =
 export const pmSuggestionsKey = new PluginKey<PmSuggestionsState>('texpile-suggestions');
 
 export function hasOldWords(r: PmSuggestionRange): boolean {
-	return !!r.restore && !r.partial && !r.format && r.old.length > 0;
+	// blocks that are gone hang at a join rather than beside a caret, so none of the caret's own
+	// machinery (stepping over them, typing on a side of them) has anything to act on
+	return !!r.restore && !r.partial && !r.format && !r.gone && !r.node && !r.brk && r.old.length > 0;
 }
 
 export function struckAt(state: EditorState, at: number): PmSuggestionRange[] {

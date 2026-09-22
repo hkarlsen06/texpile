@@ -26,6 +26,7 @@ import { pasteUuidFixPlugin } from '$lib/editor/visual/extensions/paste-uuid-fix
 import { latexClipboardPlugin } from '$lib/editor/visual/extensions/latexClipboard';
 import { createListPlugins, listInputRules, listKeymap, createIndentListCommand, createDedentListCommand } from 'prosemirror-flat-list';
 import { inputRules, InputRule, smartQuotes, ellipsis, undoInputRule } from 'prosemirror-inputrules';
+import { selectFigureBackward, selectFigureForward } from '$lib/editor/visual/figureDeleteGuard';
 import { placeholderPlugin } from '$lib/editor/visual/extensions/placeholderplugin';
 import { tablePlaceholderPlugin } from '$lib/editor/visual/extensions/table/tablePlaceholderPlugin';
 import { search } from 'prosemirror-search';
@@ -54,6 +55,7 @@ import { BibliographyNodeView } from '$lib/editor/visual/extensions/bibliography
 import { environmentView } from '$lib/languages/latex/visual/extensions/environment/environmentView.svelte';
 import { IncludeDocView } from '$lib/editor/visual/extensions/includedoc/includeDocView.svelte';
 import { createBoundaryClickPlugin } from '$lib/editor/visual/extensions/boundary-click-plugin';
+import { wordSelectionTrim } from '$lib/editor/visual/extensions/wordSelectionTrim';
 import { createBlockHandlePlugin } from '$lib/editor/visual/extensions/block-handle-plugin.svelte';
 import { wholeBlockDragPlugin } from '$lib/editor/visual/extensions/wholeBlockDrag';
 import { createNodeFlashPlugin } from '$lib/editor/visual/extensions/flash-plugin';
@@ -65,6 +67,8 @@ import { createLinkPlugin } from '$lib/editor/visual/extensions/link';
 import { pmComments } from '$lib/editor/visual/extensions/pmComments';
 import { listRuleWithoutIndent } from './listItemIndent';
 import type { CommentAnchor } from '$lib/comments/anchor';
+import type { SourceAnchorFn } from '$lib/editor/visual/extensions/pmComments';
+import { parseCarryPlugin } from '$lib/editor/visual/parseCarry';
 
 export type LatexEditorSetup = {
 	/** resolved by the caller's dynamic import so mathlive stays off the critical path */
@@ -75,13 +79,25 @@ export type LatexEditorSetup = {
 	onHistoryBoundary?: (dir: 'undo' | 'redo') => boolean;
 	onSelectComment?: (id: string) => void;
 	onAddComment?: (anchor: CommentAnchor | null) => void;
+	/** the selection as a range of the file; see pmComments */
+	sourceAnchor?: SourceAnchorFn;
 	addCommentLabel: string;
 };
 
 export function latexEditorPlugins(setup: LatexEditorSetup): Plugin[] {
-	const { mathlivePlugin, mlarrowHandlers, imageDir, placeholder, onHistoryBoundary, onSelectComment, onAddComment, addCommentLabel } =
-		setup;
+	const {
+		mathlivePlugin,
+		mlarrowHandlers,
+		imageDir,
+		placeholder,
+		onHistoryBoundary,
+		onSelectComment,
+		onAddComment,
+		sourceAnchor,
+		addCommentLabel
+	} = setup;
 	return [
+		parseCarryPlugin,
 		gapCursor(),
 		// drop cursor is inline-styled (not CSS-targetable) and its default black vanishes on dark
 		dropCursor({ color: 'var(--color-primary-500)', width: 2 }),
@@ -94,6 +110,8 @@ export function latexEditorPlugins(setup: LatexEditorSetup): Plugin[] {
 		history(),
 		...createSuggestPlugin(),
 		drawnChipAtomsPlugin(),
+		// before the list keymap, whose Backspace and Delete act at a block edge and would join into the figure first
+		keymap({ Backspace: selectFigureBackward, Delete: selectFigureForward }),
 		keymap(listKeymap),
 		inputRules({
 			rules: [
@@ -172,6 +190,7 @@ export function latexEditorPlugins(setup: LatexEditorSetup): Plugin[] {
 		proofreadPlugin,
 		spellChipPlugin,
 		createBoundaryClickPlugin(),
+		wordSelectionTrim(),
 		createBlockHandlePlugin(),
 		wholeBlockDragPlugin(),
 		footnoteNumbersPlugin(),
@@ -179,6 +198,7 @@ export function latexEditorPlugins(setup: LatexEditorSetup): Plugin[] {
 		...pmComments({
 			onSelect: (id) => onSelectComment?.(id),
 			onAdd: onAddComment,
+			sourceAnchor,
 			addLabel: addCommentLabel
 		})
 	];

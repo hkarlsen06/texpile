@@ -7,11 +7,10 @@
 	import type { Node as PMNode } from 'prosemirror-model';
 	import type { Dialect } from '$lib/editor/visual/dialect';
 	import { sanitizeLabel } from '$lib/editor/visual/label';
-	import { DEFAULT_FIGURE_FRACTION } from './figureDefaults';
+	import { DEFAULT_FIGURE_FRACTION, FIGURE_SIZE_STEP } from './figureDefaults';
 	import { labelTaken } from '$lib/editor/visual/labelTaken';
 	import { repointRefs } from '$lib/editor/visual/repointRefs';
 	import { templateFeaturesStore } from '$lib/stores/editorStore';
-	import { settings } from '$lib/settings';
 	import { m } from '$lib/paraglide/messages';
 
 	type Props = {
@@ -70,8 +69,6 @@
 		view.dispatch(tr);
 	}
 
-	// size slider: width as a fraction of \textwidth
-	const sizeStep = $derived(settings.current.figureResizeStep || 0.25);
 	// fraction from a prior resize (width/maxWidth), else parsed \includegraphics options, else full width
 	const sizePercent = $derived(Math.round(currentFraction() * 100));
 
@@ -163,9 +160,9 @@
 			<input
 				type="range"
 				class="accent-primary-500 w-full"
-				min={Math.round(sizeStep * 100)}
+				min={Math.round(FIGURE_SIZE_STEP * 100)}
 				max={100}
-				step={Math.round(sizeStep * 100)}
+				step={Math.round(FIGURE_SIZE_STEP * 100)}
 				value={sizePercent}
 				oninput={(e) => setSizePercent(Number((e.currentTarget as HTMLInputElement).value))}
 			/>

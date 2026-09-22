@@ -21,9 +21,6 @@ describe('mdSchema separation', () => {
 		for (const m of ['link', 'em', 'strong', 'code', 's']) {
 			expect(mdSchema.marks[m]).toBeDefined();
 		}
-		// the orig verbatim layer's attrs survive the trim
-		expect(mdSchema.nodes.paragraph.spec.attrs).toHaveProperty('orig');
-		expect(mdSchema.nodes.doc.spec.attrs).toHaveProperty('docTail');
 	});
 
 	// the insert paths (drop/paste/toolbar) create images on the schema default, so this default

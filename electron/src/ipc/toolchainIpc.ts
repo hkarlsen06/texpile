@@ -23,7 +23,9 @@ export function registerToolchainIpc(): void {
 		try {
 			exists = fs.statSync(f.absolute).isDirectory();
 			real = fs.realpathSync.native(f.absolute);
-		} catch {}
+		} catch {
+			/* not there, or not readable: exists stays false */
+		}
 		return { ...f, exists, real };
 	});
 }

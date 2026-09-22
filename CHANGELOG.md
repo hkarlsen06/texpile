@@ -5,6 +5,10 @@ Release notes for Texpile Desktop. Add notes under `## [Unreleased]` as you work
 
 ## [Unreleased]
 
+- refactor: untouched blocks are written back from the source map, not from a verbatim attr on every block
+
+## [1.2.0] - 2026-09-20
+
 - feat: suggestion mode
 - feat: side by side comments
 - feat: collaboration tab in perferences
@@ -13,7 +17,7 @@ Release notes for Texpile Desktop. Add notes under `## [Unreleased]` as you work
 - feat: control/command-shift-t reopens closed tab
 - feat: justified text in the visual editor (Knuth-Plass line breaks and hyphenation)
 - feat: transparent themes available
-- feat: a welcome screen on first launch, and in the Help menu whenever you want it again
+- feat: a welcome screen
 - feat: Refine rewrites selected text with an AI agent already on your computer
 - fix: version check before collaborations
 - fix: up and down arrows keep their column in the visual editor

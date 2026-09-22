@@ -1,6 +1,7 @@
 // a source edit applied to the mounted visual editor as one undoable step
 import type { EditorView as PMEditorView } from 'prosemirror-view';
-import { computeBlockPatch, syncOrigAttrs } from '$lib/editor/visual/blockPatch';
+import { computeBlockPatch, syncParseAttrs } from '$lib/editor/visual/blockPatch';
+import { adoptParse } from '$lib/editor/visual/sourceSpans';
 import type { DocumentBuffer } from '$lib/workspace/documentBuffer.svelte';
 import type { ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
 
@@ -20,8 +21,13 @@ export async function patchVisualFromSource(
 	const patch = computeBlockPatch(view.state.doc, parsed.doc);
 	const tr = view.state.tr;
 	if (patch) tr.replaceWith(patch.from, patch.to, patch.nodes);
-	syncOrigAttrs(tr, parsed.doc);
-	if (!tr.steps.length) return false;
-	view.dispatch(tr);
+	syncParseAttrs(tr, parsed.doc);
+	if (tr.steps.length) view.dispatch(tr);
+	// the patched document is the parse's from here on, even one the patch left as it was: the
+	// same content may now come from other bytes (a restored "..." the parser reads as its
+	// ellipsis), so a document with no step to dispatch is written out here, the way a dispatch
+	// would have it written, and the text takes those bytes
+	adoptParse(view.state.doc, parsed.origins);
+	if (!tr.steps.length) doc.onVisualChange(view.state.doc);
 	return true;
 }

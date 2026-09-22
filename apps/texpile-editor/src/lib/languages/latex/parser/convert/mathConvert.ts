@@ -3,7 +3,36 @@ import type { Node, Macro, Environment } from '@unified-latex/unified-latex-type
 import { printRaw } from '@unified-latex/unified-latex-util-print-raw';
 import { getTextContent } from '../ast-utils';
 import { buildNode, textNode, type PmNode } from '../builders';
-import { mathBodyRawSource } from './origCapture';
+import { macroSpan, mathBodyRawSpan, positionSpan, type RawSpan } from './origCapture';
+import { bytesSpan, concatSpans, sliceSpans, standsFor, type LeafSpan } from '$lib/editor/visual/sourceSpans';
+
+type MappedText = { text: string; spans: LeafSpan[] };
+
+/** the slice with each macro's bytes cut out; null when one of them has no place in it */
+function withoutMacros(body: RawSpan, macros: Macro[]): MappedText | null {
+	const parts: { len: number; spans: LeafSpan[] }[] = [];
+	let text = '';
+	let at = body.from;
+	const piece = (to: number) => {
+		const p = body.text.slice(at - body.from, to - body.from);
+		parts.push({ len: p.length, spans: bytesSpan(p.length, at) });
+		text += p;
+	};
+	for (const m of macros) {
+		const span = macroSpan(m);
+		if (!span || span.from < at || span.to > body.to) return null;
+		piece(span.from);
+		at = span.to;
+	}
+	piece(body.to);
+	return { text, spans: concatSpans(parts) };
+}
+
+function trimmed(t: MappedText): MappedText {
+	const lead = t.text.length - t.text.trimStart().length;
+	const text = t.text.trim();
+	return { text, spans: sliceSpans(t.text, t.spans, lead, lead + text.length) };
+}
 
 export function createBlockMath(env: Environment, starred: boolean, environment?: string): PmNode[] {
 	// one slot per row (rows split at \\), so a label on the second row stays on the second row
@@ -11,17 +40,17 @@ export function createBlockMath(env: Environment, starred: boolean, environment?
 	// unlabelled row, and \ref then pointed at the wrong equation
 	const lineLabels: string[] = [];
 	const contentWithoutLabel: Node[] = [];
+	const labelMacros: Macro[] = [];
 	let row = 0;
-	let anyLabel = false;
 
 	for (const node of env.content) {
 		if (node.type === 'macro' && node.content === 'label') {
+			labelMacros.push(node as Macro);
 			const mandatoryArgs = (node as Macro).args?.filter((arg) => arg.openMark === '{') || [];
 			const labelText = mandatoryArgs[0] ? getTextContent(mandatoryArgs[0].content) : '';
 			if (labelText) {
 				while (lineLabels.length <= row) lineLabels.push('');
 				lineLabels[row] = labelText;
-				anyLabel = true;
 			}
 		} else {
 			// unified-latex gives the row break a content of '\\' OR the whitespace it swallowed
@@ -30,11 +59,12 @@ export function createBlockMath(env: Environment, starred: boolean, environment?
 		}
 	}
 
-	// slice the exact source only when NO labels were extracted (the label text would remain in
-	// the slice and the serializer would re-add it, duplicating). printRaw is the fallback; the
-	// regex strip below keeps both paths label-free.
-	let mathContent =
-		(!anyLabel ? mathBodyRawSource(env, [`\\begin{${env.env}}`], [`\\end{${env.env}}`]) : null) ?? printRaw(contentWithoutLabel);
+	// the exact source with the labels cut out (the serializer puts them back from lineLabels);
+	// printRaw only when the slice cannot be trusted
+	const body = mathBodyRawSpan(env, [`\\begin{${env.env}}`], [`\\end{${env.env}}`]);
+	const sliced = body ? withoutMacros(body, labelMacros) : null;
+	let mathContent = sliced?.text ?? printRaw(contentWithoutLabel);
+	let spans: LeafSpan[] | null = sliced?.spans ?? null;
 
 	// safety net for labels the tokenizer left embedded in string content, where no AST exists
 	const labelRegex = /\\label\s*\{([^}]+)\}/g;
@@ -44,7 +74,11 @@ export function createBlockMath(env: Environment, starred: boolean, environment?
 			lineLabels.push(match[1]);
 		}
 	}
-	mathContent = mathContent.replace(/\\label\s*\{[^}]+\}/g, '');
+	const stripped = mathContent.replace(/\\label\s*\{[^}]+\}/g, '');
+	if (stripped !== mathContent) {
+		mathContent = stripped;
+		spans = null;
+	}
 
 	// the editor expects these environments wrapped in the content string
 	const MULTILINE_ENVS = [
@@ -62,7 +96,23 @@ export function createBlockMath(env: Environment, starred: boolean, environment?
 		'multline*'
 	];
 	if (MULTILINE_ENVS.includes(env.env)) {
-		mathContent = `\\begin{${env.env}}${mathContent}\\end{${env.env}}`;
+		const open = `\\begin{${env.env}}`;
+		const close = `\\end{${env.env}}`;
+		// the wrapper text stands for the source's own \begin and \end
+		const whole = positionSpan(env);
+		spans =
+			spans && body && whole
+				? concatSpans([
+						{ len: open.length, spans: standsFor(open.length, whole.from, body.from) },
+						{ len: mathContent.length, spans },
+						{ len: close.length, spans: standsFor(close.length, body.to, whole.to) }
+					])
+				: null;
+		mathContent = `${open}${mathContent}${close}`;
+	} else if (spans) {
+		const t = trimmed({ text: mathContent, spans });
+		mathContent = t.text;
+		spans = t.spans;
 	}
 
 	// first label becomes the main label, rest stay in lineLabels
@@ -72,7 +122,7 @@ export function createBlockMath(env: Environment, starred: boolean, environment?
 		buildNode(
 			'block_math',
 			{ label, numbered: !starred, environment: environment || null, lineLabels, starredEnv: env.env === 'equation*' },
-			[textNode(String(mathContent || '').trim())]
+			[textNode(String(mathContent || '').trim(), null, spans)]
 		)
 	];
 }

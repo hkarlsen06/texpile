@@ -11,9 +11,9 @@ import { collabGuest } from '$lib/collab/guestStore.svelte';
 import { collabHost } from '$lib/collab/hostStore.svelte';
 import { isSafeRel } from '$lib/collab/protocol';
 import { editorViewStore, sourceCmView } from '$lib/stores/editorStore';
-import { buildPmAnchor, buildPmPoint, pmCommentsKey, revealPmComment } from '$lib/editor/visual/extensions/pmComments';
+import { pmCommentsKey, revealPmComment, sourceAnchorFor } from '$lib/editor/visual/extensions/pmComments';
 import { liveCommentRanges } from '$lib/editor/visual/extensions/comments';
-import { buildAnchor, dialectOfPath, toSourceAnchor, type CommentAnchor } from '$lib/comments/anchor';
+import { buildAnchor, type CommentAnchor } from '$lib/comments/anchor';
 import { flatFiles } from '$lib/workspace/treeRefresh';
 import { relativeTo } from '$lib/comments/store.svelte';
 import { hasVisualMode, type DocumentBuffer, type FileKind } from '$lib/workspace/documentBuffer.svelte';
@@ -145,6 +145,9 @@ export class WorkspaceComments {
 			// re-entering must re-search the current text rather than replay the pre-mount list (which
 			// after edits can even point past the end of the file).
 			void d.modes.mode;
+			// and on every document the visual editor swaps in: the plugin's mapped ranges go with the
+			// old one, and the ranges the new one is placed from must be of the text as it is now
+			void d.doc.visualDoc;
 			this.ctl.reanchor(
 				d.doc.path,
 				untrack(() => this.activeText())
@@ -199,14 +202,12 @@ export class WorkspaceComments {
 		const out = new Map<string, CommentAnchor>();
 		if (this.d.modes.mode === 'visual' && hasVisualMode(this.d.kind())) {
 			const v = editorViewStore.current;
-			if (!v) return null;
-			const dialect = dialectOfPath(this.d.doc.path ?? '');
+			// the map describes texSource; another text has no map to read
+			if (!v || text !== this.d.doc.texSource) return null;
 			for (const r of pmCommentsKey.getState(v.state)?.ranges ?? []) {
 				if (r.resolved) continue;
-				const rendered = r.to > r.from ? buildPmAnchor(v.state.doc, r.from, r.to) : buildPmPoint(v.state.doc, r.from);
-				if (!rendered) continue;
-				const converted = toSourceAnchor(text, dialect, rendered);
-				if (converted.tier === 'precise') out.set(r.id, converted.anchor);
+				const anchor = sourceAnchorFor(v.state.doc, this.d.doc.sourceMap, text, r.from, r.to);
+				if (anchor) out.set(r.id, anchor);
 			}
 			return out;
 		}

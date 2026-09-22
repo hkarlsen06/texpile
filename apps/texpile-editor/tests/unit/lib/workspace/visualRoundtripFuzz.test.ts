@@ -4,173 +4,14 @@ import type { Node as PMNode } from 'prosemirror-model';
 import { EditorState } from 'prosemirror-state';
 import type { ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
 import { padTables } from '$lib/editor/visual/padTables';
-import { formatImage } from '$lib/languages/markdown/visual/inlineSyntax';
+import { printedLine, visibleLines, wordsOfLine } from '$lib/editor/visual/docShape';
 import { FORMATS, pick, prng, randomEdit, typed, type Format } from './visualEditsFuzz';
 
 const RUNS = Number(process.env.VISUAL_FUZZ_RUNS ?? 20);
 
-type Cell = { ch: string; marks: string[] };
-
-function visible(doc: PMNode, format: Format['name']): string[] {
-	const lines: string[] = [];
-	function cellsOf(node: PMNode): Cell[] {
-		const plain = format === 'md' && node.type.name === 'image';
-		const cells: Cell[] = [];
-		node.forEach((child) => {
-			if (child.isText) {
-				for (const ch of child.text!) {
-					const space = /\s/.test(ch);
-					const marks = plain || space ? [] : child.marks.map((m) => (m.type.name === 'link' ? `link(${m.attrs.href})` : m.type.name));
-					cells.push({ ch: space ? ' ' : ch, marks });
-				}
-			} else if (child.type.name === 'hard_break') {
-				cells.push({ ch: plain ? ' ' : '⏎', marks: [] });
-			} else {
-				const { orig: _orig, ...attrs } = child.attrs as Record<string, unknown>;
-				cells.push({ ch: `‹${child.type.name}:${child.textContent.replace(/\s+/g, ' ').trim() || JSON.stringify(attrs)}›`, marks: [] });
-			}
-		});
-		return cells;
-	}
-	function render(cells: Cell[]): string {
-		const word = (c: string) => /^[\p{L}\p{N}]$/u.test(c);
-		const emphasis = (m: string) => /^(strong|em|s)$/.test(m);
-		const head = cells.findIndex((c) => c.ch !== ' ' && c.ch !== '⏎' && !c.marks.includes('item_label'));
-		if (head >= 0) for (let i = head; i < cells.length; i++) cells[i].marks = cells[i].marks.filter((m) => m !== 'item_label');
-		if (format === 'md') {
-			for (let i = 0; i < cells.length;) {
-				if (!word(cells[i].ch)) {
-					cells[i].marks = cells[i].marks.filter((m) => !emphasis(m));
-					i++;
-					continue;
-				}
-				let j = i;
-				while (j < cells.length && word(cells[j].ch)) j++;
-				const key = (k: number) => cells[k].marks.filter(emphasis).sort().join('+');
-				if (cells.slice(i, j).some((_, k) => key(i + k) !== key(i)))
-					for (let k = i; k < j; k++) cells[k].marks = cells[k].marks.filter((m) => !emphasis(m));
-				i = j;
-			}
-		}
-		let out = '';
-		let key = '';
-		for (const { ch, marks } of cells) {
-			const k = [...marks].sort().join('+');
-			if (ch !== ' ' && ch !== '⏎' && k !== key) {
-				out += `«${k}»`;
-				key = k;
-			}
-			out += ch;
-		}
-		out = out
-			.replace(/\s+/g, ' ')
-			.replace(/ ?⏎ ?/g, '⏎')
-			.replace(/›(«[^»]*»)? /g, '›$1')
-			.replace(/ («[^»]*»)?‹/g, '$1‹')
-			.trim()
-			.replace(/^⏎+/, '');
-		if (format === 'md') out = out.replace(/⏎+$/, '');
-		return out.replace(/^«»/, '');
-	}
-	function push(path: string, name: string, line: string) {
-		let text = line;
-		if (!text) return;
-		const comments = format === 'typ' && name === 'paragraph' ? /^(‹inline_latex:\/[/*][^‹›]*›⏎?)+/.exec(text) : null;
-		if (comments && comments[0].length < text.length) {
-			push(path, name, comments[0]);
-			text = text.slice(comments[0].length);
-		}
-		if (name === 'paragraph' && /^(‹inline_latex:[^‹›]*›⏎?)+$/.test(text)) {
-			lines.push(`${path}raw_latex: ${text.replace(/‹inline_latex:|›|⏎|\s/g, '')}`);
-		} else if (name === 'raw_latex') lines.push(`${path}raw_latex: ${text.replace(/\s/g, '')}`);
-		else lines.push(`${path}${name}: ${text}`);
-	}
-	function typstDisplay(child: PMNode, path: string): boolean {
-		const equation = (tex: string, label: unknown) => `${path}block_math: ${tex.replace(/\s+/g, ' ').trim()}${label ? ` <${label}>` : ''}`;
-		if (child.type.name === 'block_math') {
-			lines.push(equation(child.textContent, child.attrs.label));
-			return true;
-		}
-		if (child.type.name !== 'paragraph') return false;
-		const kids: PMNode[] = [];
-		child.forEach((c) => {
-			if (!c.isText || c.text!.trim()) kids.push(c);
-		});
-		const lead = kids.findIndex((c) => !(c.type.name === 'inline_latex' && /^\/[/*]/.test(c.textContent)));
-		const [math, label, ...more] = lead < 0 ? [] : kids.slice(lead);
-		if (math?.type.name !== 'inline_math' || !/^\s/.test(String(math.attrs.typst ?? '')) || more.length) return false;
-		if (label && !(label.type.name === 'inline_latex' && /^<[^<>]*>$/.test(label.textContent))) return false;
-		const comments = kids.slice(0, lead).map((c) => c.textContent);
-		if (comments.length) push(path, 'raw_latex', comments.join(''));
-		lines.push(equation(math.textContent, label?.textContent.slice(1, -1)));
-		return true;
-	}
-	function walkBlocks(node: PMNode, path: string) {
-		node.forEach((child, _offset, index) => {
-			const name = child.type.name;
-			if (format === 'typ' && typstDisplay(child, path)) return;
-			if (node.type.name === 'list' && index > 0 && child.isTextblock) {
-				const cells = cellsOf(child).map((c) => ({ ...c, marks: c.marks.filter((m) => m !== 'item_label') }));
-				push(path, name, render(cells));
-				return;
-			}
-			if (child.type.spec.code) {
-				push(path, name, child.textContent.replace(/\s+/g, ' ').trim());
-			} else if (format === 'md' && name === 'image') {
-				push(
-					path,
-					'paragraph',
-					`‹inline_latex:${formatImage(String(child.attrs.alt ?? ''), String(child.attrs.src ?? ''), render(cellsOf(child)))}›`
-				);
-			} else if (format === 'typ' && name === 'image' && child.attrs.showCaption === false) {
-				lines.push(`${path}${name}`);
-			} else if (format === 'md' && /^table_(cell|header)$/.test(name)) {
-				const cells: Cell[] = [];
-				child.forEach((p) => {
-					const own = cellsOf(p);
-					if (!own.some((c) => c.ch !== ' ' && c.ch !== '⏎')) return;
-					if (cells.length) cells.push({ ch: '⏎', marks: [] });
-					cells.push(...own);
-				});
-				push(`${path}${name}>`, 'paragraph', render(cells));
-			} else if (child.isTextblock) {
-				push(path, `${name}${child.attrs.level ?? ''}`, render(cellsOf(child)));
-			} else if (child.isLeaf || child.isAtom) {
-				lines.push(`${path}${name}`);
-			} else {
-				walkBlocks(child, `${path}${name}>`);
-			}
-		});
-	}
-	walkBlocks(doc, '');
-	return lines.reduce<string[]>((out, line) => {
-		const prev = out[out.length - 1];
-		const raw = /^(.*?)raw_latex: (.*)$/;
-		const a = prev && raw.exec(prev);
-		const b = raw.exec(line);
-		if (a && b && a[1] === b[1]) out[out.length - 1] = `${a[1]}raw_latex: ${a[2]}${b[2]}`;
-		else out.push(line);
-		return out;
-	}, []);
-}
-
-function printed(line: string, format: Format['name']): string {
-	if (format === 'tex')
-		return line.replace(/’/g, "'").replace(/‘/g, '`').replace(/“/g, '``').replace(/”/g, "''").replace(/—/g, '---').replace(/–/g, '--');
-	if (format === 'typ') return line.replace(/…/g, '...').replace(/—/g, '---').replace(/–/g, '--');
-	return line;
-}
-
-function wordsOf(line: string): string {
-	return line
-		.slice(line.indexOf(': ') + 2)
-		.replace(/«[^»]*»|‹[a-z_]+:|›/g, '')
-		.replace(/\s+/g, '');
-}
-
 function firstDiff(a: string[], b: string[], byWords: boolean): string {
-	const aw = byWords ? a.map(wordsOf).join('') : '';
-	const bw = byWords ? b.map(wordsOf).join('') : '';
+	const aw = byWords ? a.map(wordsOfLine).join('') : '';
+	const bw = byWords ? b.map(wordsOfLine).join('') : '';
 	if (byWords) {
 		let i = 0;
 		while (i < aw.length && aw[i] === bw[i]) i++;
@@ -194,7 +35,9 @@ function textDiff(a: string, b: string): string {
 	while (s < a.length && a[s] === b[s]) s++;
 	let e = 0;
 	while (e < a.length - s && e < b.length - s && a[a.length - 1 - e] === b[b.length - 1 - e]) e++;
-	const cut = (x: string) => JSON.stringify(x.slice(Math.max(0, s - 40), Math.min(x.length - e + 20, s + 300)));
+	// VISUAL_FUZZ_CONTEXT widens the window shown around the first difference
+	const width = Number(process.env.VISUAL_FUZZ_CONTEXT ?? 300);
+	const cut = (x: string) => JSON.stringify(x.slice(Math.max(0, s - 40), Math.min(x.length - e + 20, s + width)));
 	return `  was:    ${cut(a)}\n  became: ${cut(b)}`;
 }
 
@@ -223,10 +66,10 @@ function reopenFailure(f: Format, parsed: ParsedLatexFile, doc: PMNode): Failure
 	}
 	const again = f.parse(saved);
 	if (again.preamble !== parsed.preamble) return { kind: 'preamble changes', detail: textDiff(parsed.preamble, again.preamble) };
-	const want = visible(doc, f.name).map((l) => printed(l, f.name));
-	const got = visible(padTables(again.doc), f.name).map((l) => printed(l, f.name));
-	const ww = want.map(wordsOf).join('');
-	const gw = got.map(wordsOf).join('');
+	const want = visibleLines(doc, f.name).map((l) => printedLine(l, f.name));
+	const got = visibleLines(padTables(again.doc), f.name).map((l) => printedLine(l, f.name));
+	const ww = want.map(wordsOfLine).join('');
+	const gw = got.map(wordsOfLine).join('');
 	if (ww !== gw) return { kind: 'words change on reopen', detail: firstDiff(want, got, true), shape: shapeOf(ww, gw) };
 	if (want.join('\n') !== got.join('\n'))
 		return {
@@ -250,6 +93,11 @@ function chain(f: Format, source: string, seed: number, failures: Failure[]) {
 	let typedInSource = false;
 	for (let round = 0; round < 4; round++) {
 		const parsed = f.parse(text);
+		if (parsed.origins.defects.length > 0) {
+			const shown = parsed.origins.defects.slice(0, 3).map((d) => `  ${d.kind} ${d.srcFrom}..${d.srcTo}: ${d.detail}`);
+			failures.push({ kind: 'the map contradicts the bytes', detail: `${parsed.origins.defects.length} defects\n${shown.join('\n')}` });
+			return;
+		}
 		const plain = f.serialize(parsed, parsed.doc);
 		if (plain !== text) {
 			failures.push({ kind: 'opening changes the file', detail: textDiff(text, plain) });
@@ -263,7 +111,8 @@ function chain(f: Format, source: string, seed: number, failures: Failure[]) {
 		}
 		const states = [EditorState.create({ doc: opened })];
 		const labels: string[] = [];
-		const steps = 1 + Math.floor(rnd() * 8);
+		// VISUAL_FUZZ_STEPS raises the most edits a round makes, for a heavier session
+		const steps = 1 + Math.floor(rnd() * Number(process.env.VISUAL_FUZZ_STEPS ?? 8));
 		for (let i = 0; i < steps; i++) {
 			const edit = randomEdit(states[states.length - 1], rnd);
 			if (!edit) continue;

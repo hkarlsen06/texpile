@@ -31,7 +31,7 @@ import type { Starter, ImportedFile } from '$lib/workspace/starters';
 import type { CommentMessage, CommentThread } from '$lib/comments/log';
 import type { CommentAnchor } from '$lib/comments/anchor';
 import { editorViewStore, sourceCmView } from '$lib/stores/editorStore';
-import { buildPmAnchor } from '$lib/editor/visual/extensions/pmComments';
+import { sourceAnchorFor } from '$lib/editor/visual/extensions/pmComments';
 import type { Node as PMNode } from 'prosemirror-model';
 import { toaster } from '$lib/modals/toaster-svelte';
 import { m } from '$lib/paraglide/messages';
@@ -95,7 +95,7 @@ export function makeMainActions(d: ActionSurfaceDeps) {
 				const view = editorViewStore.current;
 				const sel = view?.state.selection;
 				if (view && sel && !sel.empty) {
-					const anchor = buildPmAnchor(view.state.doc, sel.from, sel.to);
+					const anchor = sourceAnchorFor(view.state.doc, d.wsdoc.doc.sourceMap, d.wsdoc.doc.texSource, sel.from, sel.to);
 					if (anchor) {
 						void d.commentsCtl.reattachAnchored(thread, anchor);
 						return;

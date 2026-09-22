@@ -8,7 +8,7 @@ import { parseLatexFile, serializeLatexFile } from '$lib/workspace/latexRoundtri
 // \par token. inside a non-\long macro argument (\author, \institute) that's a fatal runaway
 // argument; in body prose it silently changes a paragraph break. corpus repros: 1512.00567,
 // 1608.06993, 1505.04597. these tests exercise the deterministic path directly
-// (latexToProseMirror never fills orig.norm, so no verbatim short-circuit masks the raw node).
+// (latexToProseMirror alone records no parse origins, so no verbatim short-circuit masks the raw node).
 function rt(src: string): string {
 	const { doc } = latexToProseMirror(src, {});
 	return serializeToLatex(doc);
@@ -72,13 +72,13 @@ Vincent Vanhoucke\\\\
 	});
 });
 
-// companion regression at the `orig` block-capture layer: a block whose last positioned token
-// sits inside an attached macro argument had a truncated orig.latex (the closing delimiter is
+// companion regression at the block span capture layer: a block whose last positioned token
+// sits inside an attached macro argument had a truncated span (the closing delimiter is
 // openMark/closeMark metadata with no positioned node), so the closer landed in the inter-block
 // gap and was lost the moment a slice-less block followed. the fix repairs block extents over
 // the arg tail (repairExtentTail) and gives _raw capture blocks their literal slice as capture
 // extent, keeping the verbatim chain contiguous.
-describe('orig block capture includes attached-arg closers (math_commands.tex shape)', () => {
+describe('block span capture includes attached-arg closers (math_commands.tex shape)', () => {
 	const FILE = `\\documentclass{article}
 \\begin{document}
 \\newcommand{\\captiond}{{\\em (d)}}

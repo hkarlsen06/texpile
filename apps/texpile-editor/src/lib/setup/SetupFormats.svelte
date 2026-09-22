@@ -12,7 +12,7 @@
 	];
 </script>
 
-<div class="flex max-w-md flex-col gap-2.5">
+<div class="flex flex-col gap-2.5">
 	{#each rows as r (r.id)}
 		<SetupChoice
 			kind="checkbox"

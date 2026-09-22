@@ -92,6 +92,17 @@ describe('small editor-created drifts (T21)', () => {
 		expect(back.child(1).child(0).type.name).toBe('table_header');
 	});
 
+	it('the dash and ellipsis characters go out as the shorthand typst sources write them', () => {
+		expect(out(para(text('a \u2014 b \u2013 c\u2026 d')))).toBe('a --- b -- c... d');
+		const back = typstToProseMirror('a --- b -- c... d\n').doc.child(0);
+		expect(back.textContent).toBe('a \u2014 b \u2013 c\u2026 d');
+	});
+
+	it('a dash or ellipsis next to a hyphen or a dot stays the character, not a shorthand that would fuse', () => {
+		expect(out(para(text('x-\u2013y \u2026. z')))).toBe('x-\u2013y \u2026. z');
+		expect(typstToProseMirror('x-\u2013y \u2026. z\n').doc.child(0).textContent).toBe('x-\u2013y \u2026. z');
+	});
+
 	it('emphasis over whitespace only emits no delimiters', () => {
 		expect(out(para(text('a'), text(' ', ['em']), text('b')))).toBe('a b');
 	});
@@ -99,6 +110,17 @@ describe('small editor-created drifts (T21)', () => {
 	it('a space typed after a hard break survives', () => {
 		const src = out(para(text('a'), n.hard_break.create({ lineBreak: true }), text(' b')));
 		expect(typstToProseMirror(src + '\n').doc.child(0).textContent).toBe('a b');
+	});
+
+	it('text running straight on from a coloured word does not read as more of the call', () => {
+		const src = out(para(text('and '), text('coloured', ['textcolor']), text('.term (x) [y]')));
+		expect(src).toBe('and #text(fill: black)[coloured]\\.term (x) \\[y\\]');
+		expect(reread(src + '\n')).toEqual([
+			['', 'and '],
+			['textcolor', 'coloured'],
+			['', '.term (x) [y]']
+		]);
+		expect(out(para(text('and '), text('coloured', ['textcolor']), text('(x)')))).toBe('and #text(fill: black)[coloured]\\(x)');
 	});
 
 	it('an unnumbered heading has a typst form', () => {

@@ -25,11 +25,19 @@ const caretSide = StateField.define<CaretSide | null>({
 	create: () => null,
 	update(caret, tr) {
 		for (const e of tr.effects) if (e.is(setCaretSide)) return e.value;
-		if (!caret) return caret;
-		const at = tr.changes.mapPos(caret.at, caret.side === 'before' ? 1 : -1);
-		const sel = tr.newSelection;
-		if (sel.ranges.length > 1 || !sel.main.empty || sel.main.head !== at) return null;
-		return at === caret.at ? caret : { ...caret, at };
+		let next = caret;
+		if (next) {
+			const at = tr.changes.mapPos(next.at, next.side === 'before' ? 1 : -1);
+			const sel = tr.newSelection;
+			next = sel.ranges.length > 1 || !sel.main.empty || sel.main.head !== at ? null : at === next.at ? next : { ...next, at };
+		}
+		// a delete leaves the caret at the start of what it took out, so the strikethrough stands to its
+		// right whatever shape the suggestion there ends up: typing at one makes it a replacement, whose
+		// old words would otherwise go back to the far side of the caret. Not when the reader has already
+		// put the caret on the other side of some
+		if (!next && tr.docChanged && tr.isUserEvent('delete') && tr.newSelection.main.empty)
+			return { at: tr.newSelection.main.head, side: 'before' };
+		return next;
 	}
 });
 
@@ -61,22 +69,68 @@ const ranges = StateField.define<SuggestionRange[]>({
 	}
 });
 
-class OldWords extends WidgetType {
+// A line break has no glyph, so a suggestion that only moves one draws at zero width: splitting a
+// paragraph showed nothing at all and joining two showed an empty box. Every break a suggestion
+// touches is a bar, the way a diff marks one, rather than a character the reader has to decode.
+function bar(way: 'added' | 'removed'): HTMLElement {
+	const el = document.createElement('span');
+	el.className = `cm-suggest-break cm-suggest-break-${way}`;
+	return el;
+}
+
+/** struck words with a bar wherever they held a break, so a deletion that spans lines reads as one */
+function wordsWithBars(words: string, way: 'added' | 'removed'): (string | HTMLElement)[] {
+	const parts: (string | HTMLElement)[] = [];
+	for (const [i, piece] of words.split('\n').entries()) {
+		if (i > 0) parts.push(bar(way));
+		if (piece) parts.push(piece);
+	}
+	return parts;
+}
+
+class BreakBar extends WidgetType {
 	constructor(
-		private readonly text: string,
 		private readonly id: string,
-		private readonly focus: boolean
+		private readonly focus: boolean,
+		private readonly way: 'added' | 'removed' = 'removed'
 	) {
 		super();
 	}
-	override eq(other: OldWords): boolean {
-		return other.text === this.text && other.id === this.id && other.focus === this.focus;
+	override eq(other: BreakBar): boolean {
+		return other.id === this.id && other.focus === this.focus && other.way === this.way;
+	}
+	toDOM(): HTMLElement {
+		const bar = document.createElement('span');
+		bar.className = `cm-suggest-break cm-suggest-break-${this.way}${this.focus ? ' cm-suggest-focused' : ''}`;
+		bar.dataset.comment = this.id;
+		return bar;
+	}
+	override ignoreEvent(): boolean {
+		return false;
+	}
+}
+
+class SuggestedWords extends WidgetType {
+	constructor(
+		private readonly text: string,
+		private readonly id: string,
+		private readonly focus: boolean,
+		private readonly kind: 'old' | 'new'
+	) {
+		super();
+	}
+	override eq(other: SuggestedWords): boolean {
+		return other.text === this.text && other.id === this.id && other.focus === this.focus && other.kind === this.kind;
 	}
 	toDOM(): HTMLElement {
 		const span = document.createElement('span');
-		span.className = `cm-suggest-old${this.focus ? ' cm-suggest-focused' : ''}`;
+		span.className = `cm-suggest-${this.kind}${this.focus ? ' cm-suggest-focused' : ''}`;
 		span.dataset.comment = this.id;
-		span.append(document.createElement('wbr'), this.text, document.createElement('wbr'));
+		span.append(
+			document.createElement('wbr'),
+			...wordsWithBars(this.text, this.kind === 'old' ? 'removed' : 'added'),
+			document.createElement('wbr')
+		);
 		return span;
 	}
 	override ignoreEvent(): boolean {
@@ -105,8 +159,11 @@ function build(state: EditorState): DrawnSuggestions {
 	for (const r of state.field(ranges, false) ?? []) {
 		const on = r.id === focus;
 		const side = caret?.at === r.from ? caret.side : typingSide(r);
-		if (r.restore)
-			out.push(Decoration.widget({ widget: new OldWords(r.restore, r.id, on), side: side === 'after' ? -1 : 1 }).range(r.from));
+		if (r.restore) {
+			// whitespace alone has nothing to strike through, so it is a bar rather than an empty box
+			const widget = /\S/.test(r.restore) ? new SuggestedWords(r.restore, r.id, on, 'old') : new BreakBar(r.id, on);
+			out.push(Decoration.widget({ widget, side: side === 'after' ? -1 : 1 }).range(r.from));
+		}
 		if (r.to > r.from) {
 			out.push(
 				Decoration.mark({ class: `cm-suggest-new${on ? ' cm-suggest-focused' : ''}`, attributes: { 'data-comment': r.id } }).range(
@@ -114,6 +171,22 @@ function build(state: EditorState): DrawnSuggestions {
 					r.to
 				)
 			);
+			// a mark over whitespace paints nothing, so the lines an added break OPENS carry a bar down
+			// their left edge, the way a diff marks them. Only the lines it opens: the ones it merely
+			// starts and ends in still hold their own words
+			const added = state.doc.sliceString(r.from, r.to);
+			if (added && !/\S/.test(added)) {
+				let opened = 0;
+				const last = state.doc.lineAt(r.to).number;
+				for (let n = state.doc.lineAt(r.from).number; n <= last; n++) {
+					const line = state.doc.line(n);
+					if (line.from < r.from || line.to > r.to) continue;
+					opened++;
+					out.push(Decoration.line({ class: `cm-suggest-break-lines${on ? ' cm-suggest-focused' : ''}` }).range(line.from));
+				}
+				// whitespace that opens no line of its own still has to say it is there
+				if (!opened) out.push(Decoration.widget({ widget: new BreakBar(r.id, on, 'added'), side: 1 }).range(r.from));
+			}
 		}
 	}
 	return { set: RangeSet.of(out, true), mode: editMode.current };

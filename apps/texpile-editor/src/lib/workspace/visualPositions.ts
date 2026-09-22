@@ -1,9 +1,7 @@
 // Remembering where the CARET was in the visual editor, per file.
 //
 // Only the caret. Not the viewport: both editors navigate by cursor, so placing the caret and
-// scrolling to it already puts you where you were, and a viewport anchor pushed through the block
-// map bought nothing extra - the map is block-granular - at the cost of the whole lifecycle needed
-// to keep a scroll position fresh.
+// scrolling to it already puts you where you were.
 //
 // And not a ProseMirror position either. Entering visual mode re-parses, so a pmPos captured
 // against the old doc means nothing against the new one. What is stored is a place in the FILE, the
@@ -11,17 +9,14 @@
 // in the same place with no second record to disagree with the first.
 import { TextSelection } from 'prosemirror-state';
 import type { EditorView } from 'prosemirror-view';
-import { buildBlockMap, pmPosToSourceOffset, sourceOffsetToPmPos } from '$lib/editor/visual/sourceMap';
+import type { SourceMap } from '$lib/editor/visual/sourceSpans';
+import { offsetAtPm, pmAtOffset } from '$lib/editor/visual/sourceMap';
 import { docPositions, offsetToRowCol, rowColToOffset } from './docPositions';
 import { flashNodeAt } from '$lib/editor/visual/extensions/flash-plugin';
 
-/**
- * Leaving the visual editor: map the PM caret back to a file position and store it. Must be called
- * while the view is still mounted - `bodyOffset` absolutizes the body-relative orig.start stamps.
- */
-export function saveVisualPosition(v: EditorView, path: string, source: string, bodyOffset: number): void {
-	const doc = v.state.doc;
-	const offset = pmPosToSourceOffset(doc, buildBlockMap(doc, bodyOffset), v.state.selection.head);
+/** Leaving the visual editor: the caret's place in the file, through the map of the text it shows. */
+export function saveVisualPosition(v: EditorView, path: string, source: string, map: SourceMap): void {
+	const offset = offsetAtPm(map, v.state.selection.head);
 	if (offset == null) return;
 	const { row, column } = offsetToRowCol(source, offset);
 	// firstVisibleLine is the caret's own line: source mode then opens with it near the top, which is
@@ -36,25 +31,19 @@ export function saveVisualPosition(v: EditorView, path: string, source: string, 
  * lands after this one and wins - the precedence we want, without this needing to know the mode
  * switch exists.
  */
-export function restoreVisualPosition(
-	v: EditorView,
-	path: string,
-	source: string,
-	bodyOffset: number,
-	strip?: (s: string) => string
-): void {
+export function restoreVisualPosition(v: EditorView, path: string, source: string, map: SourceMap): void {
 	const pos = docPositions.get(path);
 	const jumped = docPositions.takeJump(path); // taken even when the restore below gives up
 	if (!pos) return;
 	const doc = v.state.doc;
-	const target = sourceOffsetToPmPos(doc, buildBlockMap(doc, bodyOffset), rowColToOffset(source, pos.row, pos.column), strip);
+	const target = pmAtOffset(map, rowColToOffset(source, pos.row, pos.column));
 	if (target == null) return; // resolved into the preamble, which the visual editor does not show
 
 	// Never restore ONTO an embedded node. TextSelection.near hands back a NodeSelection when the
 	// nearest valid selection is a leaf - a math field, an image - and selecting one of those makes
 	// ProseMirror call the node view's selectNode(), which builds the embedded editor and focuses it.
 	// Reopening a tab must park a caret, never drop the user inside a formula.
-	const $target = doc.resolve(target);
+	const $target = doc.resolve(Math.min(target, doc.content.size));
 	const forward = TextSelection.near($target, 1);
 	const selection = forward instanceof TextSelection ? forward : TextSelection.near($target, -1);
 	if (!(selection instanceof TextSelection)) return; // nowhere safe to land; leave the view alone

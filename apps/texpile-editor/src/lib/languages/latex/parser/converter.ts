@@ -14,12 +14,14 @@ import {
 	heuristicMarkCommentedMacroCalls,
 	heuristicMarkTexPrimitiveDefs,
 	heuristicMarkDelimitedMacroSpans,
-	heuristicInferUnknownMacroSignatures
+	heuristicInferUnknownMacroSignatures,
+	heuristicGlueBareFileArgs
 } from './heuristics';
 
 export type { PmNode, PmMark, ConversionOptions };
 
-import { capture, extentOf, nodeExtent, withOrig, repairExtentTail } from './convert/origCapture';
+import { capture, extentOf, nodeExtent, repairExtentTail, prefixSpans, startOf, type CaptureState } from './convert/origCapture';
+import { blockSpanOf, collectMap, noteBlockSpan, rememberParseMap } from '$lib/editor/visual/sourceSpans';
 import { macroHandlers } from './convert/macroHandlers';
 import { TABLE_RULE_MACROS } from './convert/tableConvert';
 import { isBlockNode } from './convert/blockKinds';
@@ -37,15 +39,28 @@ import { drawnCommand } from '$lib/languages/latex/drawnCommands';
 export { FIG_IMG_SLOT, FIG_CAP_SLOT, FIG_LAB_SLOT } from './convert/figureConvert';
 export { convertNodeToInline } from './convert/inlineConvert';
 
-// verbatim source capture (the `orig` attr, see ORIG_BLOCKS in schema.ts): the TOP-LEVEL
-// convertNodesToBlocks pass stamps every block with `orig: { latex, pre, seq, norm: null,
-// group? }`. parseLatexFile later fills `norm`; the serializer re-emits `latex` only while the
-// block still serializes to `norm`. armed by latexToProseMirror, consumed (grab-and-null) by the
-// first convertNodesToBlocks call, so recursive calls never capture.
+// verbatim source capture: the TOP-LEVEL convertNodesToBlocks pass notes on every block it can
+// place the bytes it came from (a block span, see sourceSpans). parseLatexFile turns the spans
+// into the parse's origins; the serializer writes an untouched block back as those bytes. armed
+// by latexToProseMirror, consumed (grab-and-null) by the first convertNodesToBlocks call, so
+// recursive calls never capture.
+
+/** capture for a nested pass: the same source, the blocks placed from the first positioned node on.
+ *  Positions a nested walk synthesizes read back as 0, which the floor rejects */
+function nestedCapture(nodes: Node[]): CaptureState | null {
+	if (!capture.rawSource) return null;
+	let floor = Infinity;
+	for (const n of nodes) {
+		const at = startOf(n);
+		if (typeof at === 'number' && at >= 0 && at < floor) floor = at;
+	}
+	return { source: capture.rawSource, prevEnd: Number.isFinite(floor) ? floor : 0 };
+}
 
 export function convertNodesToBlocks(nodes: Node[], options: ConversionOptions): PmNode[] {
-	// verbatim source capture is armed only for the top-level call (grab-and-null; see above)
-	const cap = capture.pending;
+	// verbatim source capture: the top-level call takes the armed state (grab-and-null; see
+	// above), a nested call (an environment's body, a list item) captures its own blocks the same way
+	const cap = capture.pending ?? nestedCapture(nodes);
 	capture.pending = null;
 	const result: PmNode[] = [];
 	const ctx = createDefaultContext();
@@ -59,47 +74,30 @@ export function convertNodesToBlocks(nodes: Node[], options: ConversionOptions):
 		paraExt.min = Math.min(paraExt.min, ext.min);
 		paraExt.max = Math.max(paraExt.max, ext.max);
 		// an attached-arg macro's closing delimiter has no positioned node; reclaim it from the
-		// source or the block's orig.latex loses its final closer(s). see repairExtentTail.
+		// source or the block's span loses its final closer(s). see repairExtentTail.
 		if ((node as Macro).args?.length) {
 			const own = repairExtentTail(node, nodeExtent(node, cap.prevEnd));
 			if (own && Number.isFinite(own.max) && own.max > paraExt.max) paraExt.max = own.max;
 		}
 	}
 
-	// stamp-and-push for top-level blocks. ext null = no trustworthy span: the block still gets a
-	// seq (pristine adjacency stays detectable, `pre` can never bridge a deletion) but no slice.
-	// a multi-block result from ONE source construct shares the slice under a group id; the
-	// serializer substitutes it only when the whole group is present, ordered and unchanged.
+	// note-and-push for top-level blocks. ext null = no trustworthy span: the block is pushed
+	// unplaced, and the gap before its neighbour can never bridge it. a multi-block result from ONE
+	// source construct is noted as one span on its first block; the serializer substitutes it only
+	// when the whole construct is present, ordered and unchanged.
 	//
 	// advanceExt controls ONLY how far cap.prevEnd moves, separate from ext. all callers pass
 	// them equal today, but the invariant is subtle: if a block ever gets ext=null while
-	// consuming source, prevEnd MUST still advance past it, or the NEXT block's `pre` silently
-	// swallows the skipped bytes as gap while its regenerated form is ALSO emitted.
+	// consuming source, prevEnd MUST still advance past it, or the NEXT block's span could start
+	// before the skipped bytes while its regenerated form is ALSO emitted.
 	function pushBlocks(blocks: PmNode[], ext: { min: number; max: number } | null, advanceExt: { min: number; max: number } | null = ext) {
 		if (!cap || blocks.length === 0) {
 			result.push(...blocks);
 			return;
 		}
 		const spanOk = ext != null && Number.isFinite(ext.min) && ext.min >= cap.prevEnd && ext.max <= cap.source.length && ext.min < ext.max;
-		const latex = spanOk ? cap.source.slice(ext!.min, ext!.max) : null;
-		const pre = spanOk ? cap.source.slice(cap.prevEnd, ext!.min) : null;
-		const group = spanOk && blocks.length > 1 ? cap.group++ : null;
-		for (let i = 0; i < blocks.length; i++) {
-			const seq = cap.seq++;
-			if (latex == null) {
-				result.push(withOrig(blocks[i], { seq }));
-				continue;
-			}
-			// `start` (body-relative source offset) powers positional consumers like the mode-
-			// switch scroll sync, not the verbatim serializer. group members carry the shared start.
-			const orig: Record<string, unknown> = { latex, pre: i === 0 ? pre : '', seq, norm: null, start: ext!.min };
-			if (group != null) {
-				orig.group = group;
-				orig.groupIndex = i;
-				orig.groupSize = blocks.length;
-			}
-			result.push(withOrig(blocks[i], orig));
-		}
+		if (spanOk) result.push(noteBlockSpan(blocks[0], { srcFrom: ext!.min, srcTo: ext!.max, size: blocks.length }), ...blocks.slice(1));
+		else result.push(...blocks);
 		if (advanceExt && Number.isFinite(advanceExt.max)) cap.prevEnd = Math.max(cap.prevEnd, advanceExt.max);
 	}
 	// deferred inter-word whitespace: held and only emitted (as one space) once real content
@@ -201,7 +199,10 @@ export function convertNodesToBlocks(nodes: Node[], options: ConversionOptions):
 			// already buffered it falls through (TeX's % doesn't break a paragraph, so block-
 			// ifying it would split the paragraph).
 			const text = '%' + ((node as { content?: string }).content ?? '');
-			pushBlocks([buildNode('raw_latex', null, [textNode(text)])], nodeExtent(node, cap?.prevEnd ?? 0));
+			pushBlocks(
+				[buildNode('raw_latex', null, [textNode(text, null, prefixSpans(text, startOf(node)))])],
+				nodeExtent(node, cap?.prevEnd ?? 0)
+			);
 		} else if (
 			node.type === 'macro' &&
 			((node as Macro).content === 'indent' || (node as Macro).content === 'noindent') &&
@@ -234,15 +235,12 @@ export function convertNodesToBlocks(nodes: Node[], options: ConversionOptions):
 	// a container whose ENTIRE content is one all-raw paragraph collapses to a single raw_latex
 	// block: a wall of adjacent inline chips can't be selected/edited as a unit. sole-block only,
 	// so a caption/label paragraph beside a table stays an editable paragraph.
-	if (cap) capture.last = cap; // stash before every exit; see the declaration comment
-
 	const sole = result.length === 1 && result[0].type.name === 'paragraph' ? result[0] : null;
 	const raw = sole ? paragraphAsRawLatex(sole) : null;
 	if (raw !== null) {
-		// the promoted block covers exactly the paragraph's source, so its orig transfers
-		const porig = (sole!.attrs as { orig?: Record<string, unknown> | null }).orig;
-		const rawBlock = buildNode('raw_latex', null, [textNode(raw)]);
-		return [porig ? withOrig(rawBlock, porig) : rawBlock];
+		// the promoted block covers exactly the paragraph's source, so its span transfers
+		const span = blockSpanOf(sole!);
+		return [noteBlockSpan(buildNode('raw_latex', null, [textNode(raw, null, prefixSpans(raw, span?.srcFrom))]), span)];
 	}
 	return result;
 }
@@ -301,6 +299,9 @@ export function latexToProseMirror(latex: string, options: ConversionOptions = {
 	// heuristicMarkTexPrimitiveDefs so only real call sites remain visible.
 	heuristicMarkDelimitedMacroSpans(ast.content as Node[], latex, delimPairs);
 
+	// `\input name.tex` without braces names the whole file, not the token the parser took
+	heuristicGlueBareFileArgs(ast.content as Node[], latex);
+
 	// drop trailing comments so a command's args can attach across them (see fn comment)
 	stripSamelineComments(ast.content as Node[]);
 
@@ -324,11 +325,12 @@ export function latexToProseMirror(latex: string, options: ConversionOptions = {
 
 	const content = extractContent(ast);
 
-	// arm verbatim source capture for the top-level pass (norm is filled by parseLatexFile;
-	// without it the serializer ignores the attr, so direct converter users see no change). also
-	// arm the byte-faithful raw fallback; unlike capture.pending it must stay live through every
+	// arm verbatim source capture for the top-level pass (parseLatexFile turns the spans into the
+	// parse's origins with their bytes; a direct converter user's document always regenerates, but
+	// still knows which blocks were neighbours and which came from one construct). also arm
+	// the byte-faithful raw fallback; unlike capture.pending it must stay live through every
 	// nested call, hence try/finally.
-	capture.pending = { source: latex, seq: 0, prevEnd: 0, group: 0 };
+	capture.pending = { source: latex, prevEnd: 0 };
 	capture.rawSource = latex;
 	let blocks: PmNode[];
 	try {
@@ -338,15 +340,10 @@ export function latexToProseMirror(latex: string, options: ConversionOptions = {
 		capture.pending = null; // normally already consumed; clear defensively for error paths
 	}
 
-	// the body's trailing gap (after the last top-level block, up to EOF) belongs to no node;
-	// stash it on the doc so an untouched save can reproduce it.
-	const cap = capture.last;
-	capture.last = null;
-	let docAttrs: Record<string, unknown> | null = null;
-	if (cap && cap.prevEnd <= cap.source.length) {
-		docAttrs = { docTail: { text: cap.source.slice(cap.prevEnd, cap.source.length), afterSeq: cap.seq - 1 } };
-	}
-	const doc = mergeAdjacentRawBlocks(buildNode('doc', docAttrs, blocks.length > 0 ? blocks : [buildNode('paragraph')]), drawnCommand);
+	const doc = mergeAdjacentRawBlocks(buildNode('doc', null, blocks.length > 0 ? blocks : [buildNode('paragraph')]), latex, drawnCommand);
+	// the document knows its blocks' gaps and constructs from here; parseLatexFile registers it
+	// against the file, where the bytes are written back from
+	rememberParseMap(doc, collectMap(doc), { text: latex, from: 0, to: latex.length }, false);
 
 	return { doc, ast };
 }

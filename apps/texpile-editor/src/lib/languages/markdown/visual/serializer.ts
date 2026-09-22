@@ -1,15 +1,16 @@
 // Deterministic ProseMirror -> Markdown serializer: the latexSerializer's sibling dialect.
 // String-returning handlers per node type over the shared Ctx contract; doc assembly (verbatim
-// orig substitution + per-block memo) delegated to blockAssembly. prosemirror-markdown's
+// substitution + per-block memo) delegated to blockAssembly. prosemirror-markdown's
 // serializer can't drive prosemirror-flat-list (it walks nested list NODES; flat-list is one
 // node per item), so list/emphasis logic lives here; escaping follows prosemirror-markdown's
 // rules. Convention: every block handler ends with its own separation ('\n\n', lists '\n'
 // mid-run), so plain concatenation of parts is a valid document.
 import type { Node } from 'prosemirror-model';
 import { createBlockAssembly, type DocSerializeResult } from '$lib/serializer/blockAssembly';
+import type { ParseOrigins } from '$lib/editor/visual/sourceSpans';
 import type { Ctx } from '$lib/serializer/types';
 import { escMd } from './inlineSyntax';
-import { imageMarkdown, renderInline } from './markdownInline';
+import { imageMarkdown, renderInline, mdShadow, isMdHandlerLeaf } from './markdownInline';
 import { listFamily, listMarker, sameList } from './listAttrs';
 
 function indentAfterFirstLine(text: string, indent: string): string {
@@ -214,7 +215,10 @@ const NODES: Record<string, NodeHandler> = {
 /** Serialize one node to Markdown. Unknown types preserve their content rather than dropping it. */
 export function serializeMdNode(node: Node, ctx: Ctx): string {
 	const handler = NODES[node.type.name];
-	if (handler) return handler(node, ctx);
+	if (handler) {
+		const out = handler(node, ctx);
+		return isMdHandlerLeaf(node) ? mdShadow.shadowed(node, out) : out;
+	}
 	if (node.isText) return escMd(node.text ?? '');
 	if (node.isInline) {
 		// inline strays (should have come through renderInline) degrade to leafText/plain text
@@ -225,12 +229,36 @@ export function serializeMdNode(node: Node, ctx: Ctx): string {
 	return inner ? inner + '\n\n' : '';
 }
 
-const assembly = createBlockAssembly((node, ctx) => serializeMdNode(node, ctx));
+/** the inline children of a paragraph as one run, and how the paragraph writes it */
+/** what continues a child's lines inside its container: the prefix the file gave its second line,
+ *  else the width of what stood before its first (a marker becomes spaces, a quote's `>` stays) */
+function continuation(_parent: Node, text: string, head: string): string {
+	const nl = text.indexOf('\n');
+	if (nl < 0) return head.replace(/[^>]/g, ' ');
+	const prefix = /^[ \t]*(?:>[ \t]*)*/.exec(text.slice(nl + 1))![0];
+	// a quote's second line carries the quote's own marker after its container's: the container's
+	// part is what continues the quote's lines, the quote writes its own
+	return text.startsWith('>') ? prefix.replace(/>[ \t]*$/, '') : prefix;
+}
+
+// Markdown is kept at block granularity: an untouched block, at the top level or inside a list
+// item or a quote, is the file's bytes; a block that changed is written whole. No leaf or run
+// inside a changed paragraph is patched in place, since a seam between fresh bytes and the file's
+// (an emphasis delimiter that no longer flanks, a marker at a line start) is where Markdown's
+// loose grammar reads two things as one, and a paragraph written afresh loses nothing but a hand
+// wrap: the format has no comments and no macros to keep
+const assembly = createBlockAssembly((node, ctx) => serializeMdNode(node, ctx), {
+	mapLeaves: (node, ctx, text) => mdShadow.mapBlockLeaves(serializeMdNode, node, ctx, text),
+	// a task item's box is written with its marker, from the item's attrs: the first block of the
+	// item cannot be rendered on its own inside the item's frame, whose bytes hold the box
+	spliceChild: (parent, index) => !(parent.type.name === 'list' && index === 0 && parent.attrs.kind === 'task'),
+	continuation
+});
 
 export function serializeToMarkdown(doc: Node): string {
 	return assembly.serializeDocChildrenDetailed(doc).text;
 }
 
-export function serializeToMarkdownDetailed(doc: Node): DocSerializeResult {
-	return assembly.serializeDocChildrenDetailed(doc);
+export function serializeToMarkdownDetailed(doc: Node, parse?: ParseOrigins | null, afresh?: ReadonlySet<Node>): DocSerializeResult {
+	return assembly.serializeDocChildrenDetailed(doc, parse, afresh);
 }

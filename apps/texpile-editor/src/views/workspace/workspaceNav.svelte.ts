@@ -7,10 +7,9 @@ import { fileMode } from '$lib/workspace/fileMode.svelte';
 import { projectIntelStore } from '$lib/stores/projectIntel';
 import { updateLayout } from '$lib/storage/layout';
 import { SyncTexNav, sessionRelativeTarget, needsActivate } from '$lib/workspace/syncTexNav';
-import { buildBlockMap, pmPosToSourceOffset, firstWordEndOnLine } from '$lib/editor/visual/sourceMap';
+import { offsetAtPm } from '$lib/editor/visual/sourceMap';
+import { firstWordEndOnLine } from '$lib/languages/typst/preview/caretRescue';
 import { restoreVisualPosition } from '$lib/workspace/visualPositions';
-import { stripFor } from '$lib/editor/visual/stripFor';
-import { bodyOffsetOf } from '$lib/workspace/latexRoundtrip';
 import { jumpToInclude as jumpToIncludeTarget } from '$lib/workspace/editorCommands';
 import { hasVisualMode, type DocumentBuffer, type FileKind } from '$lib/workspace/documentBuffer.svelte';
 import type { ViewModeSwitch } from '$lib/workspace/viewModeSwitch.svelte';
@@ -77,19 +76,12 @@ export class WorkspaceNav {
 		});
 	}
 
-	/** the tex preamble's length in visual mode; 0 for typst, whose whole file is body. */
-	visBodyOffset(): number {
-		return this.d.doc.docMeta ? bodyOffsetOf(this.d.doc.docMeta) : 0;
-	}
-
-	/** the visual caret as a zero-based source line/character, through the orig block map -
-	 *  dialect-agnostic (the stamps carry absolute file offsets once bodyOffset is applied).
-	 *  Never returns column 0: it resolves to the line's first word end instead, or null. */
+	/** the visual caret as a zero-based source line/character, through the source map. Never
+	 *  returns column 0: it resolves to the line's first word end instead, or null. */
 	visualCaretSourcePos(): { line: number; character: number } | null {
 		const v = editorViewStore.current;
 		if (!v) return null;
-		const pmDoc = v.state.doc;
-		const off = pmPosToSourceOffset(pmDoc, buildBlockMap(pmDoc, this.visBodyOffset()), v.state.selection.head);
+		const off = offsetAtPm(this.d.doc.sourceMap, v.state.selection.head);
 		if (off == null) return null;
 		const source = this.d.doc.texSource;
 		const upto = source.slice(0, Math.min(off, source.length));
@@ -115,7 +107,7 @@ export class WorkspaceNav {
 			docPositions.set(target, { row: line - 1, column: 0, firstVisibleLine: line }, { jump: true });
 			if (target === doc.path) {
 				const v = editorViewStore.current;
-				if (v) restoreVisualPosition(v, target, doc.texSource, this.visBodyOffset(), stripFor(this.d.kind()));
+				if (v) restoreVisualPosition(v, target, doc.texSource, doc.sourceMap);
 			} else if (needsActivate(target)) {
 				openFile(target);
 			}

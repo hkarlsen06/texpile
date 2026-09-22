@@ -5,7 +5,6 @@ import { browser } from '$lib/runtime';
 import { workspaceRoot, isDirty, mainFile, texFiles, effectiveCompileFormat } from './workspaceStore';
 import { isGitRepo, refreshGitStatus } from './gitStore';
 import { compileLog } from '$lib/stores/compileLogStore';
-import { settings } from '$lib/settings';
 import { compileConfig } from './projectConfigSync.svelte';
 import { relativeTo, samePath } from './fileSystem';
 import { inOpenTree, resolveInWorkspace } from './mcpWorkspacePath';
@@ -214,7 +213,6 @@ function compileConfigPayload(deps: McpCommandDeps) {
 	function rel(p: string | null) {
 		return p && root ? relativeTo(root, p) : p;
 	}
-	const s = settings.current;
 	return {
 		command: cmd,
 		// the typesetter in effect, from the main file's extension and nothing else. Change it by

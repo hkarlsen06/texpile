@@ -13,15 +13,6 @@ export function keymapOptions(): { value: AppSettings['editorKeymap']; label: st
 	];
 }
 
-// image resize snaps to multiples of this fraction of \textwidth
-export function resizeStepOptions(): { value: number; label: string }[] {
-	return [
-		{ value: 0.1, label: '10%' },
-		{ value: 0.25, label: '25%' },
-		{ value: 0.5, label: '50%' }
-	];
-}
-
 export function uiLocaleOptions(): { value: AppSettings['uiLocale']; label: string }[] {
 	return (Object.entries(LOCALE_META) as [AppSettings['uiLocale'], (typeof LOCALE_META)[AppSettings['uiLocale']]][]).map(
 		([value, meta]) => ({ value, label: meta.label })

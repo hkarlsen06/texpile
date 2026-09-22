@@ -1,9 +1,11 @@
 // perf harness for the large-document editing hot path (~1MB synthetic paper). prints a timing
-// table; the assertions only pin the cache contract (warm/edited serialization must not re-pay
-// the whole document), loosely enough to stay green on slow CI.
+// table; the assertions only pin the contract (a document the parse still knows, unchanged or
+// with one keystroke in it, must not re-pay rendering the whole document), against a forced
+// rendering of every block, loosely enough to stay green on slow CI.
 import { describe, it, expect } from 'vitest';
 import { EditorState } from 'prosemirror-state';
 import { parseLatexFile } from '$lib/workspace/latexRoundtrip';
+import { withoutOrigins } from '$lib/editor/visual/sourceSpans';
 import { serializeToLatex } from '../../../../src/lib/languages/latex/serializer/latexSerializer';
 import { extractDocRefs } from '../../../../src/lib/languages/latex/parser/labels';
 import { parseOutlineRaw } from '../../../../src/lib/editor/visual/extensions/tableofcontents/latexHeadings';
@@ -48,6 +50,8 @@ describe('1MB document editing hot path', () => {
 		const parse = time(() => parseLatexFile(source));
 		const doc = parse.out.doc;
 
+		// every block rendered afresh: what a document the parse knows nothing of costs
+		const full = time(() => serializeToLatex(withoutOrigins(doc)));
 		const cold = time(() => serializeToLatex(doc));
 		const warm = time(() => serializeToLatex(doc));
 
@@ -69,7 +73,8 @@ describe('1MB document editing hot path', () => {
 			[
 				`\n--- 1MB paper (${(source.length / 1e6).toFixed(2)} MB, ${doc.childCount} top-level blocks) ---`,
 				`parse (worker-side cost)          ${ms(parse.t)}`,
-				`serialize cold (first, all blocks) ${ms(cold.t)}`,
+				`serialize full (every block rendered) ${ms(full.t)}`,
+				`serialize cold (first, as its bytes) ${ms(cold.t)}`,
 				`serialize warm (unchanged doc)     ${ms(warm.t)}`,
 				`serialize after 1-char edit        ${ms(afterEdit.t)}  <- per-keystroke cost in visual mode`,
 				`extractDocRefs (now in worker)     ${ms(refs.t)}`,
@@ -78,11 +83,15 @@ describe('1MB document editing hot path', () => {
 			].join('\n')
 		);
 
-		// contract: warm/edited runs reuse cached blocks instead of re-serializing the document
+		// contract: a known document is written as its bytes, unchanged or with one edit in it,
+		// rather than rendered block by block
+		// a rendering of every block is the same document, give or take how it writes a label line
+		expect(Math.abs(full.out.length - cold.out.length)).toBeLessThan(cold.out.length / 20);
 		expect(warm.out).toBe(cold.out);
 		expect(afterEdit.out).not.toBe(cold.out);
-		expect(warm.t).toBeLessThan(cold.t / 2);
-		expect(afterEdit.t).toBeLessThan(cold.t / 2);
+		expect(cold.t).toBeLessThan(full.t / 2);
+		expect(warm.t).toBeLessThan(full.t / 2);
+		expect(afterEdit.t).toBeLessThan(full.t / 2);
 		expect(refs.out.labels.length).toBeGreaterThan(0);
 		expect(outline.out.length).toBeGreaterThan(0);
 	}, 120_000);

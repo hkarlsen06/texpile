@@ -21,8 +21,9 @@ describe('locateQuote', () => {
 		expect(byLine.ok && byLine.from).toBe(doc.indexOf('mentions gravity'));
 	});
 
-	it('finds a quote copied without the line wrap', () => {
+	it('takes the bytes as given, so a quote copied without the line wrap is not in the file', () => {
 		const r = locateQuote(doc, { quote: 'sentence that wraps' });
-		expect(r.ok && doc.slice(r.from, r.to)).toBe('sentence that\nwraps');
+		expect(r.ok).toBe(false);
+		expect(locateQuote(doc, { quote: 'sentence that\nwraps' }).ok).toBe(true);
 	});
 });

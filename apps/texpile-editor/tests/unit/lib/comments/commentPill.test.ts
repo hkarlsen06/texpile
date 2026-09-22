@@ -18,7 +18,7 @@ let view: EditorView | null = null;
 
 function mountWithSelection(): HTMLElement {
 	const doc = schema.node('doc', null, [schema.node('paragraph', null, [schema.text('hello world')])]);
-	const state = EditorState.create({ doc, plugins: pmComments({ onAdd: () => {} }) });
+	const state = EditorState.create({ doc, plugins: pmComments({ onAdd: () => {}, sourceAnchor: () => null }) });
 	view = new EditorView(host, { state });
 	// jsdom lays nothing out, so the real coordsAtPos gives the pill nowhere to go and it hides for
 	// the wrong reason. Fixed coordinates well inside the window put the branching under test.

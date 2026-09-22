@@ -2,6 +2,21 @@
 import type { Node, Mark } from 'prosemirror-model';
 import { latexToTypst } from './latexToTypst';
 import { codeEndsBefore } from './codeExtent';
+import { createShadow, markupPlaceholder } from '$lib/serializer/shadowLeaves';
+
+// nodes whose handler output is one run: their bytes come from attrs, not from text leaves
+const HANDLER_LEAVES = new Set(['raw_latex', 'code_block', 'block_math', 'includedoc', 'horizontal_rule']);
+
+export function isTypHandlerLeaf(node: Node): boolean {
+	return HANDLER_LEAVES.has(node.type.name) || (node.type.name === 'image' && node.childCount === 0);
+}
+
+/** the shadow run that finds every leaf of a regenerated block in its text; see shadowLeaves */
+export const typstShadow = createShadow({
+	placeholder: markupPlaceholder,
+	charEmissions: (ch) => [escTypst(ch), ch],
+	isHandlerLeaf: isTypHandlerLeaf
+});
 
 /** a math node's typst: the stored source while its LaTeX is untouched, else MathLive's
  *  conversion, else the stored source again. never the LaTeX: a .typ cannot hold it */
@@ -24,6 +39,9 @@ function inlineMathTypst(node: Node): string {
 export function escLineStart(str: string): string {
 	return str.replace(/^(\s*)([-+/=])/, '$1\\$2').replace(/^(\s*)(\d+)\./, '$1$2\\.');
 }
+
+/** the characters typst's `--`, `---` and `...` stand for, written back as those */
+const SHORTHAND_OF: Record<string, string> = { '\u2013': '--', '\u2014': '---', '\u2026': '...' };
 
 function wordy(ch: string): boolean {
 	return /[\p{L}\p{N}]/u.test(ch) && !/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(ch);
@@ -48,12 +66,24 @@ export function escTypst(str: string, startOfLine = false, extra = ''): string {
 			out += intraword ? ch : '\\_';
 			continue;
 		}
-		if (ch === '@' && /[\p{L}\p{N}\p{M}\p{Pc}-]/u.test(str[i + 1] ?? '')) {
+		// a dash or ellipsis character goes out as its shorthand below, which a ref would eat too
+		if (ch === '@' && (/[\p{L}\p{N}\p{M}\p{Pc}-]/u.test(str[i + 1] ?? '') || SHORTHAND_OF[str[i + 1] ?? ''] !== undefined)) {
 			out += '\\@';
 			continue;
 		}
 		if (ch === '-' && str[i + 1] === '?') {
 			out += '\\-';
+			continue;
+		}
+		// the dash and ellipsis characters go out as the shorthand typst sources write them, so a
+		// regenerated run reads as the file did; next to a hyphen or a dot the character itself
+		// is kept, since the shorthand would fuse with its neighbour into another one
+		const short = SHORTHAND_OF[ch];
+		if (short) {
+			const fuses = short[0] === '-' ? /[-?]/ : /[.]/;
+			const prev = out[out.length - 1] ?? '';
+			const next = str[i + 1] ?? '';
+			out += fuses.test(prev) || fuses.test(next) ? ch : short;
 			continue;
 		}
 		if (ch === '/' && str[i + 1] === '/') {
@@ -172,14 +202,14 @@ function buildRuns(parent: Node, startOfLine: boolean, extra: string, singleLine
 		if (node.isText) {
 			const text = node.text ?? '';
 			if (node.marks.some((m) => m.type.name === 'code')) {
-				runs.push({ content: codeSpan(text), marks: orderedMarks(node.marks), kind: 'other' });
+				runs.push({ content: codeSpan(typstShadow.shadowed(node, text)), marks: orderedMarks(node.marks), kind: 'other' });
 			} else {
 				// a space typed after a hard break stays on the break's line (typst drops
 				// indentation after a line end, so `\` + newline + space would lose it)
 				const prev = runs[runs.length - 1];
 				const marks = orderedMarks(node.marks);
 				if (prev?.kind === 'break' && /^[ \t]/.test(text) && marks.length === 0) prev.content = '\\';
-				runs.push({ content: escTypst(text, atLineStart, extra), marks, kind: 'text' });
+				runs.push({ content: typstShadow.shadowed(node, escTypst(text, atLineStart, extra)), marks, kind: 'text' });
 			}
 			atLineStart = false;
 			return;
@@ -187,20 +217,28 @@ function buildRuns(parent: Node, startOfLine: boolean, extra: string, singleLine
 		switch (node.type.name) {
 			case 'hard_break':
 				if (node.attrs?.lineBreak === false) return; // legacy no-op break
-				runs.push({ content: singleLine ? '\\ ' : '\\\n', marks: [], kind: 'break' });
+				runs.push({ content: typstShadow.shadowed(node, singleLine ? '\\ ' : '\\\n'), marks: [], kind: 'break' });
 				atLineStart = !singleLine;
 				return;
 			case 'inline_latex': {
 				const text = node.textContent;
-				runs.push({ content: text, marks: orderedMarks(node.marks), kind: text.startsWith('//') ? 'comment' : 'other' });
+				runs.push({
+					content: typstShadow.shadowed(node, text),
+					marks: orderedMarks(node.marks),
+					kind: text.startsWith('//') ? 'comment' : 'other'
+				});
 				break;
 			}
 			case 'typ_ref':
-				runs.push({ content: `@${String(node.attrs.target ?? '')}`, marks: orderedMarks(node.marks), kind: 'ref' });
+				runs.push({
+					content: typstShadow.shadowed(node, `@${String(node.attrs.target ?? '')}`),
+					marks: orderedMarks(node.marks),
+					kind: 'ref'
+				});
 				break;
 			case 'inline_math': {
 				const t = inlineMathTypst(node);
-				runs.push({ content: t.trim() ? `$${t}$` : '', marks: orderedMarks(node.marks), kind: 'other' });
+				runs.push({ content: t.trim() ? typstShadow.shadowed(node, `$${t}$`) : '', marks: orderedMarks(node.marks), kind: 'other' });
 				break;
 			}
 			default:
@@ -255,7 +293,7 @@ function continuesCode(code: string, s: string): boolean {
 	return /[\p{L}\p{N}_-]$/u.test(code) && /^[\p{L}\p{N}\p{M}_-]/u.test(s);
 }
 
-type ActiveMark = { mark: Mark; close: string; expel: boolean };
+type ActiveMark = { mark: Mark; close: string; expel: boolean; call?: boolean };
 
 const KEYWORD_CODE = /^#(if|for|while|context)\b/;
 
@@ -300,7 +338,12 @@ function render(parent: Node, startOfLine: boolean, extra: string, singleLine: b
 		if (!s) return;
 		let piece = s;
 		if (refAt >= 0) {
-			if (extendsRef(piece)) out = out.slice(0, refAt) + `#ref(<${refTarget}>)`;
+			// the call form ends a code expression: `.`, `(` or `[` straight after it would go on with it
+			if (extendsRef(piece)) {
+				out = out.slice(0, refAt) + `#ref(<${refTarget}>)`;
+				codeEnd = out.length;
+				code = '#ref()';
+			}
 			refAt = -1;
 		}
 		const escapable = text && !piece.startsWith('u{');
@@ -309,12 +352,16 @@ function render(parent: Node, startOfLine: boolean, extra: string, singleLine: b
 			else {
 				const start = out.search(/https?:\/\/\S*$/);
 				out = out.slice(0, start) + `#link(${typStr(out.slice(start))})`;
+				codeEnd = out.length;
+				code = '#link()';
 			}
 		}
 		urlEnd = -1;
 		if (escapable && codeEnd === out.length && !KEYWORD_CODE.test(code) && continuesCode(code, piece)) piece = '\\' + piece;
 		codeEnd = -1;
 		if (escapable && /^[\p{L}\p{N}\p{M}\p{Pc}-]/u.test(piece) && /(^|[^\\])(\\\\)*@$/.test(out)) piece = '\\' + piece;
+		// an emphasis delimiter is an identifier character to a reference: the `@` before it is escaped instead
+		if (!escapable && /^[_*]/.test(piece) && /(^|[^\\])(\\\\)*@$/.test(out)) out = out.slice(0, -1) + '\\@';
 		if (/^[/*]/.test(piece) && /(^|[^\\])(\\\\)*\/$/.test(out)) out = out.slice(0, -1) + '\\/';
 		else if (piece.startsWith('/') && /(^|[^\\])(\\\\)*\*$/.test(out)) piece = (escapable ? '\\' : ' ') + piece;
 		out += piece;
@@ -329,7 +376,15 @@ function render(parent: Node, startOfLine: boolean, extra: string, singleLine: b
 				stolen = ws[1];
 			}
 		}
-		for (const a of closing) emit(a.close);
+		for (const a of closing) {
+			emit(a.close);
+			// a mark written as a call (`#text(fill: ..)[..]`) ends a code expression: text going
+			// straight on from its `]` with `.`, `(` or `[` would read as more of the call
+			if (a.call && a.close.endsWith(']')) {
+				codeEnd = out.length;
+				code = '#';
+			}
+		}
 		emit(stolen);
 	}
 
@@ -359,7 +414,7 @@ function render(parent: Node, startOfLine: boolean, extra: string, singleLine: b
 			}
 			if (!d.expel) {
 				emit(d.open);
-				active.push({ mark: m, close: d.close, expel: false });
+				active.push({ mark: m, close: d.close, expel: false, call: d.open.startsWith('#') });
 				bracketBody = d.open.endsWith('[');
 				continue;
 			}
@@ -376,7 +431,7 @@ function render(parent: Node, startOfLine: boolean, extra: string, singleLine: b
 				(isAlnum(runs[end].content[runs[end].content.length - 1]) && isAlnum(charAfterSpan(runs, end, k)));
 			if (intraword) {
 				emit(m.type.name === 'strong' ? '#strong[' : '#emph[');
-				active.push({ mark: m, close: ']', expel: false });
+				active.push({ mark: m, close: ']', expel: false, call: true });
 				bracketBody = true;
 				continue;
 			}

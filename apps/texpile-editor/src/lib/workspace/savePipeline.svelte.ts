@@ -44,6 +44,10 @@ export class SavePipeline {
 	private inFlight = new Set<string>();
 
 	beforeWrite: ((path: string, content: string) => Promise<void>) | null = null;
+	/** the content checked and, when it had to be, rewritten before it goes to disk: what the
+	 *  visual editor serialized must parse back to what it shows (see verifiedSerialize). Null
+	 *  keeps the content as queued */
+	verify: ((path: string, content: string) => Promise<string | null>) | null = null;
 
 	constructor(private deps: SaveDeps) {}
 
@@ -158,8 +162,9 @@ export class SavePipeline {
 		return result;
 	}
 
-	private async write(path: string, content: string, notify: boolean, eol: Eol, force: boolean): Promise<boolean> {
+	private async write(path: string, queued: string, notify: boolean, eol: Eol, force: boolean): Promise<boolean> {
 		this.saving = true;
+		let content = queued;
 		try {
 			// The point of no return for someone else's edit: writeText below replaces the whole file,
 			// so if disk moved since we last read or wrote it (VS Code, a git checkout, an AI agent),
@@ -172,6 +177,8 @@ export class SavePipeline {
 				this.deps.raiseConflict(path, notify);
 				return false;
 			}
+			const verified = this.verify ? await this.verify(path, content).catch(() => null) : null;
+			if (verified !== null) content = verified;
 			await this.beforeWrite?.(path, content).catch(() => undefined);
 			await this.deps.writeText(path, fromLf(content, eol)); // re-apply the file's CRLF/LF on disk
 			await this.deps.recordDiskStamp(path); // our own write must not read as an external one

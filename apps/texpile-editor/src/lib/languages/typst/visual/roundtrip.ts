@@ -1,12 +1,12 @@
 // the .typ file IS the document, same fidelity model as latexRoundtrip and the markdown side.
 // Typst has no preamble/frontmatter split: code-mode preludes (#import/#set/#show) are ordinary
-// top-level raw blocks, preserved verbatim by the orig machinery like every other block. The
+// top-level raw blocks, written back as their bytes like every other untouched block. The
 // ParsedLatexFile shape is reused wholesale so the buffer/worker/view plumbing needs no parallel
 // types: preamble = '', postamble = '', hadDocumentEnv = false.
 import { typstToProseMirror } from './converter';
-import { serializeToTypstDetailed, serializeTypNode } from './serializer';
-import { fillOrigNorms } from '$lib/serializer/blockAssembly';
+import { serializeToTypstDetailed } from './serializer';
 import { padTables } from '$lib/editor/visual/padTables';
+import { collectMap, rememberParseMap, shiftMap, warnMapDefects, type RegionParse, type SourceMap } from '$lib/editor/visual/sourceSpans';
 import type { Node } from 'prosemirror-model';
 import type { ParsedLatexFile, ParsePhase } from '$lib/workspace/latexRoundtrip';
 
@@ -14,7 +14,7 @@ export function parseTypstFile(source: string, _projectMacros = '', onPhase?: (p
 	onPhase?.('parsing');
 	const { doc: parsedDoc } = typstToProseMirror(source);
 	onPhase?.('finalizing');
-	const doc = fillOrigNorms(padTables(parsedDoc), serializeTypNode);
+	const doc = padTables(parsedDoc);
 
 	if (import.meta.env.DEV) {
 		try {
@@ -24,15 +24,36 @@ export function parseTypstFile(source: string, _projectMacros = '', onPhase?: (p
 		}
 	}
 
-	return { preamble: '', postamble: '', doc, hadDocumentEnv: false, warnings: [] };
+	// the parser reads the markup after a byte order mark, so its offsets count from there
+	const bom = source.startsWith('\uFEFF') ? 1 : 0;
+	const map = collectMap(doc, bom);
+	const origins = rememberParseMap(doc, map, { text: source, from: bom, to: source.length });
+	warnMapDefects('typstRoundtrip', origins);
+	return { preamble: '', postamble: '', doc, hadDocumentEnv: false, warnings: [], map, origins };
+}
+
+/** a stretch of the file parsed as the file is, for a comparison; the map's offsets are the stretch's own */
+export function parseTypstRegion(source: string): RegionParse {
+	const doc = padTables(typstToProseMirror(source).doc);
+	return { doc, map: collectMap(doc, 0) };
 }
 
 /** Serializes back to .typ (a protected tail reproduces the exact original trailing bytes,
  *  including a missing final newline). A file that opened with a BOM keeps it. */
-export function serializeTypstFile(_parsed: Pick<ParsedLatexFile, 'preamble' | 'postamble' | 'hadDocumentEnv'>, doc: Node): string {
-	const { text: body, tailProtected } = serializeToTypstDetailed(doc);
+export function serializeTypstFile(parsed: Pick<ParsedLatexFile, 'preamble' | 'postamble' | 'hadDocumentEnv'>, doc: Node): string {
+	return serializeTypstFileDetailed(parsed, doc).text;
+}
+
+/** the file text and where every run of `doc` landed in it */
+export function serializeTypstFileDetailed(
+	parsed: Pick<ParsedLatexFile, 'preamble' | 'postamble' | 'hadDocumentEnv'> & Partial<Pick<ParsedLatexFile, 'origins'>>,
+	doc: Node,
+	afresh?: ReadonlySet<Node>
+): { text: string; map: SourceMap } {
+	const { text: body, tailProtected, map } = serializeToTypstDetailed(doc, parsed.origins ?? null, afresh);
 	const file = doc.attrs.typFile as { bom?: boolean; eol?: string } | null;
 	const eol = file?.eol === '\r\n' ? '\r\n' : '\n';
 	const withTail = body + (tailProtected ? '' : eol);
-	return file?.bom && !withTail.startsWith('\uFEFF') ? '\uFEFF' + withTail : withTail;
+	const bom = file?.bom && !withTail.startsWith('\uFEFF') ? '\uFEFF' : '';
+	return { text: bom + withTail, map: shiftMap(map, bom.length, bom.length + body.length) };
 }
