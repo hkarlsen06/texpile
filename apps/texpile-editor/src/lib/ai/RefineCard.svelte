@@ -46,7 +46,9 @@
 			const sel = view?.state.selection;
 			if (!view || !sel || sel.empty || !view.dom.checkVisibility()) return;
 			setPmCommentPending(view, { from: sel.from, to: sel.to });
-			return () => setPmCommentPending(view, null);
+			// out of the teardown: the transaction that clears the mark re-renders the rail, and Svelte
+			// will not let a component take an effect while a cleanup is running
+			return () => queueMicrotask(() => !view.isDestroyed && setPmCommentPending(view, null));
 		});
 	});
 
