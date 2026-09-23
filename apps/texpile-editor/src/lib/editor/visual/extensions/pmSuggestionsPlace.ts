@@ -1,7 +1,6 @@
 // where a suggestion sits in the rendered document: the file around it parsed with and without it,
 // the two compared, and each change carried into the editor's document through the source map
 import type { Fragment, Mark, Node as PMNode } from 'prosemirror-model';
-import type { Change } from 'prosemirror-changeset';
 import type { SuggestionMark } from '$lib/comments/activeSuggestions.svelte';
 import { chipLetters } from '$lib/editor/spellcheck/blockSpellText';
 import {
@@ -16,7 +15,7 @@ import {
 } from '../sourceSpans';
 import { blockAtPm, blockAtSource } from '../sourceMap';
 import { isSelfRendered } from '../diff/selfRendered';
-import { diffDocs, textOf } from './pmSuggestionDiff';
+import { diffDocs, textOf, type DocChange } from './pmSuggestionDiff';
 
 /** a run of the words a change took out: text with its marks, or a node standing as one character */
 export type OldRun = { text: string; marks: readonly Mark[]; node?: PMNode };
@@ -469,7 +468,7 @@ function crossedEdge(doc: PMNode, from: number, to: number): { pos: number; side
 
 // a change that runs from words into a node that draws itself (or out of one) is two: the words,
 // and the node, which is then set beside the node it was rather than struck as a block with them
-function splitAtNodes(changes: Change[], before: RegionParse, after: RegionParse): Stretch[] {
+function splitAtNodes(changes: DocChange[], before: RegionParse, after: RegionParse): Stretch[] {
 	const out: Stretch[] = [];
 	for (const c of changes) {
 		let cur: Stretch = { fromA: c.fromA, toA: c.toA, fromB: c.fromB, toB: c.toB };

@@ -252,3 +252,15 @@ it('strikes the paragraph a figure took in as its caption after the figure it wa
 	expect(gone?.from).toBe(figure?.to);
 	expect(doc.resolve(gone!.from).depth).toBe(0);
 });
+
+// Louis's Refine: the last character of a Chinese paragraph and the includes after it replaced by other words
+it('strikes only the Chinese word a change took, and the includes taken with it', () => {
+	const source = '\\documentclass{article}\n\\begin{document}\na兵器里啊hello codex\n\nThe end.\n\\end{document}\n';
+	const { doc, ranges, partial } = placed(source, [mark(source, 'refine', 'hello codex', '啊\n\n\\input{intro}\n\n\\input{related}')]);
+	expect([...partial]).toEqual([]);
+	const gone = ranges.find((r) => r.gone)!;
+	expect(gone.gone!.head.map((run) => run.text).join('')).toBe('啊');
+	expect(gone.gone!.blocks.map((b: PMNode) => `${b.type.name} ${b.attrs.path}`)).toEqual(['includedoc intro', 'includedoc related']);
+	const typed = ranges.find((r) => !r.gone)!;
+	expect(doc.textBetween(typed.from, typed.to)).toBe('hello codex');
+});
