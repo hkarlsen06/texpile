@@ -60,6 +60,9 @@ export function visualCollabBridge(deps: VisualCollabBridgeDeps) {
 			// reference handshake: the editor sees its own live doc and skips the state swap
 			doc.visualDoc = liveDoc;
 			doc.lastDoc = liveDoc;
+			// what places suggestions and new comments on the text; a kept caret block leaves the old
+			// map until the next local edit writes one
+			if (liveDoc.eq(parsed.doc)) doc.sourceMap = parsed.map;
 		},
 		commit(path: string, content: string) {
 			isDirty.current = true;

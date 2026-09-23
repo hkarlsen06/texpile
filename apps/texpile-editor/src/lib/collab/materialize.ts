@@ -6,7 +6,7 @@
 
 import type * as Y from 'yjs';
 import { LATEX_SIDECAR_RE } from '$lib/workspace/buildArtifacts';
-import type { TextSpan } from '$lib/comments/editGestures';
+import { carryGestures, type TextSpan } from '$lib/comments/editGestures';
 import { manifestOf, locksOf, textOf, type ManifestEntry } from './session';
 
 export type MaterializeFs = {
@@ -105,7 +105,14 @@ export function spliceDiff(oldStr: string, newStr: string): { index: number; rem
 }
 
 /** where a Y.Text change landed, as spans of the text after it; a deletion is an empty span */
-export function changedSpans(delta: Y.YTextEvent['delta']): TextSpan[] {
+export function changedSpans(delta: Y.YTextEvent['delta'], before: string, after: string): TextSpan[] {
+	const spans = deltaSpans(delta);
+	// one edit is placed from the text, as a local one is: the writer's splice is one of several places it
+	// could have gone, and the visual editor's puts a letter typed beside the same letter after it
+	return spans.length === 1 ? carryGestures([], before, after) : spans;
+}
+
+function deltaSpans(delta: Y.YTextEvent['delta']): TextSpan[] {
 	const out: TextSpan[] = [];
 	let at = 0;
 	for (const op of delta) {
@@ -126,7 +133,7 @@ export function changedSpans(delta: Y.YTextEvent['delta']): TextSpan[] {
 }
 
 export class HostMaterializer {
-	/** awaited before each write-through, so whatever the write records lands first */
+	/** awaited once a file's changes settle, before the write-through, so whatever the write records lands first */
 	onWrite: ((rel: string, content: string) => Promise<void>) | null = null;
 	/** the peer a transaction origin came from, or null when it is this side's own */
 	senderOf: ((origin: unknown) => number | null) | null = null;
@@ -205,7 +212,7 @@ export class HostMaterializer {
 			this.running.set(rel, after);
 			if (origin === SEED_ORIGIN) return;
 			const from = this.senderOf?.(origin) ?? null;
-			if (from !== null && before !== after) this.onRemoteChange?.(rel, before, after, from, changedSpans(ev.delta));
+			if (from !== null && before !== after) this.onRemoteChange?.(rel, before, after, from, changedSpans(ev.delta, before, after));
 			this.scheduleWrite(rel);
 		};
 		t.observe(handler);
@@ -230,13 +237,13 @@ export class HostMaterializer {
 		const entry = manifestOf(this.doc).get(rel);
 		if (!entry || entry.kind !== 'text' || entry.gone) return;
 		const content = textOf(this.doc, rel).toString();
-		const before = this.lastWritten.get(rel);
-		if (before === content) return;
+		// even when the changes cancel out: what they moved is still recorded
 		try {
 			await this.onWrite?.(rel, content);
 		} catch (e) {
 			this.onError?.(rel, e);
 		}
+		if (this.lastWritten.get(rel) === content) return;
 		try {
 			await this.fs.writeText(this.joinPath(this.root, rel), fromLf(content, entry.eol ?? '\n'));
 			this.lastWritten.set(rel, content);

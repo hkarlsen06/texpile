@@ -4,18 +4,21 @@
 // y-codemirror, the same binding the source editor uses. Each test file mocks the fs modules onto
 // `disk` before importing this.
 import * as Y from 'yjs';
+import { expect } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { yCollab } from 'y-codemirror.next';
 import { deriveSessionKeys } from '$lib/collab/e2e/keys';
 import { generateShareCode } from '$lib/collab/e2e/shareCode';
 import { CollabSession, textOf, type SessionEvents } from '$lib/collab/session';
-import { HostMaterializer, changedSpans } from '$lib/collab/materialize';
+import { EDIT_ORIGIN, HostMaterializer, changedSpans, spliceDiff } from '$lib/collab/materialize';
 import { isSafeCommentEvent, type RelayNotice } from '$lib/collab/protocol';
 import type { Transport, TransportStatus } from '$lib/collab/transport';
 import { parseLog, serializeLog, type CommentEvent, type CommentThread } from '$lib/comments/log';
 import type { EditMode, PlacedSuggestion } from '$lib/comments/suggestCompare';
 import { CommentsController } from '$lib/workspace/commentsController.svelte';
+import { activeSuggestions, editMode } from '$lib/comments/activeSuggestions.svelte';
+import { cmSuggestions, fitsSuggestion, setSuggestionRanges } from '$lib/editor/source/cmSuggestions';
 import { disk, resetDisk } from './sessionDisk';
 
 export const FILE = 'main.tex';
@@ -84,7 +87,9 @@ export function placedOn(ctl: CommentsController): { text: string; placed: Place
 /** the file with every placed suggestion rejected: what it said before anyone suggested anything */
 export function withAllRejected(text: string, placed: Placed): string {
 	let out = text;
-	for (const s of [...placed].sort((a, b) => b.from - a.from || b.to - a.to)) out = out.slice(0, s.from) + s.restore + out.slice(s.to);
+	// last first, so several deletions at one spot go back in the order they are placed in
+	for (const s of [...placed].sort((a, b) => a.from - b.from || a.to - b.to).reverse())
+		out = out.slice(0, s.from) + s.restore + out.slice(s.to);
 	return out;
 }
 
@@ -116,33 +121,118 @@ function sharedEditor(ytext: Y.Text, awareness: CollabSession['awareness'], onTe
 
 type Editor = ReturnType<typeof sharedEditor>;
 
-/** typing and deleting in an editor the way a person does: one keystroke per transaction */
-function keyboard(ed: Editor) {
+type Stroke = [from: number, to: number, insert: string];
+
+function find(text: string, words: string): number {
+	const at = text.indexOf(words);
+	if (at < 0) throw new Error(`no "${words}" in ${JSON.stringify(text)}`);
+	return at;
+}
+
+// each key is worked out against the text as it stands after the one before
+const strokes = {
+	*type(text: () => string, words: string, mark: string): Generator<Stroke> {
+		for (const ch of words) {
+			const at = find(text(), mark);
+			yield [at, at, ch];
+		}
+	},
+	*typeAt(at: number, words: string): Generator<Stroke> {
+		for (const [i, ch] of [...words].entries()) yield [at + i, at + i, ch];
+	},
+	*erase(text: () => string, words: string): Generator<Stroke> {
+		const at = find(text(), words);
+		for (let i = words.length; i > 0; i--) yield [at + i - 1, at + i, ''];
+	},
+	*cut(text: () => string, words: string): Generator<Stroke> {
+		const at = find(text(), words);
+		yield [at, at + words.length, ''];
+	},
+	*replace(text: () => string, words: string, by: string): Generator<Stroke> {
+		const at = find(text(), words);
+		yield [at, at + words.length, by.slice(0, 1)];
+		yield* strokes.typeAt(at + 1, by.slice(1));
+	}
+};
+
+function keysFor<R>(text: () => string, press: (keys: Iterable<Stroke>) => R) {
 	return {
 		/** type `words` just before the first `mark` */
-		type(words: string, mark: string) {
-			for (const ch of words) {
-				const at = ed.text().indexOf(mark);
-				if (at < 0) throw new Error(`no "${mark}" in ${JSON.stringify(ed.text())}`);
-				ed.change(at, at, ch);
-			}
-		},
+		type: (words: string, mark: string) => press(strokes.type(text, words, mark)),
 		/** type `words` at an offset */
-		typeAt(at: number, words: string) {
-			for (const [i, ch] of [...words].entries()) ed.change(at + i, at + i, ch);
-		},
+		typeAt: (at: number, words: string) => press(strokes.typeAt(at, words)),
 		/** delete the first `words`, a backspace at a time from its end */
-		erase(words: string) {
-			const at = ed.text().indexOf(words);
-			if (at < 0) throw new Error(`no "${words}" in ${JSON.stringify(ed.text())}`);
-			for (let i = words.length; i > 0; i--) ed.change(at + i - 1, at + i, '');
-		},
+		erase: (words: string) => press(strokes.erase(text, words)),
+		/** select the first `words` and press Delete */
+		cut: (words: string) => press(strokes.cut(text, words)),
 		/** select `words` and type over them */
-		replace(words: string, by: string) {
-			const at = ed.text().indexOf(words);
-			if (at < 0) throw new Error(`no "${words}" in ${JSON.stringify(ed.text())}`);
-			ed.change(at, at + words.length, by.slice(0, 1));
-			if (by.length > 1) this.typeAt(at + 1, by.slice(1));
+		replace: (words: string, by: string) => press(strokes.replace(text, words, by))
+	};
+}
+
+/** typing and deleting in an editor the way a person does: one keystroke per transaction */
+function keyboard(ed: Editor) {
+	return keysFor(ed.text, (keys) => {
+		for (const [from, to, insert] of keys) ed.change(from, to, insert);
+	});
+}
+
+export type Keys = ReturnType<typeof keysFor<unknown>>;
+
+/**
+ * One person on their own in Suggesting, the reference for what the host should record for a guest
+ * typing the same keys: a source editor with the suggestion marks drawn, and every key settled
+ * before the next.
+ */
+export async function startSolo(o: { text: string; name: string; log?: CommentEvent[] }) {
+	resetDisk({ [FILE]: o.text, '.texpile/comments.jsonl': serializeLog(o.log ?? []) });
+	editMode.current = 'suggesting';
+	const view: EditorView = new EditorView({
+		state: EditorState.create({ doc: o.text, extensions: [cmSuggestions()] }),
+		parent: document.body
+	});
+	const text = () => view.state.doc.toString();
+	const change = (from: number, to: number, insert: string) =>
+		view.dispatch({ changes: { from, to, insert }, userEvent: insert ? 'input.type' : 'delete' });
+	const ctl = new CommentsController({
+		root: () => '/w',
+		preferredAuthor: () => o.name,
+		openFileAt: () => {},
+		activeText: text,
+		mode: () => 'suggesting',
+		applyEdit: async (e) => {
+			change(e.from, e.to, e.insert);
+			return true;
+		},
+		saveNow: () => {}
+	});
+	await ctl.load('/w');
+	ctl.reanchor('/w/' + FILE, text());
+	ctl.suggestions.textChanged('/w/' + FILE, text());
+	// as SourceEditor feeds the marks back to the editor after each comparison
+	const draw = () => {
+		const marks = activeSuggestions.current;
+		if (!marks.every((r) => fitsSuggestion(view.state, r))) return;
+		view.dispatch({ effects: setSuggestionRanges.of(marks.map(({ id, from, to, restore, mine }) => ({ id, from, to, restore, mine }))) });
+	};
+	await ctl.suggestions.settle();
+	draw();
+	return {
+		ctl,
+		view,
+		text,
+		keys: keysFor(text, async (keys) => {
+			for (const [from, to, insert] of keys) {
+				change(from, to, insert);
+				ctl.suggestions.textChanged('/w/' + FILE, text());
+				await ctl.suggestions.settle();
+				draw();
+			}
+		}),
+		close() {
+			view.destroy();
+			editMode.current = 'editing';
+			activeSuggestions.current = [];
 		}
 	};
 }
@@ -275,9 +365,19 @@ export async function startSession(o: SessionOptions) {
 		back: () => host.transport.start()
 	};
 
-	const guests: Awaited<ReturnType<typeof join>>[] = [];
+	const guests: Awaited<ReturnType<typeof connectGuest>>[] = [];
+	function forget(side: object): void {
+		guests.splice((guests as object[]).indexOf(side), 1);
+	}
 
-	async function join(name: string) {
+	/** `author`: the name in the guest's Preferences, when it is not the one they joined under */
+	async function join(name: string, o: { author?: string } = {}) {
+		const side = await connectGuest(name, o);
+		guests.push(side);
+		return side;
+	}
+
+	async function connectGuest(name: string, o: { author?: string }) {
 		let mode: EditMode = 'editing';
 		const g = party('guest', name, {
 			onControl: (payload) => {
@@ -287,11 +387,13 @@ export async function startSession(o: SessionOptions) {
 				if (blob === 'comments') ctl.adopt(new TextDecoder().decode(bytes), 'session/' + FILE, editor.text());
 			}
 		});
+		// as workspaceComments advertises it
+		g.session.setAuthor(o.author ?? name);
 		const ytext = textOf(g.doc, FILE);
 		await until(() => ytext.toString() === hostSide.text(), 10000, `${name} catching up`);
 		const ctl = new CommentsController({
 			root: () => 'session',
-			preferredAuthor: () => name,
+			preferredAuthor: () => o.author ?? name,
 			openFileAt: () => {},
 			activeText: () => editor.text(),
 			mode: () => mode,
@@ -314,7 +416,7 @@ export async function startSession(o: SessionOptions) {
 			running = ytext.toString();
 			const who = g.session.senderOf(ev.transaction.origin);
 			if (who === null || before === running || ctl.activeFile !== FILE) return;
-			ctl.remoteEdit(FILE, before, running, { ...g.session.authorOf(who), gestures: changedSpans(ev.delta) });
+			ctl.remoteEdit(FILE, before, running, { ...g.session.authorOf(who), gestures: changedSpans(ev.delta, before, running) });
 		});
 		await ctl.load(null);
 		ctl.reanchor('session/' + FILE, editor.text());
@@ -327,6 +429,25 @@ export async function startSession(o: SessionOptions) {
 			doc: g.doc,
 			editor,
 			keys: keyboard(editor),
+			/** each key reaching the host and settling there before the next */
+			slowKeys: keysFor(editor.text, async (keys) => {
+				for (const [from, to, insert] of keys) {
+					editor.change(from, to, insert);
+					await quiet();
+				}
+			}),
+			/** each key folded into the shared text the way the visual editor writes, as guestSession.edit does */
+			visualKeys: keysFor(editor.text, (keys) => {
+				for (const [from, to, insert] of keys) {
+					const now = ytext.toString();
+					const diff = spliceDiff(now, now.slice(0, from) + insert + now.slice(to));
+					if (!diff) continue;
+					g.doc.transact(() => {
+						if (diff.remove > 0) ytext.delete(diff.index, diff.remove);
+						if (diff.insert) ytext.insert(diff.index, diff.insert);
+					}, EDIT_ORIGIN);
+				}
+			}),
 			text: () => editor.text(),
 			hostRecords: () => [...g.session.peers.values()].some((p) => p.role === 'host' && p.suggesting !== undefined),
 			async mode(next: EditMode) {
@@ -342,9 +463,11 @@ export async function startSession(o: SessionOptions) {
 			},
 			away: () => g.transport.drop(),
 			back: () => g.transport.start(),
-			leave: () => g.session.destroy()
+			leave(): void {
+				g.session.destroy();
+				forget(side);
+			}
 		};
-		guests.push(side);
 		return side;
 	}
 
@@ -358,6 +481,9 @@ export async function startSession(o: SessionOptions) {
 			await mat.flushAll();
 			await tick(20);
 		}
+		// on a busy machine the host's last events can still be on the wire; agree() says what never arrives
+		const drawn = (ctl: CommentsController) => JSON.stringify(shape(ctl));
+		await until(() => guests.every((g) => drawn(g.ctl) === drawn(hostCtl)), 5000).catch(() => {});
 	}
 
 	return {
@@ -373,3 +499,47 @@ export async function startSession(o: SessionOptions) {
 
 export type Session = Awaited<ReturnType<typeof startSession>>;
 export type Guest = Awaited<ReturnType<Session['join']>>;
+
+const shape = (ctl: CommentsController) =>
+	(placedOn(ctl)?.placed ?? []).map((p) => ({ id: p.id, from: p.from, to: p.to, restore: p.restore, author: p.author }));
+
+/** once everything has settled: every guest draws what the host recorded, nothing is lost, and rejecting it all gives `base` */
+export async function agree(s: Session, base: string): Promise<void> {
+	await s.quiet();
+	const host = placedOn(s.host.ctl);
+	const text = s.host.text();
+	expect(host?.text ?? text).toBe(text);
+	expect([...s.host.ctl.orphaned]).toEqual([]);
+	const recorded = s.host.ctl.threads.filter((t) => t.restore !== undefined && !t.resolved && t.file === FILE).map((t) => t.id);
+	expect(
+		shape(s.host.ctl)
+			.map((p) => p.id)
+			.sort()
+	).toEqual(recorded.sort());
+	for (const g of s.guests) {
+		expect(g.text()).toBe(text);
+		expect(shape(g.ctl), `${g.name} draws what the host recorded`).toEqual(shape(s.host.ctl));
+	}
+	expect(withAllRejected(text, host?.placed ?? [])).toBe(base);
+	expect(disk[FILE]).toBe(text);
+}
+
+export async function rejectAllOn(ctl: CommentsController, s: Session): Promise<void> {
+	for (let n = 0; n < 50; n++) {
+		await s.quiet();
+		const t = ctl.threads.find((x) => x.restore !== undefined && !x.resolved);
+		if (!t) return;
+		expect(await ctl.suggestions.reject(t), `rejecting ${JSON.stringify(t.anchor.quote)}`).toBe(true);
+	}
+	throw new Error('suggestions kept coming back');
+}
+
+export async function acceptAllOn(ctl: CommentsController, s: Session): Promise<void> {
+	for (let n = 0; n < 50; n++) {
+		await s.quiet();
+		const t = ctl.threads.find((x) => x.restore !== undefined && !x.resolved);
+		if (!t) return;
+		await ctl.suggestions.accept(t);
+	}
+	throw new Error('suggestions kept coming back');
+}

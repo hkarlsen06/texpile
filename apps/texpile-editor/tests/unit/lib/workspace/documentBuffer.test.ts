@@ -86,6 +86,34 @@ describe('DocumentBuffer.lastDocSource follows the mounted doc, not the last par
 	});
 });
 
+// a shared session got the edit the moment it was made; the undo that takes it back to the saved
+// text queues no save, so it must still reach the session or everyone else keeps the edit
+it('hands an edit undone back to the saved text to the shared session', () => {
+	const shareEdit = vi.fn();
+	const scheduleSave = vi.fn();
+	const buffer = new DocumentBuffer({
+		scheduleSave,
+		discardQueuedSave: () => {},
+		shareEdit,
+		writeNow: () => {},
+		rebuildVisual: () => {},
+		isVisualMode: () => true,
+		noteLocalEdit: () => {},
+		clearPendingAnchor: () => {}
+	});
+	buffer.openTex('C:/ws/main.tex', 'ORIGINAL', '\n');
+	buffer.adoptParsed(parsedWith('as saved'), 'ORIGINAL');
+	buffer.onVisualChange(parsedWith('as saved').doc);
+	const saved = buffer.texSource;
+	buffer.diskBaseline = saved;
+	buffer.onVisualChange(parsedWith('edited').doc);
+	expect(scheduleSave).toHaveBeenLastCalledWith('C:/ws/main.tex', buffer.texSource);
+	scheduleSave.mockClear();
+	buffer.onVisualChange(parsedWith('as saved').doc);
+	expect(scheduleSave).not.toHaveBeenCalled();
+	expect(shareEdit).toHaveBeenLastCalledWith('C:/ws/main.tex', saved);
+});
+
 describe('DocumentBuffer.verifyForWrite', () => {
 	const SRC = '\\documentclass{article}\n\\begin{document}\nAlpha   one.\n\nBeta two.\n\\end{document}\n';
 	function withCheck(reparse: (text: string) => Promise<PMNode | null>) {

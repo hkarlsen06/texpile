@@ -200,6 +200,7 @@ class GuestCollabController {
 			this.session = session;
 			this.transport = transport;
 			session.setSuggesting(this.suggesting);
+			session.setAuthor(this.author);
 			transport.connect();
 
 			// belt-and-braces: the relay now closes with a specific code for a bad join, but if it's
@@ -342,6 +343,14 @@ class GuestCollabController {
 	setSuggesting(on: boolean): void {
 		this.suggesting = on;
 		this.session?.setSuggesting(on);
+	}
+
+	private author = '';
+
+	/** the name this guest signs comments with, which the host records its suggestions under */
+	setAuthor(name: string): void {
+		this.author = name;
+		this.session?.setAuthor(name);
 	}
 
 	/** who made a change this guest received and in which mode, or null for its own */

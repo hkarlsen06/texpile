@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 // suggestions in a shared session, end to end: real editors on every side, the host recording
-import { it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { buildAnchor } from '$lib/comments/anchor';
+import { openEvent, type CommentEvent } from '$lib/comments/log';
+import { removeAwarenessStates } from 'y-protocols/awareness';
 import { disk } from './sessionDisk';
 
 vi.mock('$lib/workspace/fileSystem', async () => {
@@ -26,8 +29,11 @@ vi.mock('$lib/comments/author', () => ({
 	forgetAuthor: () => {}
 }));
 
-const { startSession, openSuggestions, placedOn, withAllRejected, logged, FILE } = await import('./sessionHarness');
+const { startSession, startSolo, openSuggestions, placedOn, withAllRejected, logged, agree, rejectAllOn, acceptAllOn, until, FILE } =
+	await import('./sessionHarness');
 type Session = Awaited<ReturnType<typeof startSession>>;
+type Keys = import('./sessionHarness').Keys;
+type Side = { ctl: Parameters<typeof placedOn>[0] };
 
 const TEXT = 'We prove the estimator is sharp for smooth solutions.\n';
 
@@ -54,50 +60,114 @@ it('smoke: a guest typing in Suggesting reaches the host as their suggestion', a
 	expect(withAllRejected(s.host.text(), placedOn(s.host.ctl)!.placed)).toBe(TEXT);
 });
 
-type Side = { ctl: Parameters<typeof placedOn>[0] };
-const shape = (side: Side) =>
-	(placedOn(side.ctl)?.placed ?? []).map((p) => ({ id: p.id, from: p.from, to: p.to, restore: p.restore, author: p.author }));
+const blunt = TEXT.replace('sharp', 'blunt');
+const adaBlunt = openEvent({
+	id: 'ada-blunt',
+	file: FILE,
+	by: 'ada',
+	body: '',
+	anchor: buildAnchor(blunt, blunt.indexOf('blunt'), blunt.indexOf('blunt') + 5),
+	at: 'now',
+	restore: 'sharp'
+});
 
-/** once everything has settled: every guest draws what the host recorded, nothing is lost, and rejecting it all gives `base` */
-async function agree(s: Session, base: string) {
-	await s.quiet();
-	const host = placedOn(s.host.ctl);
-	const text = s.host.text();
-	expect(host?.text ?? text).toBe(text);
-	expect([...s.host.ctl.orphaned]).toEqual([]);
-	const recorded = s.host.ctl.threads.filter((t) => t.restore !== undefined && !t.resolved && t.file === FILE).map((t) => t.id);
-	expect(
-		shape(s.host)
-			.map((p) => p.id)
-			.sort()
-	).toEqual(recorded.sort());
-	for (const g of s.guests) {
-		expect(g.text()).toBe(text);
-		expect(shape(g), `${g.name} draws what the host recorded`).toEqual(shape(s.host));
-	}
-	expect(withAllRejected(text, host?.placed ?? [])).toBe(base);
-	expect(disk[FILE]).toBe(text);
-}
+// the same keys typed by one person alone, settling after each, are the reference
+const SAME_AS_ALONE: [string, { text: string; log?: CommentEvent[] }, (k: Keys) => Promise<unknown>][] = [
+	['replacing a word', { text: TEXT }, async (k) => k.replace('sharp', 'blunt')],
+	['replacing a word by one that ends the same', { text: blunt }, async (k) => k.replace('blunt', 'tight')],
+	['replacing a word by one that starts the same', { text: TEXT }, async (k) => k.replace('sharp', 'steep')],
+	['replacing a word by one that shares its middle', { text: TEXT }, async (k) => k.replace('smooth', 'moot')],
+	['inserting a word', { text: TEXT }, async (k) => k.type('new ', 'estimator')],
+	['inserting a word that repeats the letters before it', { text: TEXT }, async (k) => k.type('ter estima', 'tor is')],
+	['deleting a word a backspace at a time', { text: TEXT }, async (k) => k.erase('sharp ')],
+	['deleting a selected word', { text: TEXT }, async (k) => k.cut('sharp ')],
+	['deleting a selected word before one that starts the same', { text: TEXT }, async (k) => k.cut('smooth ')],
+	['deleting a word before one that starts the same a backspace at a time', { text: TEXT }, async (k) => k.erase('smooth ')],
+	[
+		'deleting a word and typing its replacement',
+		{ text: TEXT },
+		async (k) => {
+			await k.erase('sharp');
+			await k.type('blunt', ' for smooth');
+		}
+	],
+	[
+		'deleting part of their own insertion',
+		{ text: TEXT },
+		async (k) => {
+			await k.type('very new ', 'estimator');
+			await k.erase('very ');
+		}
+	],
+	[
+		'typing inside their own replacement',
+		{ text: TEXT },
+		async (k) => {
+			await k.replace('sharp', 'blunt');
+			await k.replace('lun', 'ea');
+		}
+	],
+	[
+		'deleting across their own replacement and the words beside it',
+		{ text: TEXT },
+		async (k) => {
+			await k.replace('sharp', 'blunt');
+			await k.erase('is blunt');
+		}
+	],
+	['typing inside someone else’s replacement', { text: blunt, log: [adaBlunt] }, async (k) => k.replace('lun', 'ea')],
+	['deleting someone else’s replacement', { text: blunt, log: [adaBlunt] }, async (k) => k.erase('blunt ')],
+	['typing just after someone else’s replacement', { text: blunt, log: [adaBlunt] }, async (k) => k.type('ly', ' for')]
+];
 
-async function rejectAllOn(ctl: Side['ctl'], s: Session) {
-	for (let n = 0; n < 50; n++) {
+const shapeAlone = (ctl: Side['ctl']) =>
+	(placedOn(ctl)?.placed ?? []).map(({ from, to, restore, author }) => ({ from, to, restore, author }));
+
+describe('the host records a guest’s keys the way it records one person typing them alone', () => {
+	it.each(SAME_AS_ALONE)('%s', async (_, start, keys) => {
+		const solo = await startSolo({ ...start, name: 'mei' });
+		await keys(solo.keys);
+		const alone = { text: solo.text(), placed: shapeAlone(solo.ctl) };
+		solo.close();
+		const base = withAllRejected(alone.text, placedOn(solo.ctl)!.placed);
+
+		const s = await session(start);
+		const mei = await s.join('mei');
+		await mei.mode('suggesting');
+		await keys(mei.keys);
+		await agree(s, base);
+		expect({ text: s.host.text(), placed: shapeAlone(s.host.ctl) }).toEqual(alone);
+	});
+
+	it.each(SAME_AS_ALONE)('%s, each key settling on the host before the next', async (_, start, keys) => {
+		const solo = await startSolo({ ...start, name: 'mei' });
+		await keys(solo.keys);
+		const alone = { text: solo.text(), placed: shapeAlone(solo.ctl) };
+		solo.close();
+
+		const s = await session(start);
+		const mei = await s.join('mei');
+		await mei.mode('suggesting');
+		await keys(mei.slowKeys);
 		await s.quiet();
-		const t = ctl.threads.find((x) => x.restore !== undefined && !x.resolved);
-		if (!t) return;
-		expect(await ctl.suggestions.reject(t), `rejecting ${JSON.stringify(t.anchor.quote)}`).toBe(true);
-	}
-	throw new Error('suggestions kept coming back');
-}
+		expect({ text: s.host.text(), placed: shapeAlone(s.host.ctl) }).toEqual(alone);
+	});
 
-async function acceptAllOn(ctl: Side['ctl'], s: Session) {
-	for (let n = 0; n < 50; n++) {
+	// the visual editor splices the whole text in, which puts a letter typed beside the same letter after it
+	it.each(SAME_AS_ALONE)('%s, from the visual editor', async (_, start, keys) => {
+		const solo = await startSolo({ ...start, name: 'mei' });
+		await keys(solo.keys);
+		const alone = { text: solo.text(), placed: shapeAlone(solo.ctl) };
+		solo.close();
+
+		const s = await session(start);
+		const mei = await s.join('mei');
+		await mei.mode('suggesting');
+		await keys(mei.visualKeys);
 		await s.quiet();
-		const t = ctl.threads.find((x) => x.restore !== undefined && !x.resolved);
-		if (!t) return;
-		await ctl.suggestions.accept(t);
-	}
-	throw new Error('suggestions kept coming back');
-}
+		expect({ text: s.host.text(), placed: shapeAlone(s.host.ctl) }).toEqual(alone);
+	});
+});
 
 it('a guest replaces, adds and deletes words; the host rejects them all and the file is exactly the original', async () => {
 	const s = await session();
@@ -154,6 +224,56 @@ it('a guest rejects their own suggestion: the words come back and nothing new is
 	expect(logged().filter((e) => e.t === 'open')).toHaveLength(2);
 });
 
+it('a guest undoing their own Reject while suggesting suggests the words again', async () => {
+	const s = await session();
+	const mei = await s.join('mei');
+	await mei.mode('suggesting');
+	mei.keys.replace('sharp', 'blunt');
+	await agree(s, TEXT);
+	const rejected = mei.ctl.threads.find((t) => t.restore === 'sharp')!;
+	// a person takes longer than the undo manager's half second to reach the Reject button
+	mei.editor.undo.stopCapturing();
+	expect(await mei.ctl.suggestions.reject(rejected)).toBe(true);
+	mei.editor.undo.stopCapturing();
+	await agree(s, TEXT);
+	mei.editor.undo.undo();
+	await agree(s, TEXT);
+	expect(openSuggestions(s.host.ctl.threads)).toEqual([['mei', 'blunt', 'sharp']]);
+	expect(s.host.ctl.threads.find((t) => t.id === rejected.id)?.decision).toBe('rejected');
+});
+
+it('a guest undoing their own Reject while editing brings the same suggestion back', async () => {
+	const s = await session();
+	const mei = await s.join('mei');
+	await mei.mode('suggesting');
+	mei.keys.replace('sharp', 'blunt');
+	await agree(s, TEXT);
+	await mei.mode('editing');
+	const rejected = mei.ctl.threads.find((t) => t.restore === 'sharp')!;
+	mei.editor.undo.stopCapturing();
+	expect(await mei.ctl.suggestions.reject(rejected)).toBe(true);
+	mei.editor.undo.stopCapturing();
+	await agree(s, TEXT);
+	mei.editor.undo.undo();
+	await agree(s, TEXT);
+	expect(s.host.ctl.threads.filter((t) => !t.resolved).map((t) => t.id)).toEqual([rejected.id]);
+});
+
+it('a guest who signs comments with another name than the one they joined under suggests under that name', async () => {
+	const s = await session();
+	const mei = await s.join('mei', { author: 'Mei Chen' });
+	await mei.mode('suggesting');
+	mei.keys.replace('sharp', 'blunt');
+	await s.quiet();
+	// at the end of their own suggestion, so it grows rather than starting another
+	mei.keys.type('ly', ' for');
+	await agree(s, TEXT);
+	expect(openSuggestions(s.host.ctl.threads)).toEqual([['Mei Chen', 'bluntly', 'sharp']]);
+	expect(await mei.ctl.suggestions.reject(mei.ctl.threads[0])).toBe(true);
+	await agree(s, TEXT);
+	expect(logged().flatMap((e) => (e.t === 'open' || e.t === 'resolve' ? [e.by] : []))).toEqual(['Mei Chen', 'Mei Chen']);
+});
+
 it('a guest accepts a suggestion someone else made', async () => {
 	const s = await session();
 	const mei = await s.join('mei');
@@ -163,7 +283,8 @@ it('a guest accepts a suggestion someone else made', async () => {
 	await agree(s, TEXT);
 	await acceptAllOn(ada.ctl, s);
 	await agree(s, TEXT.replace('sharp', 'blunt'));
-	expect(s.host.ctl.threads.map((t) => [t.decision, t.resolvedBy ?? null])).toEqual([['accepted', null]]);
+	expect(s.host.ctl.threads.map((t) => t.decision)).toEqual(['accepted']);
+	expect(logged().flatMap((e) => (e.t === 'resolve' ? [[e.decision, e.by]] : []))).toEqual([['accepted', 'ada']]);
 });
 
 it('a guest in Editing changes the file without suggesting anything, beside the host suggesting', async () => {
@@ -274,7 +395,8 @@ it('a guest undoing what they suggested withdraws it', async () => {
 	expect(openSuggestions(s.host.ctl.threads)).toEqual([]);
 	mei.editor.undo.redo();
 	await agree(s, TEXT);
-	expect(openSuggestions(s.host.ctl.threads)).toEqual([['mei', 'new ', '']]);
+	// the redo brings the words back at once, and like a paste they can stand either side of the space
+	expect(openSuggestions(s.host.ctl.threads).map(([by, words, restore]) => [by, words.trim(), restore])).toEqual([['mei', 'new', '']]);
 });
 
 it('a guest retyping the words they deleted withdraws the deletion', async () => {
@@ -325,6 +447,120 @@ it('every write of a guest suggestion has the log entries for it on disk first',
 		expect(opened, JSON.stringify(w.tex)).toBeGreaterThanOrEqual(words > 0 ? 1 : 0);
 	}
 	await agree(s, TEXT);
+});
+
+it('two guests deleting neighbouring words at once: everyone draws the struck words in the order the host recorded', async () => {
+	const text = 'The adaptive scheme wins.\n';
+	const s = await session({ text });
+	const mei = await s.join('mei');
+	const ada = await s.join('ada');
+	await mei.mode('suggesting');
+	await ada.mode('suggesting');
+	mei.keys.cut('scheme ');
+	ada.keys.erase('wins.');
+	await agree(s, text);
+	expect(placedOn(s.host.ctl)!.placed.map((p) => [p.author, p.restore])).toEqual([
+		['mei', 'scheme '],
+		['ada', 'wins.']
+	]);
+});
+
+it('a guest rejecting Deletes stacked at one spot puts each one back in its place', async () => {
+	const s = await session();
+	const mei = await s.join('mei');
+	const ada = await s.join('ada');
+	await mei.mode('suggesting');
+	await ada.mode('suggesting');
+	// right to left, so each one stacks in front of the last
+	for (const [who, words] of [
+		[mei, 'solutions.'],
+		[ada, 'smooth '],
+		[mei, 'for '],
+		[ada, 'sharp ']
+	] as const) {
+		who.keys.cut(words);
+		await s.quiet();
+	}
+	await agree(s, TEXT);
+	await rejectAllOn(mei.ctl, s);
+	await agree(s, TEXT);
+	expect(s.host.text()).toBe(TEXT);
+});
+
+it('two guests whose edits leave the file as it was last written still move the suggestions for everyone', async () => {
+	const s = await session();
+	const mei = await s.join('mei');
+	const ada = await s.join('ada');
+	await mei.mode('suggesting');
+	await ada.mode('suggesting');
+	mei.keys.type('new ', 'estimator');
+	await s.quiet();
+	ada.keys.cut('estimator ');
+	await agree(s, TEXT);
+	const written = s.host.text();
+	// ada takes mei's words out and mei types them again, inside one write: the same file, but the
+	// struck words now stand before them
+	ada.keys.cut('new ');
+	await until(() => !s.host.text().includes('new ') && !mei.text().includes('new '));
+	mei.keys.type('new ', 'is sharp');
+	await agree(s, TEXT);
+	expect(s.host.text()).toBe(written);
+	expect(openSuggestions(s.host.ctl.threads)).toEqual([
+		['ada', '', 'estimator '],
+		['mei', 'new ', '']
+	]);
+});
+
+// while the host is away the guests still reach each other, and it gets all of it back from one of
+// them; nothing in that says who deleted what, so the names can be wrong, but no deleted word is lost
+it('the host away while two guests edit: the one left to catch it up is editing, and the other’s deleted words are kept', async () => {
+	const s = await session();
+	const mei = await s.join('mei');
+	const ada = await s.join('ada');
+	await ada.mode('suggesting');
+	await s.quiet();
+	s.host.away();
+	ada.keys.cut('smooth ');
+	await until(() => !mei.text().includes('smooth'));
+	mei.keys.cut('sharp ');
+	await until(() => !ada.text().includes('sharp'));
+	ada.leave();
+	s.host.back();
+	await agree(s, TEXT);
+	expect(
+		openSuggestions(s.host.ctl.threads)
+			.map(([, , restore]) => restore.trim())
+			.sort()
+	).toEqual(['sharp', 'smooth']);
+});
+
+it('the host away long enough to forget who its guests are: their deleted words are kept', async () => {
+	const s = await session();
+	const mei = await s.join('mei');
+	const ada = await s.join('ada');
+	await mei.mode('suggesting');
+	await ada.mode('suggesting');
+	await s.quiet();
+	s.host.away();
+	// what the awareness timeout does after 30 seconds without a word from them
+	removeAwarenessStates(s.host.session.awareness, [mei.doc.clientID, ada.doc.clientID], 'timeout');
+	mei.keys.cut('sharp ');
+	ada.keys.cut('smooth ');
+	await until(() => mei.text() === ada.text() && !mei.text().includes('sharp') && !mei.text().includes('smooth'));
+	s.host.back();
+	await agree(s, TEXT);
+});
+
+it('a guest the host has not heard from for a while is still recorded in their own name and mode', async () => {
+	const s = await session();
+	const mei = await s.join('mei');
+	await mei.mode('suggesting');
+	await s.quiet();
+	// what the awareness timeout does when a guest's updates are held up, while they are still typing
+	removeAwarenessStates(s.host.session.awareness, [mei.doc.clientID], 'timeout');
+	mei.keys.erase('sharp ');
+	await agree(s, TEXT);
+	expect(openSuggestions(s.host.ctl.threads)).toEqual([['mei', '', 'sharp ']]);
 });
 
 it('an older host that never says it records: a guest is not offered Suggesting', async () => {

@@ -35,6 +35,8 @@ export type PeerInfo = {
 	role: 'host' | 'guest';
 	/** the peer's edit mode, absent when its build does not advertise one */
 	suggesting?: boolean;
+	/** the name the peer signs comments with, absent when its build does not advertise one */
+	author?: string;
 };
 
 export type SessionEndReason = 'host-ended' | 'relay-closed' | 'quota' | 'error' | 'no-session' | 'full' | 'host-outdated' | 'app-outdated';
@@ -127,6 +129,8 @@ export class CollabSession {
 	readonly awareness: Awareness;
 	readonly role: 'host' | 'guest';
 	readonly peers = new Map<number, PeerInfo>();
+	// every peer as it last described itself, kept after its awareness lapses: its edits can still arrive
+	private readonly lastSeen = new Map<number, PeerInfo>();
 
 	private readonly transport: Transport;
 	private readonly key: CryptoKey;
@@ -146,6 +150,9 @@ export class CollabSession {
 	private recvChain: Promise<void> = Promise.resolve();
 	// the peer whose sync frame is being applied, so a Y.Text observer can name who made a change
 	private applyingFrom: number | null = null;
+	// that frame is a catch-up after this side was away, so it can hold anyone's edits
+	private applyingCatchUp = false;
+	private handshakes = 0;
 
 	constructor(opts: {
 		doc: Y.Doc;
@@ -195,15 +202,23 @@ export class CollabSession {
 		if (this.awareness.getLocalState()?.suggesting !== on) this.awareness.setLocalStateField('suggesting', on);
 	}
 
+	/** advertise the name this side signs comments with, so its suggestions are recorded under it too */
+	setAuthor(name: string): void {
+		const author = name.trim();
+		if (author && this.awareness.getLocalState()?.author !== author) this.awareness.setLocalStateField('author', author);
+	}
+
 	/** the peer a change came from, when `origin` is a transaction this session applied off the wire */
 	senderOf(origin: unknown): number | null {
 		return origin === this ? this.applyingFrom : null;
 	}
 
-	/** who a peer's changes are recorded as: its name, and suggesting only when it says so */
+	/** who a peer's changes are recorded as while they apply: its name, and suggesting only when it says so */
 	authorOf(id: number): { by: string; mode: 'editing' | 'suggesting' } {
-		const peer = this.peers.get(id);
-		return { by: peer?.name ?? (id === this.authHostId ? 'Host' : 'Guest'), mode: peer?.suggesting ? 'suggesting' : 'editing' };
+		const peer = this.peers.get(id) ?? this.lastSeen.get(id);
+		// nothing in a catch-up says who deleted what, so its deletions are all kept, if under one name
+		const suggesting = peer?.suggesting || (this.applyingCatchUp && this.applyingFrom === id);
+		return { by: peer?.author ?? peer?.name ?? (id === this.authHostId ? 'Host' : 'Guest'), mode: suggesting ? 'suggesting' : 'editing' };
 	}
 
 	/** the host's Y clientID, learned from a relay-authenticated host frame. */
@@ -218,11 +233,13 @@ export class CollabSession {
 		this.peers.clear();
 		for (const [id, state] of this.awareness.getStates()) {
 			if (id === this.clientId) continue;
-			const { user, suggesting } = state as { user?: { name: string; color: string }; suggesting?: unknown };
+			const { user, suggesting, author } = state as { user?: { name: string; color: string }; suggesting?: unknown; author?: unknown };
 			if (!user) continue;
 			const peer: PeerInfo = { name: user.name, color: user.color, role: id === this.authHostId ? 'host' : 'guest' };
 			if (typeof suggesting === 'boolean') peer.suggesting = suggesting;
+			if (typeof author === 'string' && author.trim()) peer.author = author.trim();
 			this.peers.set(id, peer);
+			this.lastSeen.set(id, peer);
 		}
 		this.events.onPeersChange?.(this.peers);
 	};
@@ -268,6 +285,7 @@ export class CollabSession {
 
 	/** hello + sync step1 + full awareness; runs on every (re)connect. */
 	private handshake(): void {
+		this.handshakes++;
 		this.hello(BROADCAST);
 		const enc = encoding.createEncoder();
 		syncProtocol.writeSyncStep1(enc, this.doc);
@@ -325,10 +343,12 @@ export class CollabSession {
 				const dec = decoding.createDecoder(frame.payload);
 				const enc = encoding.createEncoder();
 				this.applyingFrom = frame.from;
+				this.applyingCatchUp = this.handshakes > 1 && decoding.peekVarUint(dec) === syncProtocol.messageYjsSyncStep2;
 				try {
 					syncProtocol.readSyncMessage(dec, enc, this.doc, this);
 				} finally {
 					this.applyingFrom = null;
+					this.applyingCatchUp = false;
 				}
 				// a step1 wants an answer; address it to the asker only
 				if (encoding.length(enc) > 0) {
@@ -340,9 +360,10 @@ export class CollabSession {
 				applyAwarenessUpdate(this.awareness, frame.payload, 'remote');
 				break;
 			case FrameType.HELLO: {
-				// introduce ourselves and always re-offer our state, so a reconnecting peer catches
-				// up on edits made while it was gone (its step2 reply carries what we missed too)
-				this.hello(frame.from);
+				// introduce ourselves to a peer that announced itself (answering its answer would greet back and
+				// forth for good), and always re-offer our state, so a reconnecting peer catches up on edits
+				// made while it was gone (its step2 reply carries what we missed too)
+				if (frame.to === BROADCAST) this.hello(frame.from);
 				const mismatch = sessionMismatch(this.version, frame.payload);
 				if (mismatch) {
 					this.outdated.add(frame.from);

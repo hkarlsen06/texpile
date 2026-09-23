@@ -164,6 +164,7 @@
 				if (onLocalChange && transaction.docChanged && !transaction.getMeta('collabRemotePatch')) {
 					onLocalChange(newState.doc);
 				}
+				if (transaction.getMeta('collabRemotePatch')) remotePatches++;
 				if (onSelectionChange && (transaction.selectionSet || transaction.docChanged)) onSelectionChange();
 			}
 		});
@@ -183,6 +184,7 @@
 	 * with it. Typing never bumps it: ranges map through transactions and re-searching mid-edit
 	 * could snap a range onto another copy of its text. */
 	let docEpoch = $state(0);
+	let remotePatches = $state(0);
 	$effect(() => {
 		const next = localValue;
 		const path = docPath;
@@ -213,6 +215,7 @@
 		body: () => bodyRange,
 		parse: () => regionParser,
 		epoch: () => docEpoch,
+		patched: () => remotePatches,
 		selected: () => selectedComment,
 		onPlaced: (lost) => onCommentsPlaced?.(lost),
 		pendingActive: () => commentPendingActive
