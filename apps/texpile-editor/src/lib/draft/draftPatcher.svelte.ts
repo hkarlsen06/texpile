@@ -121,11 +121,18 @@ export class DraftPatcher {
 	afterCompile(): void {
 		this.hopSource = null;
 		this.hopTarget = null;
-		if (this.queuedPatch) {
-			const q = this.queuedPatch;
-			this.queuedPatch = null;
-			void this.instantPatch(q);
-		}
+		this.drainQueued();
+	}
+
+	// the held edit is decided again, not replayed: the patch or compile it waited behind can have moved the
+	// baseline its `orig` was diffed against, and an `orig` the page no longer shows locates nowhere, so fast
+	// typing fell to a full recompile where slow typing patched
+	private drainQueued(): void {
+		const q = this.queuedPatch;
+		this.queuedPatch = null;
+		if (!q) return;
+		if (q.redecide) q.redecide();
+		else void this.instantPatch(q);
 	}
 
 	/** savePdf: flush a pending debounced reconcile right now; true if one was pending */
@@ -536,11 +543,7 @@ export class DraftPatcher {
 			// otherwise unlock (and start draining the queue) under its live successor
 			if (this.patchRun === run) {
 				this.patching = false;
-				if (this.queuedPatch) {
-					const q = this.queuedPatch;
-					this.queuedPatch = null;
-					void this.instantPatch(q);
-				}
+				this.drainQueued();
 			}
 		}
 	}

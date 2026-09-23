@@ -37,7 +37,9 @@ export function computeReflow(
 	);
 	const y0 = dRowsNew.length ? dRowsNew[0].y : ((lineRecs[0] as any).y ?? 0);
 	const yk = dRowsNew.length ? dRowsNew[dRowsNew.length - 1].y : ((lineRecs[lineRecs.length - 1] as any).y ?? 0);
-	const delta = yk - y0 - (cal.bk - cal.b1);
+	// the engine writes baselines to four decimals, so a difference below that is float arithmetic on equal spans:
+	// 7e-15 read as growth and refused every keystroke on a packed page the certificate cannot speak for
+	const delta = Math.round((yk - y0 - (cal.bk - cal.b1)) * 1e4) / 1e4;
 	// C3: the column/page break must not move. A delta<=0 edit (same or fewer lines)
 	// can't push content past the column bottom, so it's always safe on the overflow
 	// side. When it GROWS, the content below the paragraph in this column shifts down

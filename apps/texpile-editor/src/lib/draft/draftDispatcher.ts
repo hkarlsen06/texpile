@@ -158,7 +158,8 @@ export class DraftDispatcher {
 					},
 					// the patch derived the page's new records itself: no compile is coming, so
 					// the baseline moves here instead, in the same tick as the record store
-					onBaseline: () => this.advanceBaseline(src)
+					onBaseline: () => this.advanceBaseline(src),
+					redecide: () => this.run()
 				});
 				return;
 			}
