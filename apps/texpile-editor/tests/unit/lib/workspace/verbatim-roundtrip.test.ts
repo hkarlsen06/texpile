@@ -421,6 +421,21 @@ wrapped too, 50\\% sure.
 		expect(reserialize(out)).toBe(out);
 	});
 
+	// the line breaks either side of it would meet as a blank line
+	it('a line taken out of a hand-wrapped paragraph leaves one paragraph', () => {
+		const parsed = parseLatexFile(FILE2);
+		const out = serializeLatexFile(parsed, retypeLeaf(parsed.doc, 0, 0, 'Intro paragraph wrapped  spacing and math '));
+		expect(parseLatexFile(out).doc.childCount).toBe(parsed.doc.childCount);
+		expect(out).toContain('Intro paragraph wrapped');
+	});
+
+	it('a letter typed into a bare url keeps the link', () => {
+		const parsed = parseLatexFile(`${PREAMBLE}\nA bare one: \\url{https://typst.app}.\n\\end{document}\n`);
+		const at = posOf(parsed.doc, 'st.app');
+		const out = serializeLatexFile(parsed, new Transform(parsed.doc).insert(at, schema.text('X', parsed.doc.nodeAt(at)!.marks)).doc);
+		expect(out).toContain('A bare one: \\href{https://typst.app}{https://typXst.app}.');
+	});
+
 	it('escapes what is typed, and keeps the escaped bytes it did not touch', () => {
 		const parsed = parseLatexFile(FILE2);
 		const out = serializeLatexFile(parsed, retypeLeaf(parsed.doc, 1, 0, 'Second & third with '));

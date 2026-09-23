@@ -47,6 +47,11 @@ export type DocSerializeResult = {
 };
 
 /** the parse's last block, which the body's trailing gap follows */
+/** whether the file's line breaks either side of `bytes` meet across them as a blank line */
+export function blankLineAt(head: string, bytes: string, tail: string): boolean {
+	return /\n[ \t]*$/.test(head) && /^[ \t]*$/.test(bytes) && /^[ \t]*\n/.test(tail);
+}
+
 export function isLastOfParse(o: BlockOrigin): boolean {
 	return o.index === o.parse.origins.length - 1;
 }
@@ -121,9 +126,10 @@ export type BlockAssemblyOptions = {
 	/** the fresh `bytes` as they must be written between the file's bytes before them (`head`) and
 	 *  after them (`tail`), so no two of the three read as one (a LaTeX control word before a
 	 *  letter takes a space); `bytes` is empty where the change only took bytes out, and the two
-	 *  sides then meet; `gone` is what the change took out from between them. Null for a seam the
-	 *  dialect cannot write, which gives up the splice and writes the block afresh */
-	keepApart?: (bytes: string, tail: string, head: string, gone: string) => string | null;
+	 *  sides then meet; `gone` is what the change took out from between them, `parent` the node
+	 *  they are written in. Null for a seam the dialect cannot write, which gives up the splice and
+	 *  writes the block afresh */
+	keepApart?: (bytes: string, tail: string, head: string, gone: string, parent: Node) => string | null;
 	/** whether `text` ends on something that owns the rest of its line (a LaTeX comment), so
 	 *  what follows it must begin a line of its own */
 	endsLine?: (text: string) => boolean;
@@ -710,7 +716,7 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 			// fresh bytes that would fuse with the bytes kept beside them are kept apart
 			const gone = origin.text.slice(from - base, to - base);
 			if (options.keepApart) {
-				const apart = options.keepApart(bytes, origin.text.slice(to - base), origin.text.slice(0, from - base), gone);
+				const apart = options.keepApart(bytes, origin.text.slice(to - base), origin.text.slice(0, from - base), gone, p.parent);
 				if (apart === null) return null;
 				bytes = apart;
 			}
@@ -741,7 +747,7 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 		if (options.keepApart && changes.length > 1) {
 			for (const c of changes) {
 				const at = shifted(c.srcFrom) - base;
-				if (options.keepApart(c.bytes, text.slice(at + c.bytes.length), text.slice(0, at), c.gone) !== c.bytes) return null;
+				if (options.keepApart(c.bytes, text.slice(at + c.bytes.length), text.slice(0, at), c.gone, c.pair.parent) !== c.bytes) return null;
 			}
 		}
 		// the runs: an untouched leaf's, moved to where its bytes and its node now are; a changed
@@ -1022,7 +1028,8 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 				bytes,
 				origin.text.slice(end - base),
 				origin.text.slice(0, start - base),
-				origin.text.slice(start - base, end - base)
+				origin.text.slice(start - base, end - base),
+				node
 			);
 			if (apart === null) return null;
 			bytes = apart;

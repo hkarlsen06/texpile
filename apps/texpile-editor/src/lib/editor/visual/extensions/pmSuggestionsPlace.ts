@@ -126,13 +126,14 @@ function regionByte(region: RegionParse, pos: number, assoc: Side): number | nul
 type Landing = { pos: number; block: Segment | null };
 
 // a position at the very start of an inline node's content, reached from the byte before the node,
-// is the node's own start; likewise its end. The node's opening and closing have no bytes of their
+// is the node's own start, and one at the end of its content is past the node from either side (a
+// change that begins there begins after it). The node's opening and closing have no bytes of their
 // own, and the runs inside it start one position in
 function atNodeEdge(doc: PMNode, pos: number, assoc: Side): number {
 	const $pos = doc.resolve(pos);
 	if ($pos.depth === 0 || !$pos.parent.isInline || $pos.parent.isText) return pos;
 	if (assoc > 0 && $pos.parentOffset === 0) return $pos.before();
-	if (assoc < 0 && $pos.parentOffset === $pos.parent.content.size) return $pos.after();
+	if ($pos.parentOffset === $pos.parent.content.size) return $pos.after();
 	return pos;
 }
 
@@ -224,11 +225,6 @@ function selfRenderedAround(doc: PMNode, pos: number, to = pos): Span | null {
 		return to <= $pos.after(d) ? { from: $pos.before(d), to: $pos.after(d) } : null;
 	}
 	return null;
-}
-
-function nodeAround(doc: PMNode, pos: number, to = pos): PMNode | null {
-	const span = selfRenderedAround(doc, pos, to);
-	return span ? doc.nodeAt(span.from) : null;
 }
 
 function blocksSpanning(map: SourceMap, from: number, to: number): Span | null {
@@ -326,8 +322,9 @@ function placeChange(doc: PMNode, s: SuggestionMark, { A, B }: Piece, before: Re
 	const oldText = textOf(before.doc, A.from, A.to);
 	// inside a node that draws itself, or a change to what such a node is (its source, say) that
 	// the comparison reads as its opening token. A leaf (a line break, a label) is drawn by the
-	// editor like a character and takes the tint the words do
-	const atStart = doc.nodeAt(from);
+	// editor like a character and takes the tint the words do, and words taken out just before
+	// such a node are only words
+	const atStart = to > from ? doc.nodeAt(from) : null;
 	const chip =
 		selfRenderedAround(doc, from, to) ??
 		(atStart && !atStart.isLeaf && isSelfRendered(atStart) && to <= from + atStart.nodeSize ? { from, to: from + atStart.nodeSize } : null);
@@ -335,7 +332,10 @@ function placeChange(doc: PMNode, s: SuggestionMark, { A, B }: Piece, before: Re
 		// a node the change begins inside stood before it and was changed by it; one whose opening is
 		// in the change is new, or stands in place of what the change took out
 		const stood = selfRenderedAround(after.doc, B.from) !== null;
-		const found = stood ? nodeAround(before.doc, A.from, A.to) : lenA > 0 ? before.doc.nodeAt(A.from) : null;
+		// the one it began inside, even when the change runs on past its end (a caption that took in
+		// the heading after it)
+		const inside = stood ? selfRenderedAround(before.doc, A.from) : null;
+		const found = inside ? before.doc.nodeAt(inside.from) : !stood && lenA > 0 ? before.doc.nodeAt(A.from) : null;
 		const was = found && !found.isLeaf && isSelfRendered(found) ? found : null;
 		// what the node replaced, when that was not such a node itself: words, or whole blocks
 		const old = was ? { runs: [], gone: null } : oldContent(before.doc, A.from, A.to);
@@ -344,7 +344,8 @@ function placeChange(doc: PMNode, s: SuggestionMark, { A, B }: Piece, before: Re
 		ranges.push({ ...base, ...chip, node: true, old: old.runs, ...(was ? { was } : {}) });
 		// what stood after the node it was and is in the change too (the paragraph a figure took
 		// in as its caption): struck after the node, where it stood
-		const beyond = was && !stood && A.from + was.nodeSize < A.to ? oldContent(before.doc, A.from + was.nodeSize, A.to) : null;
+		const wasEnd = was ? (inside?.to ?? A.from + was.nodeSize) : 0;
+		const beyond = was && wasEnd < A.to ? oldContent(before.doc, wasEnd, A.to) : null;
 		if (beyond?.gone) ranges.push({ ...base, from: chip.to, to: chip.to, gone: beyond.gone });
 		else if (beyond?.runs.length) ranges.push({ ...base, from: chip.to, to: chip.to, old: beyond.runs });
 		return { ranges, partial: false };
@@ -430,6 +431,27 @@ function regionPos(region: RegionParse, byte: number, assoc: Side): number | nul
 	if (pick) return pick === before ? pick.pmTo : pick.pmFrom;
 	if (!block) return null;
 	return byte <= block.srcFrom ? block.pmFrom : byte >= block.srcTo ? block.pmTo : Math.min(block.pmFrom + 1, block.pmTo);
+}
+
+// the positions a mark's bytes can take in a region's document, read from either side of each end
+function spanOf(region: RegionParse, bytes: Span): Span | null {
+	const ends = [bytes.from, bytes.to].flatMap((byte) => [regionPos(region, byte, -1), regionPos(region, byte, 1)]);
+	if (ends.some((pos) => pos === null)) return null;
+	return { from: Math.min(...(ends as number[])), to: Math.max(...(ends as number[])) };
+}
+
+// the stretch each mark has in the two documents: the words between marks are the same bytes on both
+// sides, and are compared as such, so a word typed before one starting with its letter is not read as
+// that letter moved
+function stretchesOf(marks: MarkBytes[], before: RegionParse, after: RegionParse): DocChange[] {
+	const out: DocChange[] = [];
+	for (const m of marks) {
+		const a = spanOf(before, m.a);
+		const b = spanOf(after, m.b);
+		if (!a || !b) return [];
+		out.push({ fromA: a.from, toA: a.to, fromB: b.from, toB: b.to });
+	}
+	return out;
 }
 
 function bytesOf(region: RegionParse, span: Span): Span | null {
@@ -583,7 +605,8 @@ export function placePmSuggestions(doc: PMNode, marks: SuggestionMark[], source:
 		const owned = new Map<SuggestionMark, Piece[]>(group.map((s) => [s, []]));
 		// the node it was is set beside a node once, however many marks changed it
 		const wasAt = new Set<string>();
-		for (const c of joinAcrossNodes(splitAtNodes(diffDocs(before.doc, after.doc), before, after), before, after)) {
+		const changes = diffDocs(before.doc, after.doc, stretchesOf(bytes, before, after));
+		for (const c of joinAcrossNodes(splitAtNodes(changes, before, after), before, after)) {
 			for (const { mark, piece } of shareOut(c, before, after, bytes)) owned.get(mark)!.push(piece);
 		}
 		// a mark with nothing readable of its own - the closing brace of a wrapper whose opening

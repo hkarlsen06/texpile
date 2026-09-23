@@ -5,7 +5,7 @@
 // by blockGap from the NEXT block's typGap, in renderBlocks for nested blocks and through the
 // assembly's boundary hook at the top level.
 import { Fragment, type Node } from 'prosemirror-model';
-import { createBlockAssembly, type DocSerializeResult } from '$lib/serializer/blockAssembly';
+import { blankLineAt, createBlockAssembly, type DocSerializeResult } from '$lib/serializer/blockAssembly';
 import type { ParseOrigins, Segment } from '$lib/editor/visual/sourceSpans';
 import type { Ctx } from '$lib/serializer/types';
 import {
@@ -365,7 +365,9 @@ const assembly = createBlockAssembly((node, ctx) => serializeTypNode(node, ctx),
 	leafBytes,
 	inlineBytes,
 	mapInlineLeaves,
-	keepApart: (bytes, tail, head, gone) => {
+	// the line breaks either side of a line taken out from prose would meet as a blank line, a new paragraph
+	keepApart: (bytes, tail, head, gone, parent) => {
+		if (!parent.type.spec.code && blankLineAt(head, bytes, tail)) return null;
 		if (bytes === '' ? seam(head, tail) : seam(head, bytes) || seam(bytes, tail)) return null;
 		if (unbound(head, bytes, tail, gone)) return null;
 		return atLineStart(head, bytes, tail);
