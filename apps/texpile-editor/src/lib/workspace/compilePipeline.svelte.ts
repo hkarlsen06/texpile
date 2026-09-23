@@ -463,7 +463,9 @@ export class CompilePipeline {
 	};
 	// For external files path that user compield that iddnt press the compile buttons
 	loadExternalPdf = async () => {
-		if (this.busy) return;
+		// the pane shows no PDF until a main file is picked, so an old one on disk opened it just to say so, the first
+		// time the window came back into focus
+		if (this.busy || !mainFile.current) return;
 		const pdfPath = this.expectedPdfPath();
 		if (!pdfPath) return;
 		const first = await this.deps.stat(pdfPath);

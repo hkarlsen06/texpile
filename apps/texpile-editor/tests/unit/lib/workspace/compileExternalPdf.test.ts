@@ -109,6 +109,21 @@ describe('a PDF written outside Texpile', () => {
 		expect(pdfStore.current).toBeNull();
 	});
 
+	it('leaves the pane shut while no main file is set, whatever the open file compiled to', async () => {
+		mainFile.current = null;
+		let opened = false;
+		compiler = new CompilePipeline({
+			...deps(() => Promise.resolve({ exists: true, mtimeMs: 50, size: 100 })),
+			getLoadedPath: () => `${ROOT}/FOO/book.typ`,
+			getCompileCommand: () => resolveCompileCommand(`${ROOT}/FOO/book.typ`),
+			setPdfPaneOpen: (open: boolean) => (opened = open)
+		});
+		const p = compiler.loadExternalPdf();
+		await vi.advanceTimersByTimeAsync(700);
+		await p;
+		expect([pdfStore.current, opened]).toEqual([null, false]);
+	});
+
 	it('keeps the pane when a deleted PDF is back before the second stat', async () => {
 		pdfStore.current = `${ROOT}/output/book.pdf&t=50`;
 		let calls = 0;

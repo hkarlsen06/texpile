@@ -17,6 +17,7 @@ Release notes for Texpile Desktop. Add notes under `## [Unreleased]` as you work
 - fix: a block dragged onto an \input, a formula or a code block lands beside it instead of nowhere, and a code block no longer takes a copy of its text
 - fix: a suggestion that removes an \input or a \label shows it struck in the visual editor
 - fix: a suggestion in Chinese or Japanese text strikes only the words it changed, not the whole sentence
+- fix: switching back to the window no longer opens the PDF preview while no main file is picked
 
 ## [1.2.0] - 2026-09-20
 
