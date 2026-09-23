@@ -5,23 +5,7 @@ Release notes for Texpile Desktop. Add notes under `## [Unreleased]` as you work
 
 ## [Unreleased]
 
-- refactor: untouched blocks are written back from the source map, not from a verbatim attr on every block
-- fix: undoing an Accept or a Reject brings the suggestion back
-- fix: a suggested deletion undone in Editing no longer leaves its card behind
-- fix: Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z work when the text is not focused
-- fix: changing the language in the welcome screen no longer opens it a second time or loses the folder it was opening
-- fix: the transparent window on macOS shows the desktop through it and stays readable in dark mode
-- fix: shortcut hints use the macOS spelling on a Mac, and the subscript hint names its real key
-- fix: undo in a shared session never rolls the document back past what was typed in it
-- fix: a comment a guest adds right after joining no longer disappears from their screen
-- fix: a block dragged onto an \input, a formula or a code block lands beside it instead of nowhere, and a code block no longer takes a copy of its text
-- fix: a suggestion that removes an \input or a \label shows it struck in the visual editor
-- fix: a suggestion in Chinese or Japanese text strikes only the words it changed, not the whole sentence
-- fix: switching back to the window no longer opens the PDF preview while no main file is picked
-- fix: checkboxes in a transparent window are no longer dark or white squares
-- feat: suggestions in a shared session: guests can suggest too, and the host records each change under the name of whoever made it
-
-## [1.2.0] - 2026-09-20
+## [1.2.0] - 2026-09-23
 
 - feat: suggestion mode
 - feat: side by side comments
@@ -37,6 +21,9 @@ Release notes for Texpile Desktop. Add notes under `## [Unreleased]` as you work
 - fix: up and down arrows keep their column in the visual editor
 - fix: various visual editor improvements bugfixes
 - fix: improved dragging experience for visual editor
+- fix: Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z work when the text is not focused
+- fix: live preview will not fall back to recompile when typing fast
+
 
 ## [1.1.0] - 2026-09-10
 
