@@ -17,6 +17,7 @@ import { registerFsIpc } from './ipc/fsIpc';
 import { registerDraftIpc } from './ipc/draftIpc';
 import { registerWorkspaceWindowIpc, openFolderInNewWindow } from './ipc/workspaceWindowIpc';
 import { registerWindowGlassIpc } from './windowGlass';
+import { registerNativeAppearanceIpc } from './nativeAppearance';
 import { registerSurfacesIpc } from './ipc/surfacesIpc';
 import { registerDeferredIpc, shutdownDeferred } from './ipc/deferredIpc';
 import { registerWindowChrome } from './windowChrome';
@@ -34,6 +35,7 @@ registerFsIpc();
 registerDraftIpc();
 registerWorkspaceWindowIpc();
 registerWindowGlassIpc(() => chromeColors().background);
+registerNativeAppearanceIpc();
 registerSurfacesIpc();
 
 // .tex handed over by the OS before any window exists; consumed at whenReady

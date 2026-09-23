@@ -65,7 +65,12 @@ html.window-glass {
 	--glass-sheet-blur: 64px;
 	background-color: transparent;
 }
-/* the veil: the theme's own ground, pushed a little further the way the mode already leans. It lightens what shows through
+/* a macOS material already tints for legibility in the app's own mode (nativeAppearance.ts); a veil on top greys it out */
+html.window-glass.window-vibrancy {
+	--glass-veil-light: 0%;
+	--glass-veil-dark: 0%;
+}
+/* the veil:the theme's own ground, pushed a little further the way the mode already leans. It lightens what shows through
    in light mode and darkens it in dark mode, so text keeps its contrast */
 html.window-glass body {
 	background-color: light-dark(

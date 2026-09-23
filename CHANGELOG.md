@@ -10,6 +10,7 @@ Release notes for Texpile Desktop. Add notes under `## [Unreleased]` as you work
 - fix: a suggested deletion undone in Editing no longer leaves its card behind
 - fix: Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z work when the text is not focused
 - fix: the welcome screen no longer opens a second time after its language is changed
+- fix: the transparent window on macOS shows the desktop through it and stays readable in dark mode
 
 ## [1.2.0] - 2026-09-20
 

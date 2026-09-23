@@ -62,6 +62,8 @@ contextBridge.exposeInMainWorld('texpileNative', {
 	windowGlassWorks: () => ipcRenderer.invoke('window:glassWorks'),
 	/** the blurred, see-through window material on or off, for every window; resolves to what was applied. */
 	setWindowGlass: (on: boolean) => ipcRenderer.invoke('window:setGlass', on),
+	/** menus, dialogs and the vibrancy material take the app's light / dark / system choice. */
+	setNativeAppearance: (choice: 'light' | 'dark' | 'system') => ipcRenderer.send('window:appearance', choice),
 	/** a native message box, modal to this window; resolves to the index of the pressed button
 	 *  in the array as sent (primary first, cancel last), or null. */
 	showMessageBox: (req: Record<string, unknown>) => ipcRenderer.invoke('dialog:messageBox', req),

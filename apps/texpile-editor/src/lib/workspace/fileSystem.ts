@@ -126,6 +126,7 @@ type TexpileNative = {
 	setZoomFactor?: (factor: number) => Promise<number>;
 	windowGlassWorks?: () => Promise<boolean>;
 	setWindowGlass?: (on: boolean) => Promise<boolean>;
+	setNativeAppearance?: (choice: 'light' | 'dark' | 'system') => void;
 	// optional: an older preload predates the native surfaces, and the renderer draws its own
 	showMessageBox?: (req: {
 		kind: 'question' | 'warning';

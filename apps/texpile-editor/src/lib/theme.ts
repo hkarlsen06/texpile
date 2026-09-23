@@ -4,6 +4,7 @@
 // texpile:layout blob directly - keep its `theme` field in step with this module).
 import { box } from '$lib/runes/box.svelte';
 import { layout, updateLayout } from '$lib/storage/layout';
+import { nativeBridge } from '$lib/workspace/fileSystem';
 
 export type ThemeChoice = 'light' | 'dark' | 'system';
 
@@ -44,6 +45,7 @@ function watchSystem(choice: ThemeChoice): void {
 export function setTheme(choice: ThemeChoice): void {
 	themeChoice.current = choice;
 	updateLayout({ theme: choice });
+	nativeBridge()?.setNativeAppearance?.(choice);
 	apply(resolve(choice));
 	watchSystem(choice);
 }
@@ -92,6 +94,7 @@ export function setThemeName(name: string): void {
 // apply on module load; theme-init.js already handled the very first paint
 if (typeof document !== 'undefined') {
 	const choice = stored();
+	nativeBridge()?.setNativeAppearance?.(choice);
 	apply(resolve(choice));
 	watchSystem(choice);
 	applyThemeName(layout.current.themeName);
