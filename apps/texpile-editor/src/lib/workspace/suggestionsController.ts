@@ -46,6 +46,12 @@ type Deps = {
 
 type FileState = { text: string; placed: PlacedSuggestion[] };
 
+// as deep as the editors' own undo history
+const REJECTS_KEPT = 100;
+
+/** the file just before (`open`) and just after (`rejected`) a Reject */
+type UndoableReject = { file: string; thread: CommentThread; open: FileState; rejected: FileState };
+
 /** an edit recorded for someone other than the reader: `gesture` is where it landed, `opened` what it opened */
 type AgentEdit = { by: string; note: string; gesture: TextSpan; opened: string[] };
 
@@ -58,6 +64,7 @@ export class SuggestionsController {
 	private chain: Promise<void> = Promise.resolve();
 	private timer: ReturnType<typeof setTimeout> | null = null;
 	private me: string | null = null;
+	private rejects: UndoableReject[] = [];
 
 	constructor(private readonly deps: Deps) {}
 
@@ -192,6 +199,7 @@ export class SuggestionsController {
 		this.sides = {};
 		this.placedFile = null;
 		this.me = null;
+		this.rejects = [];
 	}
 
 	async accept(t: CommentThread): Promise<void> {
@@ -226,6 +234,8 @@ export class SuggestionsController {
 		this.states.set(file, { text: next, placed: rest });
 		await this.deps.store.append(decided);
 		await this.run(file, this.deps.activeText(), 'editing');
+		const rejected = this.states.get(file);
+		if (rejected) this.rejects = [...this.rejects.slice(1 - REJECTS_KEPT), { file, thread: t, open: state, rejected }];
 		this.show(this.states.get(file)?.text ?? next, this.states.get(file)?.placed ?? rest);
 		this.deps.saveNow();
 		return true;
@@ -285,6 +295,7 @@ export class SuggestionsController {
 	): Promise<void> {
 		const state = this.states.get(file);
 		if (!state || state.text === after) return;
+		if (await this.revisitReject(file, state, after)) return;
 		if (mode === 'editing' && state.placed.length === 0) {
 			this.states.set(file, { text: after, placed: [] });
 			if (!this.deps.compares()) this.refit(file);
@@ -311,6 +322,23 @@ export class SuggestionsController {
 			if (agent && c.t === 'open' && r.placed.some((s) => s.id === c.id && s.author === author)) agent.opened.push(c.id);
 		this.stage(this.eventsFor(file, after, r, author, agent?.note));
 		if (file === this.deps.activeFile()) this.show(after, r.placed);
+	}
+
+	// an undo of a Reject lands exactly on the file as it was before it, and brings the same thread back
+	// rather than making the words a new change; a redo lands on the file after it and rejects it again
+	private async revisitReject(file: string, state: FileState, after: string): Promise<boolean> {
+		const mine = this.rejects.filter((r) => r.file === file);
+		const undo = mine.findLast((r) => after === r.open.text && sameFileState(state, r.rejected));
+		const r = undo ?? mine.findLast((r) => after === r.rejected.text && sameFileState(state, r.open));
+		if (!r) return false;
+		const undone = r === undo;
+		const event = await this.decision(r.thread, undone ? undefined : 'rejected');
+		if (this.states.get(file) !== state) return true;
+		const now = undone ? r.open : r.rejected;
+		this.states.set(file, now);
+		this.stage([event]);
+		if (file === this.deps.activeFile()) this.show(now.text, now.placed);
+		return true;
 	}
 
 	private refit(file: string): void {
@@ -393,6 +421,10 @@ function sameSuggestions(a: PlacedSuggestion[], b: PlacedSuggestion[]): boolean 
 	return (
 		a.length === b.length && a.every((s, i) => s.id === b[i].id && s.from === b[i].from && s.to === b[i].to && s.restore === b[i].restore)
 	);
+}
+
+function sameFileState(a: FileState, b: FileState): boolean {
+	return a.text === b.text && sameSuggestions(a.placed, b.placed);
 }
 
 function anchorOf(text: string, s: PlacedSuggestion, ranks: Map<string, number>): CommentAnchor {

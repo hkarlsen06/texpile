@@ -103,6 +103,52 @@ describe('a suggestion in the file', () => {
 		expect(edits).toHaveLength(1);
 	});
 
+	// Suggesting: the words coming back would otherwise be a new suggestion of the reader's own
+	it.each(['editing', 'suggesting'] as const)('brings rejected suggestions back as the Rejects are undone in %s', async (mode) => {
+		disk['.texpile/comments.jsonl'] = serializeLog([
+			suggestion('s1', TEXT, 'sharp', 'reliable'),
+			suggestion('s2', TEXT, 'smooth', 'regular')
+		]);
+		const { ctl, open, type, text } = make(TEXT, mode);
+		await open();
+		const thread = (id: string) => ctl.threads.find((t) => t.id === id)!;
+		const opened = () => ctl.threads.filter((t) => !t.resolved).map((t) => t.id);
+		async function goTo(next: string) {
+			type(next);
+			ctl.suggestions.textChanged(FILE, next);
+			await ctl.suggestions.settle();
+		}
+		expect(await ctl.suggestions.reject(thread('s1'))).toBe(true);
+		const oneRejected = text();
+		expect(await ctl.suggestions.reject(thread('s2'))).toBe(true);
+		const bothRejected = text();
+
+		await goTo(oneRejected);
+		expect(opened()).toEqual(['s2']);
+		await goTo(TEXT);
+		expect(opened()).toEqual(['s1', 's2']);
+		expect(activeSuggestions.current.map((s) => [s.id, TEXT.slice(s.from, s.to), s.restore])).toEqual([
+			['s1', 'sharp', 'reliable'],
+			['s2', 'smooth', 'regular']
+		]);
+		await ctl.suggestions.beforeSave('main.tex', TEXT);
+		expect(
+			logged()
+				.filter((e) => e.t === 'resolve')
+				.slice(-2)
+		).toMatchObject([
+			{ thread: 's2', resolved: false },
+			{ thread: 's1', resolved: false }
+		]);
+
+		// and a redo rejects them again
+		await goTo(oneRejected);
+		await goTo(bothRejected);
+		expect(opened()).toEqual([]);
+		expect(thread('s1').decision).toBe('rejected');
+		expect(activeSuggestions.current).toEqual([]);
+	});
+
 	it('keeps what was typed when the folder changes, and drops it when the edit is thrown away', async () => {
 		const after = TEXT.replace('sharp', 'tight');
 		const kept = make(TEXT, 'suggesting');

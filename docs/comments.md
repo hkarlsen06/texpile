@@ -24,7 +24,7 @@ Your name on a comment is the display name from [Preferences](preferences.md), a
 
 ## Suggest changes
 
-The button left of the comment count picks how edits apply, and the choice is remembered per project. Editing, the default, changes the document directly. In Suggesting, edits go into the file as suggestions: the new words are tinted, the old words are struck through just before them, and a card beside them offers Accept and Reject. Accept keeps the new words. Reject puts the old words back. Formatting put on words that stay the same, bold for instance, shows only the tinted words, and the card says Format and names the formatting.
+The button left of the comment count picks how edits apply, and the choice is remembered per project. Editing, the default, changes the document directly. In Suggesting, edits go into the file as suggestions: the new words are tinted, the old words are struck through just before them, and a card beside them offers Accept and Reject. Accept keeps the new words. Reject puts the old words back, and undoing it brings the suggestion back. Formatting put on words that stay the same, bold for instance, shows only the tinted words, and the card says Format and names the formatting.
 
 The file on disk holds the suggested text, so a compile shows the paper as it reads with every suggestion taken. The old words are kept with the comments in the project folder, and nowhere else, so commit that folder along with the files.
 
