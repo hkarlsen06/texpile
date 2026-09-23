@@ -134,6 +134,16 @@ html.window-glass .checkbox:not(:checked, :indeterminate) {
 	background-color: transparent;
 	border: 1px solid var(--glass-line);
 }
+/* the picked segment of a segmented control is the ground raised over a mark of it, a step glass all but evens out; it
+   is told from its track by a share of the text colour instead */
+html.window-glass .shadow-sm.bg-surface-50-950 {
+	background-color: color-mix(in oklab, var(--color-surface-950-50) 16%, transparent);
+}
+/* the open tab is the ground the editor stands on, over a strip one step off it, and glass clears both steps; it
+   takes the tint the dock's picked view wears instead */
+html.window-glass [role='tab'][aria-selected='true'].bg-surface-50-950 {
+	background-color: color-mix(in oklab, var(--color-surface-950-50) 10%, transparent);
+}
 /* unwrapped lines pass under the line numbers, so their strip has to cover; wrapped ones never do, and it can be glass */
 html.window-glass .cm-gutters {
 	background-color: light-dark(var(--solid-surface-50), var(--solid-surface-950));
