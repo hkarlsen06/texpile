@@ -55,3 +55,20 @@ it('serves staged events with the written ones, and says whether a discard dropp
 	expect(store.discardStaged('main.tex')).toBe(true);
 	expect(store.serialize()).toBe('\n');
 });
+
+// the catch-up log can land after a guest's own new comment, and after the host's echo of it
+it('keeps what this side appended when a log served before it lands', async () => {
+	const store = new CommentStore();
+	await store.load(null);
+	const hostOpen = openEvent({ id: 'h1', file: 'main.tex', by: 'louis', body: 'first', anchor: buildAnchor('some text', 0, 4), at: 'now' });
+	const guestOpen = openEvent({ id: 'g1', file: 'main.tex', by: 'mei', body: 'mine', anchor: buildAnchor('some text', 5, 9), at: 'now' });
+	await store.append(guestOpen);
+
+	store.adoptLog(JSON.stringify(hostOpen) + '\n');
+	expect(store.threads.map((t) => t.id)).toEqual(['h1', 'g1']);
+
+	// the next catch-up has it: once, not twice
+	store.adoptLog([hostOpen, guestOpen].map((e) => JSON.stringify(e)).join('\n') + '\n');
+	expect(store.threads.map((t) => t.id)).toEqual(['h1', 'g1']);
+	expect(store.serialize().trim().split('\n')).toHaveLength(2);
+});

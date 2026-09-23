@@ -13,6 +13,7 @@ Release notes for Texpile Desktop. Add notes under `## [Unreleased]` as you work
 - fix: the transparent window on macOS shows the desktop through it and stays readable in dark mode
 - fix: shortcut hints use the macOS spelling on a Mac, and the subscript hint names its real key
 - fix: undo in a shared session never rolls the document back past what was typed in it
+- fix: a comment a guest adds right after joining no longer disappears from their screen
 
 ## [1.2.0] - 2026-09-20
 

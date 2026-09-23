@@ -146,10 +146,13 @@ export class CommentStore {
 		if (this.root) await ensureTexpileIgnore(this.root);
 	}
 
-	/** replace everything from a log served over the wire; a guest's catch-up on join */
+	/** a log served over the wire, a guest's catch-up on join. Lines appended here while it was in flight stay: the
+	 *  host cut the log before it had them, and their echo may already have come and gone */
 	adoptLog(text: string): void {
-		this.events = parseLog(text);
-		this.lines = keptLines(text);
+		const served = keptLines(text);
+		const known = new Set(served);
+		this.lines = [...served, ...this.lines.filter((line) => !known.has(line))];
+		this.events = parseLog(this.lines.join('\n'));
 		this.threads = foldLog([...this.events, ...this.staged]);
 	}
 
