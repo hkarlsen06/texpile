@@ -54,4 +54,7 @@ export type PatchReq = {
 	 *  page's new records itself: baseline and record store must move in the SAME tick, or the
 	 *  next edit diffs its `orig` against a page that already shows the newer text. */
 	onBaseline?: () => void;
+	/** decide the edit again from the text as it is now. A request held behind another patch was
+	 *  diffed against the baseline of its keystroke, which that patch may have moved on */
+	redecide?: () => void;
 };
