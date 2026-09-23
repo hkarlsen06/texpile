@@ -128,8 +128,11 @@ export function buildSourceExtensions(deps: SourceSetupDeps): Extension[] {
 			{ key: 'Mod-f', run: toggleSearchPanel },
 			{ key: 'Escape', run: closeSearchPanelAnimated },
 			...defaultKeymap,
-			// VS Code's second redo key, which CodeMirror binds on Linux and macOS only
-			...(collab ? yUndoManagerKeymap : [...historyKeymap, { key: 'Mod-Shift-z', run: redo, preventDefault: true }]),
+			// both redo keys on every platform: CodeMirror splits them by platform, and a missing one falls through to
+			// the workspace history below while CodeMirror still has its own redo
+			...(collab
+				? yUndoManagerKeymap
+				: [...historyKeymap, { key: 'Mod-y', run: redo, preventDefault: true }, { key: 'Mod-Shift-z', run: redo, preventDefault: true }]),
 			...searchKeymap,
 			indentWithTab
 		]),
