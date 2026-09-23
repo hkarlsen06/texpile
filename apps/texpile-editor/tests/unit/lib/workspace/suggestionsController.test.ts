@@ -44,6 +44,7 @@ function suggestion(id: string, text: string, words: string, restore: string, at
 function make(initial: string, mode: 'editing' | 'suggesting' = 'editing', name = 'main.tex') {
 	let text = initial;
 	const edits: { from: number; to: number; insert: string }[] = [];
+	const marks: number[] = [];
 	const ctl = new CommentsController({
 		root: () => ROOT,
 		preferredAuthor: () => 'louis',
@@ -55,13 +56,22 @@ function make(initial: string, mode: 'editing' | 'suggesting' = 'editing', name 
 			text = text.slice(0, e.from) + e.insert + text.slice(e.to);
 			return true;
 		},
+		markDecision: (seq) => marks.push(seq),
 		saveNow: () => {}
 	});
 	const open = async () => {
 		await ctl.load(ROOT);
 		ctl.reanchor(`${ROOT}/${name}`, text);
 	};
-	return { ctl, edits, open, type: (next: string) => (text = next), text: () => text, setMode: (next: typeof mode) => (mode = next) };
+	return {
+		ctl,
+		edits,
+		marks,
+		open,
+		type: (next: string) => (text = next),
+		text: () => text,
+		setMode: (next: typeof mode) => (mode = next)
+	};
 }
 
 const logged = () => parseLog(disk['.texpile/comments.jsonl'] ?? '');
@@ -147,6 +157,31 @@ describe('a suggestion in the file', () => {
 		expect(opened()).toEqual([]);
 		expect(thread('s1').decision).toBe('rejected');
 		expect(activeSuggestions.current).toEqual([]);
+	});
+
+	// Docs does the same: an Accept is one step of the undo history like any edit
+	it('brings an accepted suggestion back where it stood when the Accept is undone, and accepts it on redo', async () => {
+		disk['.texpile/comments.jsonl'] = serializeLog([suggestion('s1', TEXT, 'sharp', 'reliable')]);
+		const { ctl, open, marks } = make(TEXT);
+		await open();
+		const thread = () => ctl.threads.find((t) => t.id === 's1')!;
+		await ctl.suggestions.accept(thread());
+		expect(thread().decision).toBe('accepted');
+		expect(activeSuggestions.current).toEqual([]);
+		expect(marks).toEqual([1]);
+
+		await ctl.suggestions.revisitAccept(1, true);
+		expect(thread().resolved).toBe(false);
+		expect(activeSuggestions.current.map((s) => [s.id, TEXT.slice(s.from, s.to), s.restore])).toEqual([['s1', 'sharp', 'reliable']]);
+
+		await ctl.suggestions.revisitAccept(1, false);
+		expect(thread().decision).toBe('accepted');
+		expect(activeSuggestions.current).toEqual([]);
+		expect(logged().filter((e) => e.t === 'resolve')).toMatchObject([
+			{ thread: 's1', resolved: true, decision: 'accepted' },
+			{ thread: 's1', resolved: false },
+			{ thread: 's1', resolved: true, decision: 'accepted' }
+		]);
 	});
 
 	it('keeps what was typed when the folder changes, and drops it when the edit is thrown away', async () => {

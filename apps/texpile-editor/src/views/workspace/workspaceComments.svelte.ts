@@ -21,6 +21,9 @@ import type { ViewModeSwitch } from '$lib/workspace/viewModeSwitch.svelte';
 import type { ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
 import type { SourceEdit } from '$lib/workspace/suggestionsController';
 import { patchVisualFromSource } from '$lib/workspace/visualSourcePatch';
+import { onDecisionStep } from '$lib/comments/decisionHistory';
+import { markPmDecision } from '$lib/editor/visual/extensions/pmDecisionStep';
+import { markCmDecision } from '$lib/editor/source/extensions/cmDecisionStep';
 import { editMode, suggesting } from '$lib/comments/activeSuggestions.svelte';
 import type { EditMode } from '$lib/comments/suggestCompare';
 
@@ -73,9 +76,12 @@ export class WorkspaceComments {
 			compares: () => !d.guest(),
 			rewraps: () => d.modes.mode === 'visual' && hasVisualMode(d.kind()),
 			applyEdit: (edit) => this.applyEdit(edit),
+			markDecision: (seq) => this.markDecision(seq),
 			saveNow: () => d.flushSave(),
 			resync: () => collabHost.resendCommentLog()
 		});
+
+		$effect(() => onDecisionStep((s) => void this.ctl.suggestions.revisitAccept(s.seq, s.undone)));
 
 		let lastMode = mode();
 		$effect(() => {
@@ -172,6 +178,16 @@ export class WorkspaceComments {
 		if (!cm || cm.state.doc.toString() !== before) return false;
 		cm.dispatch({ changes: { from: edit.from, to: edit.to, insert: edit.insert } });
 		return true;
+	}
+
+	private markDecision(seq: number): void {
+		if (this.d.modes.mode === 'visual' && hasVisualMode(this.d.kind())) {
+			const v = editorViewStore.current;
+			if (v) markPmDecision(v, seq);
+			return;
+		}
+		const cm = sourceCmView.current;
+		if (cm) markCmDecision(cm, seq);
 	}
 
 	async beforeSave(absPath: string, content: string): Promise<void> {

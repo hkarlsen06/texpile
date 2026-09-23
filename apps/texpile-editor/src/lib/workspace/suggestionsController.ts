@@ -42,6 +42,8 @@ type Deps = {
 	rewraps: () => boolean;
 	onLost?: (file: string, lost: Set<string>) => void;
 	dropped?: () => void;
+	/** puts the Accept numbered `seq` into the open editor's undo history; see comments/decisionHistory.ts */
+	markDecision?: (seq: number) => void;
 };
 
 type FileState = { text: string; placed: PlacedSuggestion[] };
@@ -51,6 +53,9 @@ const REJECTS_KEPT = 100;
 
 /** the file just before (`open`) and just after (`rejected`) a Reject */
 type UndoableReject = { file: string; thread: CommentThread; open: FileState; rejected: FileState };
+
+/** an Accept the editors' undo can take back */
+type UndoableAccept = { file: string; thread: CommentThread };
 
 /** an edit recorded for someone other than the reader: `gesture` is where it landed, `opened` what it opened */
 type AgentEdit = { by: string; note: string; gesture: TextSpan; opened: string[] };
@@ -65,6 +70,8 @@ export class SuggestionsController {
 	private timer: ReturnType<typeof setTimeout> | null = null;
 	private me: string | null = null;
 	private rejects: UndoableReject[] = [];
+	private accepts = new Map<number, UndoableAccept>();
+	private acceptSeq = 0;
 
 	constructor(private readonly deps: Deps) {}
 
@@ -200,6 +207,7 @@ export class SuggestionsController {
 		this.placedFile = null;
 		this.me = null;
 		this.rejects = [];
+		this.accepts.clear();
 	}
 
 	async accept(t: CommentThread): Promise<void> {
@@ -207,6 +215,19 @@ export class SuggestionsController {
 		await this.settle();
 		await this.decide(t, 'accepted');
 		this.drop(t.file, t.id);
+		if (t.file !== this.deps.activeFile()) return;
+		this.accepts.set(++this.acceptSeq, { file: t.file, thread: t });
+		this.deps.markDecision?.(this.acceptSeq);
+	}
+
+	// the editors' undo of an Accept reopens the same thread where it stood; their redo accepts it again
+	async revisitAccept(seq: number, undone: boolean): Promise<void> {
+		const a = this.accepts.get(seq);
+		if (!a) return;
+		await this.settle();
+		await this.deps.commit(await this.decision(a.thread, undone ? undefined : 'accepted'));
+		if (!undone) return this.drop(a.file, a.thread.id);
+		if (this.states.has(a.file)) this.refit(a.file);
 	}
 
 	async reject(t: CommentThread): Promise<boolean> {

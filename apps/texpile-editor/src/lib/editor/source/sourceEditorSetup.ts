@@ -38,6 +38,7 @@ import type * as Y from 'yjs';
 import { gutterTheme, yRemoteLayoutFix } from './sourceEditorThemes';
 import type { CollabBinding } from './sourceEditorTypes';
 import { tocCaretListener } from '$lib/editor/visual/extensions/tableofcontents/tocCaretListener';
+import { cmDecisionSteps } from './extensions/cmDecisionStep';
 
 export type SourceSetupDeps = {
 	fileFor: string;
@@ -82,7 +83,9 @@ export function buildSourceExtensions(deps: SourceSetupDeps): Extension[] {
 		lineNumbers(onSelectComment ? { domEventHandlers: commentGutterHandlers((id) => onSelectComment(id)) } : {}),
 		gutterTheme,
 		highlightActiveLine(),
-		...(collab ? [yCollab(collab.ytext, collab.awareness, { undoManager: deps.undoManager! }), yRemoteLayoutFix] : [history()]),
+		...(collab
+			? [yCollab(collab.ytext, collab.awareness, { undoManager: deps.undoManager! }), yRemoteLayoutFix]
+			: [history(), cmDecisionSteps()]),
 		deps.roConf.of(deps.readOnly || collab?.readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
 		deps.keymapConf.of([]),
 		drawSelection(),

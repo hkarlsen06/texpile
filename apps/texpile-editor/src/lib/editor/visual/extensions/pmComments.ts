@@ -19,6 +19,7 @@ import { buildAnchor, type CommentAnchor } from '$lib/comments/anchor';
 import { indexStartingBy, pmToSource, type Segment, type SourceMap } from '../sourceSpans';
 
 import { focusPmSuggestionMeta, pmSuggestionAt, pmSuggestions, pmSuggestionsKey } from './pmSuggestions';
+import { pmDecisionSteps } from './pmDecisionStep';
 import { pmSelectionToolbar } from './pmSelectionToolbar';
 
 export { flattenDoc, placePmComments, pmRangeOf, type FlatDoc } from './pmCommentsResolve';
@@ -261,5 +262,5 @@ export function pmComments({ onSelect, onAdd, sourceAnchor, addLabel = 'Comment'
 			}
 		}
 	});
-	return [state, pmSuggestions(), ...(onAdd && sourceAnchor ? [pmSelectionToolbar(onAdd, addLabel, sourceAnchor)] : [])];
+	return [state, pmSuggestions(), pmDecisionSteps(), ...(onAdd && sourceAnchor ? [pmSelectionToolbar(onAdd, addLabel, sourceAnchor)] : [])];
 }

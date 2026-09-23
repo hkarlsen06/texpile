@@ -59,6 +59,7 @@ type Deps = {
 	publish?: (event: CommentEvent) => void;
 	mode?: () => EditMode;
 	applyEdit?: (edit: SourceEdit) => Promise<boolean>;
+	markDecision?: (seq: number) => void;
 	saveNow?: () => void;
 	compares?: () => boolean;
 	rewraps?: () => boolean;
@@ -138,6 +139,7 @@ export class CommentsController {
 			commit: (...events) => this.commit(...events),
 			publish: (event) => deps.publish?.(event),
 			applyEdit: (edit) => deps.applyEdit?.(edit) ?? Promise.resolve(false),
+			markDecision: (seq) => deps.markDecision?.(seq),
 			saveNow: () => deps.saveNow?.(),
 			compares: () => deps.compares?.() ?? true,
 			rewraps: () => deps.rewraps?.() ?? false,
