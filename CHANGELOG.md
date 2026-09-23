@@ -8,6 +8,7 @@ Release notes for Texpile Desktop. Add notes under `## [Unreleased]` as you work
 - refactor: untouched blocks are written back from the source map, not from a verbatim attr on every block
 - fix: undoing a Reject brings the suggestion back
 - fix: a suggested deletion undone in Editing no longer leaves its card behind
+- fix: Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z work when the text is not focused
 
 ## [1.2.0] - 2026-09-20
 

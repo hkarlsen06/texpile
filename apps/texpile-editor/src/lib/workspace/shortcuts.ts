@@ -43,12 +43,29 @@ export type ShortcutDeps = {
 	runCompile(): void;
 	stopCompile(): void;
 	openPreferences(): void;
+	stepDocumentHistory(direction: 'undo' | 'redo'): void;
 };
+
+/** VS Code's keys: Mod+Z undoes, Mod+Y and Mod+Shift+Z redo */
+function historyKey(e: KeyboardEvent): 'undo' | 'redo' | null {
+	if (!(e.metaKey || e.ctrlKey) || e.altKey) return null;
+	const k = e.key.toLowerCase();
+	if (k === 'z') return e.shiftKey ? 'redo' : 'undo';
+	return k === 'y' && !e.shiftKey ? 'redo' : null;
+}
 
 export function createKeydownHandler(deps: ShortcutDeps): (e: KeyboardEvent) => void {
 	return (e: KeyboardEvent) => {
 		const mod = e.metaKey || e.ctrlKey;
-		if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'w') {
+		const history = historyKey(e);
+		if (history) {
+			// the editors and the file tree take these themselves; from anywhere else (the body, once a card's
+			// Reject button has gone) they reach the open document the way the Edit menu does. Chromium's own
+			// undo lands there only by chance, and its redo never does
+			if (e.defaultPrevented || (e.target instanceof Element && e.target.closest(`${TYPING_HOSTS}, [role="dialog"]`))) return;
+			e.preventDefault();
+			deps.stepDocumentHistory(history);
+		} else if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'w') {
 			e.preventDefault();
 			// closes the FOCUSED tab, which may be a comparison rather than the file itself. The tab
 			// strip runs on activeFilePath, not on the loaded document: a file that failed to load

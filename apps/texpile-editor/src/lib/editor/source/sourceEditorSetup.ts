@@ -11,7 +11,7 @@ import {
 } from '@codemirror/view';
 import type { ViewUpdate } from '@codemirror/view';
 import { EditorState, type Compartment, type Extension } from '@codemirror/state';
-import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, indentWithTab, redo } from '@codemirror/commands';
 import { bracketMatching, indentOnInput, foldGutter, LanguageDescription } from '@codemirror/language';
 import { cmSyntaxHighlight } from '$lib/editor/source/cmHighlight';
 import { languages as cmlangdata } from '@codemirror/language-data';
@@ -128,7 +128,8 @@ export function buildSourceExtensions(deps: SourceSetupDeps): Extension[] {
 			{ key: 'Mod-f', run: toggleSearchPanel },
 			{ key: 'Escape', run: closeSearchPanelAnimated },
 			...defaultKeymap,
-			...(collab ? yUndoManagerKeymap : historyKeymap),
+			// VS Code's second redo key, which CodeMirror binds on Linux and macOS only
+			...(collab ? yUndoManagerKeymap : [...historyKeymap, { key: 'Mod-Shift-z', run: redo, preventDefault: true }]),
 			...searchKeymap,
 			indentWithTab
 		]),

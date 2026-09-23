@@ -35,6 +35,7 @@
 	import { TerminalDockState } from '$lib/workspace/terminalDockState.svelte';
 	import { mark } from '$lib/debug/startupDoctor';
 	import { createKeydownHandler } from '$lib/workspace/shortcuts';
+	import { editSelect } from '$lib/chrome/menuBarCommands';
 	import { preferencesOpen } from '$lib/stores/dialogStore';
 	import { workspaceRoot, texFiles, activeCompare, activeFilePath } from '$lib/workspace/workspaceStore';
 	import ZoteroCitationDialog from '$lib/zotero/ZoteroCitationDialog.svelte';
@@ -286,7 +287,8 @@
 		isCompiling: () => compiler.compiling,
 		runCompile: () => compiler.runCompile(),
 		stopCompile: () => compiler.stopCompile(),
-		openPreferences: () => (preferencesOpen.current = true)
+		openPreferences: () => (preferencesOpen.current = true),
+		stepDocumentHistory: (direction) => editSelect(direction)
 	});
 </script>
 

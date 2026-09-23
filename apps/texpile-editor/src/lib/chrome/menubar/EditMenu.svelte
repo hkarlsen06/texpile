@@ -3,6 +3,7 @@
 	import MenuBarTrigger from './MenuBarTrigger.svelte';
 	import { contentClass, itemClass, separatorClass } from './menuBarStyles';
 	import { combo } from '$lib/chrome/shortcutText';
+	import { isMac } from '$lib/platform';
 	import { m } from '$lib/paraglide/messages';
 
 	// findable without editable: a .pdf tab, where Find is the viewer's and the rest has nothing to act on
@@ -30,7 +31,9 @@
 					><Menu.ItemText>{m.menubar_undo()}</Menu.ItemText><span class="opacity-50">{combo('Z')}</span></Menu.Item
 				>
 				<Menu.Item value="redo" class={itemClass} disabled={!editable}
-					><Menu.ItemText>{m.menubar_redo()}</Menu.ItemText><span class="opacity-50">{combo('Z', { shift: true })}</span></Menu.Item
+					><Menu.ItemText>{m.menubar_redo()}</Menu.ItemText><span class="opacity-50"
+						>{isMac ? combo('Z', { shift: true }) : combo('Y')}</span
+					></Menu.Item
 				>
 				<Menu.Separator class={separatorClass} />
 				<Menu.Item value="find" class={itemClass} disabled={!findable}
