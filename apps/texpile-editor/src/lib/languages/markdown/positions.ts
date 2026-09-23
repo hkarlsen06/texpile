@@ -21,6 +21,23 @@ function stamp(tok: Token, from: number, to: number): void {
 	if (!meta.at) meta.at = { from, to };
 }
 
+// a delimiter run is pushed as one text piece per delimiter (`**` is two `*`), each of which reads
+// as its own character when the run matches nothing: every piece its own bytes, or the two claim both
+function stampRead(state: StateInline, n: number, start: number): void {
+	// the text pending before the rule is flushed into the same stretch, already stamped
+	const pushed = state.tokens.slice(n).filter((t) => !rangeOf(t));
+	const pieces =
+		pushed.length > 1 &&
+		pushed.every((t) => t.type === 'text') &&
+		pushed.map((t) => t.content).join('') === state.src.slice(start, state.pos);
+	let at = start;
+	for (const t of pushed) {
+		const to = pieces ? at + t.content.length : state.pos;
+		stamp(t, pieces ? at : start, to);
+		at = to;
+	}
+}
+
 // text the tokenizer appended itself, one character per position, since the last rule ran
 function catchUp(state: StateInline, p: Pending): void {
 	if (state.pending.length <= p.len) return;
@@ -43,7 +60,7 @@ export function positionsPlugin(md: MarkdownIt): void {
 			const n = state.tokens.length;
 			const ok = fn(state, silent);
 			if (!ok) return ok;
-			for (let i = n; i < state.tokens.length; i++) stamp(state.tokens[i], start, state.pos);
+			stampRead(state, n, start);
 			const len = state.pending.length;
 			if (len > p.len) {
 				if (p.len === 0) p.from = start;

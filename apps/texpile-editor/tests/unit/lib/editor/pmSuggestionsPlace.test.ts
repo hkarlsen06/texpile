@@ -3,11 +3,17 @@ import type { Node as PMNode } from 'prosemirror-model';
 import { buildAnchor } from '$lib/comments/anchor';
 import type { SuggestionMark } from '$lib/comments/activeSuggestions.svelte';
 import { placePmSuggestions, type PmSuggestionRange } from '$lib/editor/visual/extensions/pmSuggestionsPlace';
+import { parseMarkdownFile, parseMarkdownRegion } from '$lib/languages/markdown/visual/roundtrip';
+import { parseTypstFile, parseTypstRegion } from '$lib/languages/typst/visual/roundtrip';
 import { bodyOffsetOf, parseLatexFile, parseLatexRegion } from '$lib/workspace/latexRoundtrip';
 
+const latex = { parse: parseLatexFile, region: (preamble: string) => (src: string) => parseLatexRegion(src, preamble) };
+const markdown = { parse: parseMarkdownFile, region: () => parseMarkdownRegion };
+const typst = { parse: parseTypstFile, region: () => parseTypstRegion };
+
 /** the marks placed in `source` parsed as a file, the way the editor hands them over */
-function placed(source: string, marks: SuggestionMark[]) {
-	const parsed = parseLatexFile(source);
+function placed(source: string, marks: SuggestionMark[], format = latex) {
+	const parsed = format.parse(source);
 	const from = bodyOffsetOf(parsed);
 	const to = parsed.hadDocumentEnv ? source.length - parsed.postamble.length : source.length;
 	return {
@@ -16,7 +22,7 @@ function placed(source: string, marks: SuggestionMark[]) {
 			text: source,
 			map: parsed.map,
 			body: { from, to },
-			parse: (src) => parseLatexRegion(src, parsed.preamble)
+			parse: format.region(parsed.preamble)
 		})
 	};
 }
@@ -137,6 +143,71 @@ it('tints the copy the suggestion is in when the text around it repeats', () => 
 	const from = source.lastIndexOf('sat');
 	const { doc, ranges } = placed(source, [mark(source, 'again', 'sat', 'lay', from)]);
 	expect(ranges[0].from).toBeGreaterThan(doc.child(0).nodeSize);
+});
+
+// with a second mark in the paragraph the comparison lined the "e" of "new" up with the one of "estimator"
+it('draws each of two changes in one paragraph where its mark is', () => {
+	const typed = '\\begin{document}\nWe prove the new estimator is blunt for smooth solutions.\n\\end{document}\n';
+	const one = placed(typed, [mark(typed, 'added', 'new ', ''), mark(typed, 'swapped', 'blunt', 'sharp')]);
+	const added = one.ranges.find((r) => r.id === 'added')!;
+	expect(one.doc.textBetween(added.from, added.to)).toBe('new ');
+	expect(added.old).toEqual([]);
+	const cut = '\\begin{document}\nWe the estimator is sharp for a very smooth solutions.\n\\end{document}\n';
+	const two = placed(cut, [mark(cut, 'prove', '', 'prove ', cut.indexOf('the ')), mark(cut, 'only', '', 'only ', cut.indexOf('a very'))]);
+	for (const [id, words, at] of [
+		['prove', 'prove ', 'the '],
+		['only', 'only ', 'a very']
+	]) {
+		const r = two.ranges.find((x) => x.id === id)!;
+		expect([r.to - r.from, oldOf(r)]).toEqual([0, [[words, []]]]);
+		expect(two.doc.textBetween(r.from, r.from + at.length)).toBe(at);
+	}
+});
+
+it('draws words taken out just before a formula as words', () => {
+	const source = '\\begin{document}\nEach glue is $g_i$ here.\n\\end{document}\n';
+	const { doc, ranges } = placed(source, [mark(source, 'cut', '', 'set to ', source.indexOf('$g_i$'))]);
+	const [cut] = ranges;
+	expect([cut.node, cut.to - cut.from, oldOf(cut)]).toEqual([undefined, 0, [['set to ', []]]]);
+	expect(doc.nodeAt(cut.from)?.type.name).toBe('inline_math');
+});
+
+// Enter after the words left before a display takes it out of their paragraph, a blank line the
+// visual editor does not draw
+it('draws the words taken out before a display without the display', () => {
+	const source = '\\begin{document}\nIn\n\n\\begin{equation}\n\t\\alpha = 1\n\\end{equation}\n\nA closing line.\n\\end{document}\n';
+	const { ranges } = placed(source, [mark(source, 'cut', 'In\n', 'Inline math $E$ and a display:')]);
+	expect(ranges.filter((r) => r.node)).toEqual([]);
+	expect(ranges.flatMap((r) => r.old.map((run) => run.node?.type.name ?? run.text))).toEqual([
+		'line math ',
+		'inline_math',
+		' and a display:'
+	]);
+});
+
+// a deletion from inside a caption into the heading after it, which then reads as the rest of the caption
+it('sets an image a change began inside beside the one it was, when the change ran on past it', () => {
+	const source = "Some words.\n\n![A plot](plot.png 'Now the caphat differs')\n";
+	const { doc, ranges } = placed(source, [mark(source, 'join', "caphat differs')", "caption words.')\n\n## What differs")], markdown);
+	const image = ranges.find((r) => r.node)!;
+	expect([doc.nodeAt(image.from)?.textContent, image.was?.textContent]).toEqual(['Now the caphat differs', 'Now the caption words.']);
+});
+
+// the comparison reads edits fewer than two letters apart as one
+it('keeps a one letter word a paragraph was split after, with words typed before it', () => {
+	const source = '\\begin{document}\nSo A\n\ncat sat on the mat.\n\\end{document}\n';
+	const { doc, ranges } = placed(source, [mark(source, 'split', 'So A\n\n', 'A ')]);
+	expect(ranges.map((r) => [doc.textBetween(r.from, r.to), oldOf(r), r.brk])).toEqual([
+		['So ', [], undefined],
+		['', [[' ', []]], 'added']
+	]);
+});
+
+it('draws a paragraph split just after a chip after the chip, not inside it', () => {
+	const source = 'An inline #quote[quotation]\n\n sits in running text.\n';
+	const { doc, ranges } = placed(source, [mark(source, 'split', '\n\n', '')], typst);
+	const [split] = ranges;
+	expect([split.brk, split.from]).toEqual(['added', doc.child(0).nodeSize - 1]);
 });
 
 it('tints only the chip a change sits in, and draws a removed accent as its letter', () => {

@@ -3,7 +3,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import type { Node as PMNode } from 'prosemirror-model';
-import { parseMarkdownFile, serializeMarkdownFileDetailed } from '$lib/languages/markdown/visual/roundtrip';
+import { parseMarkdownFile, serializeMarkdownFile, serializeMarkdownFileDetailed } from '$lib/languages/markdown/visual/roundtrip';
 import { pmToSource, sourceToPm, withoutOrigins } from '$lib/editor/visual/sourceSpans';
 import { auditMap, coverage } from '../../editor/visual/sourceMapAudit';
 import { FORMATS } from '../../workspace/visualEditsFuzz';
@@ -42,6 +42,14 @@ describe('the Markdown parser source map', () => {
 		);
 		expect(prose).toBeGreaterThan(0.95);
 		expect(nodes).toBeGreaterThan(0.9);
+	});
+
+	// markdown-it pushes a run that opens nothing as one piece per delimiter, and each claimed the whole run
+	it('gives each star of a run that opens nothing its own byte, so its paragraph writes back as it was', () => {
+		const src = 'Words in th**e panel and snake__case here.\n\nNext.\n';
+		const parsed = parseMarkdownFile(src);
+		expect(parsed.origins?.defects).toEqual([]);
+		expect(serializeMarkdownFile(parsed, parsed.doc)).toBe(src);
 	});
 
 	it('maps prose inside markers, an escape and a formula', () => {

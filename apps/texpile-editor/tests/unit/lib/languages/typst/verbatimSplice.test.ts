@@ -162,6 +162,14 @@ describe('typst: an edit keeps every byte but its own', () => {
 		).toBe(MD.replace('+ two', '+ TWO'));
 	});
 
+	// the line breaks either side of it would meet as a blank line
+	it('a line taken out of a hand-wrapped paragraph leaves one paragraph', () => {
+		const src = 'A line\nwith a wrap and\nmore words here.\n';
+		const p = parseTypstFile(src);
+		const out = serializeTypstFile(p, new Transform(p.doc).delete(posOf(p.doc, 'with'), posOf(p.doc, 'and') + 3).doc);
+		expect(parseTypstFile(out).doc.childCount).toBe(1);
+	});
+
 	it('a paragraph written afresh inside an item continues under the marker', () => {
 		const schema = parsed.doc.type.schema;
 		const edited = replace(parsed.doc, [3, 2, 0], (p) =>

@@ -8,7 +8,14 @@
 import { Fragment, type Node, type Mark } from 'prosemirror-model';
 import { serializeTable, serializeRowCells, serializeCell } from './tableSerializer';
 import { FIG_IMG_SLOT, FIG_CAP_SLOT, FIG_LAB_SLOT } from '../parser/converter';
-import { createBlockAssembly, follows, isLastOfParse, type DocSerializeResult, type Neighbour } from '$lib/serializer/blockAssembly';
+import {
+	blankLineAt,
+	createBlockAssembly,
+	follows,
+	isLastOfParse,
+	type DocSerializeResult,
+	type Neighbour
+} from '$lib/serializer/blockAssembly';
 import type { Ctx, NodeHandler } from '$lib/serializer/types';
 // direct, not through the image barrel: that one pulls in svelte and the DOM
 import { DEFAULT_FIGURE_FRACTION } from '$lib/editor/visual/extensions/image/figureDefaults';
@@ -534,6 +541,8 @@ const assembly = createBlockAssembly((node, ctx) => serializeNode(node, ctx), {
 		if (parent.type.spec.leafText || parent.type.spec.code) return leaf.text ?? '';
 		// a label's bytes sit inside \item[..]: a `]` in them needs the whole bracket braced
 		if (leaf.marks.some((m) => m.type.name === 'item_label') && (leaf.text ?? '').includes(']')) return null;
+		// a bare link's text is the argument of its \url, whose bytes are the text's own run
+		if (leaf.marks.some((m) => m.type.name === 'link' && m.attrs.bare)) return null;
 		const bytes = bareTextString(
 			leaf.text ?? '',
 			leaf.marks.some((m) => m.type.name === 'code')
@@ -544,8 +553,12 @@ const assembly = createBlockAssembly((node, ctx) => serializeNode(node, ctx), {
 	mapInlineLeaves,
 	// a comment runs to the end of its line: nothing may follow it on that line
 	endsLine: (text) => /(^|[^\\])(\\\\)*%[^\n]*$/.test(text),
-	// a control word ending the fresh bytes would fuse with a letter beginning the kept tail
-	keepApart: (bytes, tail) => (/\\[a-zA-Z@]+$/.test(bytes) && /^[a-zA-Z]/.test(tail) ? bytes + ' ' : bytes),
+	// a control word ending the fresh bytes would fuse with a letter beginning the kept tail, and in
+	// prose the line breaks either side of a line taken out would meet as a blank line, a new paragraph
+	keepApart: (bytes, tail, head, _gone, parent) => {
+		if (!parent.type.spec.leafText && !parent.type.spec.code && blankLineAt(head, bytes, tail)) return null;
+		return /\\[a-zA-Z@]+$/.test(bytes) && /^[a-zA-Z]/.test(tail) ? bytes + ' ' : bytes;
+	},
 	// a block written afresh inside an environment or an item continues its lines as the file
 	// indented the block it replaced, else under what stood before it on its first line
 	continuation: (_parent, text, head) => {
