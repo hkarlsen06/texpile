@@ -61,7 +61,7 @@ function make(initial: string, mode: 'editing' | 'suggesting' = 'editing', name 
 		await ctl.load(ROOT);
 		ctl.reanchor(`${ROOT}/${name}`, text);
 	};
-	return { ctl, edits, open, type: (next: string) => (text = next), text: () => text };
+	return { ctl, edits, open, type: (next: string) => (text = next), text: () => text, setMode: (next: typeof mode) => (mode = next) };
 }
 
 const logged = () => parseLog(disk['.texpile/comments.jsonl'] ?? '');
@@ -146,14 +146,16 @@ describe('a suggestion in the file', () => {
 		expect(authorCalls).toBeGreaterThan(before);
 	});
 
-	it('takes a Delete away again when the words are put back where they came from', async () => {
-		const { ctl, open, type } = make(TEXT, 'suggesting');
+	// Editing: the Delete was made while suggesting, and the mode switched before the undo
+	it.each(['suggesting', 'editing'] as const)('takes a Delete away again when the words are put back in %s', async (backIn) => {
+		const { ctl, open, type, setMode } = make(TEXT, 'suggesting');
 		await open();
 		const cut = TEXT.replace('sharp ', '');
 		type(cut);
 		ctl.suggestions.textChanged(FILE, cut);
 		await ctl.suggestions.settle();
 		expect(activeSuggestions.current.map((s) => s.restore)).toEqual(['sharp ']);
+		setMode(backIn);
 		// an undo, or the same thing typed back by hand
 		type(TEXT);
 		ctl.suggestions.textChanged(FILE, TEXT);

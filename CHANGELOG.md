@@ -6,6 +6,7 @@ Release notes for Texpile Desktop. Add notes under `## [Unreleased]` as you work
 ## [Unreleased]
 
 - refactor: untouched blocks are written back from the source map, not from a verbatim attr on every block
+- fix: a suggested deletion undone in Editing no longer leaves its card behind
 
 ## [1.2.0] - 2026-09-20
 

@@ -205,7 +205,7 @@ export function compareSuggestions(o: CompareInput): ComparedSuggestions {
 		// standing beside it as new ones. An undo lands here, and without this it reads as a deletion
 		// of everything followed by an addition of the same thing, which is what the document already
 		// said before either. Retyping by hand lands here too, and means the same thing.
-		if (typed && inserted && mode === 'suggesting') {
+		if (typed && inserted) {
 			const back = points.find((i) => entries[i].author === me && entries[i].from === h.aFrom && entries[i].restore.startsWith(inserted));
 			if (back !== undefined) {
 				const e = entries[back];
