@@ -101,10 +101,12 @@ export class SuggestionsController {
 		const lost = new Set<string>();
 		for (const t of this.deps.store.forFile(file).filter(isOpenSuggestion)) {
 			const base = { id: t.id, restore: t.restore ?? '', author: suggestionAuthor(t) };
+			// a reader who does not record takes the recorder's word for where a suggestion stands, and
+			// only falls back on its own reckoning while that anchor has not caught up with the text
 			const s = carried.get(t.id);
-			const hit = s ? null : resolveExactly(against, t.anchor);
-			if (s) placed.push({ ...base, from: s.from, to: s.to });
-			else if (hit) placed.push({ ...base, from: hit.from, to: hit.to });
+			const hit = s && this.deps.compares() ? null : resolveExactly(against, t.anchor);
+			if (hit) placed.push({ ...base, from: hit.from, to: hit.to });
+			else if (s) placed.push({ ...base, from: s.from, to: s.to });
 			else lost.add(t.id);
 			order.set(t.id, s ? s.i : carried.size + (t.anchor.rank ?? 0));
 		}
