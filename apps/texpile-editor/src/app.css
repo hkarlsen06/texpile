@@ -127,6 +127,13 @@ html.window-glass .TexpileEditor :is(hr, div.abstract, .table-wrapper, .table-he
 html.window-glass .scroll-inset-r {
 	border-right-color: transparent;
 }
+/* a native checkbox paints its own solid box whatever color it is given, a dark or white hole in the glass. Clear
+   inside the glass line like the fields; a ticked one keeps the native accent */
+html.window-glass .checkbox:not(:checked, :indeterminate) {
+	appearance: none;
+	background-color: transparent;
+	border: 1px solid var(--glass-line);
+}
 /* unwrapped lines pass under the line numbers, so their strip has to cover; wrapped ones never do, and it can be glass */
 html.window-glass .cm-gutters {
 	background-color: light-dark(var(--solid-surface-50), var(--solid-surface-950));
