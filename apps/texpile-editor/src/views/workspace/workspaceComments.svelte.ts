@@ -10,6 +10,8 @@ import { userData } from '$lib/storage/userData';
 import { collabGuest } from '$lib/collab/guestStore.svelte';
 import { collabHost } from '$lib/collab/hostStore.svelte';
 import { isSafeRel } from '$lib/collab/protocol';
+import { changedSpans } from '$lib/collab/materialize';
+import type * as Y from 'yjs';
 import { editorViewStore, sourceCmView } from '$lib/stores/editorStore';
 import { pmCommentsKey, revealPmComment, sourceAnchorFor } from '$lib/editor/visual/extensions/pmComments';
 import { liveCommentRanges } from '$lib/editor/visual/extensions/comments';
@@ -42,7 +44,8 @@ export class WorkspaceComments {
 
 	constructor(private d: CommentsDeps) {
 		function mode(): EditMode {
-			return suggesting.current && !d.guest() && !collabHost.active && !fileMode.current ? 'suggesting' : 'editing';
+			// a guest suggests only through a host that records it; an older host would take it as editing
+			return suggesting.current && !fileMode.current && (!d.guest() || collabGuest.hostRecords) ? 'suggesting' : 'editing';
 		}
 		this.ctl = new CommentsController({
 			root: () => workspaceRoot.current,
@@ -87,10 +90,38 @@ export class WorkspaceComments {
 		$effect(() => {
 			const next = mode();
 			editMode.current = next;
+			untrack(() => {
+				// a guest's typing so far goes out before its new mode does, so the host records it in the old one
+				if (d.guest() && next !== lastMode) d.flushSave();
+				if (d.guest()) collabGuest.setSuggesting(next === 'suggesting');
+				else collabHost.setSuggesting(next === 'suggesting');
+			});
 			if (next === lastMode) return;
 			const was = lastMode;
 			lastMode = next;
 			untrack(() => void this.ctl.suggestions.settle(was));
+		});
+
+		// a guest keeps the others' changes to the open file theirs: named, in their mode, and not
+		// compared as this guest's own typing
+		$effect(() => {
+			if (!d.guest()) return;
+			void collabGuest.rev;
+			const path = d.doc.path;
+			const t = path ? collabGuest.ytextFor(path) : null;
+			if (!path || !t) return;
+			let running = t.toString();
+			const onChange = (ev: Y.YTextEvent) => {
+				const before = running;
+				running = t.toString();
+				const who = collabGuest.remoteAuthorOf(ev.transaction.origin);
+				const file = this.ctl.activeFile;
+				const root = workspaceRoot.current;
+				if (!who || !file || !root || before === running || relativeTo(root, path) !== file) return;
+				this.ctl.remoteEdit(file, before, running, { ...who, gestures: changedSpans(ev.delta) });
+			};
+			t.observe(onChange);
+			return () => t.unobserve(onChange);
 		});
 
 		$effect(() => {

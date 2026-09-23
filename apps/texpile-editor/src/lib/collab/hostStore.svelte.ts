@@ -8,6 +8,7 @@ import { CollabSession, manifestOf, locksOf, metaOf, textOf, type PeerInfo } fro
 import { BROADCAST, isSafeRel, isSafeCommentEvent, type ControlPayload, type PreviewPayload } from './protocol';
 import type { SharedCompileIntel } from './editSession';
 import type { CommentEvent } from '$lib/comments/log';
+import type { RemoteEdit } from '$lib/workspace/suggestionStates';
 import { HostMaterializer, isShared } from './materialize';
 import { RelayTransport, createRelaySession } from './transport';
 import {
@@ -49,7 +50,10 @@ class HostCollabController {
 	onCommentEvent: ((event: CommentEvent) => void) | null = null;
 	/** the whole comment log, served to a guest joining mid-review. */
 	commentLog: (() => string) | null = null;
-	onGuestWrite: ((rel: string, before: string, after: string) => Promise<void>) | null = null;
+	/** a guest's change to a shared file as it applies, with their name and mode, for the host to record */
+	onGuestEdit: ((rel: string, before: string, after: string, edit: RemoteEdit) => void) | null = null;
+	/** awaited before a guest's changes are written to disk, so what they recorded is logged first */
+	beforeGuestWrite: ((rel: string, content: string) => Promise<void>) | null = null;
 	/** one hop of the Typst preview relay from a guest; previewRelay wires this while hosting. */
 	onPreview: ((p: PreviewPayload, from: number) => void) | null = null;
 	/** a guest asked its preview to follow a source position; workspaceSession wires this. */
@@ -155,7 +159,11 @@ class HostCollabController {
 				},
 				joinPath
 			);
-			materializer.onWrite = (rel, before, after) => this.onGuestWrite?.(rel, before, after) ?? Promise.resolve();
+			materializer.onWrite = (rel, content) => this.beforeGuestWrite?.(rel, content) ?? Promise.resolve();
+			materializer.senderOf = (origin) => session.senderOf(origin);
+			materializer.onRemoteChange = (rel, before, after, from, gestures) =>
+				this.onGuestEdit?.(rel, before, after, { ...session.authorOf(from), gestures });
+			session.setSuggesting(this.suggesting);
 			this.oversizedText = (await materializer.seed()).oversizedText;
 
 			this.doc = doc;
@@ -176,6 +184,14 @@ class HostCollabController {
 
 	refreshIdentity(): void {
 		this.session?.setIdentity(presenceIdentity('host'));
+	}
+
+	private suggesting = false;
+
+	/** the host's own mode, advertised so guests know this host records suggestions */
+	setSuggesting(on: boolean): void {
+		this.suggesting = on;
+		this.session?.setSuggesting(on);
 	}
 
 	/** stop sharing; tellGuests=false when the teardown came from the far side. */

@@ -19,6 +19,7 @@ Release notes for Texpile Desktop. Add notes under `## [Unreleased]` as you work
 - fix: a suggestion in Chinese or Japanese text strikes only the words it changed, not the whole sentence
 - fix: switching back to the window no longer opens the PDF preview while no main file is picked
 - fix: checkboxes in a transparent window are no longer dark or white squares
+- feat: suggestions in a shared session: guests can suggest too, and the host records each change under the name of whoever made it
 
 ## [1.2.0] - 2026-09-20
 
