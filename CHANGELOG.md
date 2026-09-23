@@ -9,7 +9,7 @@ Release notes for Texpile Desktop. Add notes under `## [Unreleased]` as you work
 - fix: undoing a Reject brings the suggestion back
 - fix: a suggested deletion undone in Editing no longer leaves its card behind
 - fix: Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z work when the text is not focused
-- fix: the welcome screen no longer opens a second time after its language is changed
+- fix: changing the language in the welcome screen no longer opens it a second time or loses the folder it was opening
 - fix: the transparent window on macOS shows the desktop through it and stays readable in dark mode
 - fix: shortcut hints use the macOS spelling on a Mac, and the subscript hint names its real key
 

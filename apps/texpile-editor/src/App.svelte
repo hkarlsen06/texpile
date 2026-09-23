@@ -4,7 +4,7 @@
 	import { nativeBridge, openNewWindow } from '$lib/workspace/fileSystem';
 	import { openFileInWindow, openFolderInWindow } from '$lib/workspace/openWorkspace';
 	import { setupOwed } from '$lib/setup/setupGate';
-	import { pendingWorkspace } from '$lib/setup/pendingWorkspace.svelte';
+	import { holdPendingWorkspace } from '$lib/setup/pendingWorkspace';
 	import { settings, loadSettings } from '$lib/settings';
 	import { checkForUpdate, updateModalOpen } from '$lib/updates';
 	import UpdateAvailableModal from '$lib/modals/window/UpdateAvailableModal.svelte';
@@ -122,7 +122,7 @@
 		if (!n?.onOpenFolder) return;
 		return n.onOpenFolder((root) => {
 			if (setupOwed() && route.path === '/') {
-				pendingWorkspace.current = root;
+				holdPendingWorkspace(root);
 				return;
 			}
 			loadWorkspace(); // stream the workspace chunk while the folder scans

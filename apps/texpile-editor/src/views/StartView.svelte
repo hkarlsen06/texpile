@@ -20,7 +20,7 @@
 	import { RecentsFit } from './startRecentsFit.svelte';
 	import WelcomeSetup from '$lib/setup/WelcomeSetup.svelte';
 	import { setupOwed } from '$lib/setup/setupGate';
-	import { takePendingWorkspace } from '$lib/setup/pendingWorkspace.svelte';
+	import { takePendingWorkspace } from '$lib/setup/pendingWorkspace';
 
 	// the flag is taken even when the welcome is owed anyway: left set, the workspace opens the welcome a second time
 	let welcome = $state(takeSetupReopen() || setupOwed());
