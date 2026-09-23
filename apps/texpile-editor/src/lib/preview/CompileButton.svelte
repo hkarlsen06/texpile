@@ -11,14 +11,15 @@
 	 * `filter-none` on hover overrides Skeleton's own `.btn` hover, which is
 	 * `filter: brightness(125%)` in light mode (and 75% in dark). Brightening a tint takes the label
 	 * and the hairline with it, since a filter applies to the whole element - that is the glow. One
-	 * step deeper in the same hue is what a hover should do at both ends.
+	 * step deeper in the same hue is what a hover should do at both ends. It is important because
+	 * Skeleton's selector, `.btn:not(:disabled):hover`, outranks a hover utility's.
 	 */
 	export type CompileTone = 'primary' | 'success' | 'warning' | 'error';
 	export const COMPILE_TONE: Record<CompileTone, string> = {
-		primary: 'preset-tonal-primary border border-primary-wash hover:filter-none hover:bg-primary-tonal-hover',
-		success: 'preset-tonal-success border border-success-wash hover:filter-none hover:bg-success-tonal-hover',
-		warning: 'preset-tonal-warning border border-warning-wash hover:filter-none hover:bg-warning-tonal-hover',
-		error: 'preset-tonal-error border border-error-wash hover:filter-none hover:bg-error-tonal-hover'
+		primary: 'preset-tonal-primary border border-primary-wash hover:filter-none! hover:bg-primary-tonal-hover',
+		success: 'preset-tonal-success border border-success-wash hover:filter-none! hover:bg-success-tonal-hover',
+		warning: 'preset-tonal-warning border border-warning-wash hover:filter-none! hover:bg-warning-tonal-hover',
+		error: 'preset-tonal-error border border-error-wash hover:filter-none! hover:bg-error-tonal-hover'
 	};
 </script>
 
