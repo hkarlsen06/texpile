@@ -22,7 +22,8 @@
 	import { setupOwed } from '$lib/setup/setupGate';
 	import { takePendingWorkspace } from '$lib/setup/pendingWorkspace.svelte';
 
-	let welcome = $state(setupOwed() || takeSetupReopen());
+	// the flag is taken even when the welcome is owed anyway: left set, the workspace opens the welcome a second time
+	let welcome = $state(takeSetupReopen() || setupOwed());
 
 	let busy = $state(false);
 	let error = $state<string | null>(null);
