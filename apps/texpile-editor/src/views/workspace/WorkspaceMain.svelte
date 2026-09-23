@@ -13,6 +13,7 @@
 	import { m } from '$lib/paraglide/messages';
 	import { activeCompare, setSuggesting, workspaceRoot } from '$lib/workspace/workspaceStore';
 	import { activeSuggestions, suggesting } from '$lib/comments/activeSuggestions.svelte';
+	import { collabGuest } from '$lib/collab/guestStore.svelte';
 	import type { WorkspaceMainProps } from './workspaceMainProps';
 
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any -- the pipelines are structural here
@@ -66,7 +67,7 @@
 	function toggleSuggest(next: boolean) {
 		void commentsCtl.suggestions.settle();
 		suggesting.current = next;
-		if (workspaceRoot.current) setSuggesting(workspaceRoot.current, next);
+		if (workspaceRoot.current && !session.isGuest) setSuggesting(workspaceRoot.current, next);
 	}
 	const beside = $derived(
 		new Set<string>(
@@ -111,7 +112,7 @@
 		commentCount={panes.comments.filter((t: Any) => !t.resolved && !panes.commentGhosts.has(t.id)).length}
 		onShowComments={actions.showComments}
 		suggesting={suggesting.current}
-		onToggleSuggest={canComment && !session.active ? toggleSuggest : undefined}
+		onToggleSuggest={canComment && (!session.isGuest || collabGuest.hostRecords) ? toggleSuggest : undefined}
 		onTogglePdf={layout.togglePdfPane}
 		onSave={actions.save}
 		onSyncToCursor={layout.pdfPopout && !mainUnset ? syncToCursor : null}

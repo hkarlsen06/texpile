@@ -29,6 +29,7 @@ import { isSuggestion } from '$lib/comments/suggest';
 import { activeSuggestions, suggestionVisibility } from '$lib/comments/activeSuggestions.svelte';
 import type { EditMode } from '$lib/comments/suggestCompare';
 import { SuggestionsController, type SourceEdit } from './suggestionsController';
+import type { RemoteEdit } from './suggestionStates';
 
 type Deps = {
 	/** absolute workspace root, or null before a folder is open */
@@ -633,6 +634,8 @@ export class CommentsController {
 		// dedupes by id) but re-resolving is NOT - a miss here badged the author's own fresh
 		// comment as detached on their own screen.
 		if (event.t === 'open' && this.store.threads.some((t) => t.id === event.id)) return;
+		// before the refit below forgets where it stood: its words come back as the rejecter's edit
+		if (event.t === 'resolve' && event.decision === 'rejected') this.suggestions.expectReject(event.thread);
 		const appended = this.store.append(event);
 		this.applyIngested(event);
 		await appended;
@@ -679,9 +682,14 @@ export class CommentsController {
 		this.resolve();
 	}
 
-	async adoptRemoteWrite(file: string, before: string, after: string): Promise<void> {
-		if (file === this.file || !this.store.writable) return;
-		await this.suggestions.adoptRemote(file, before, after);
+	/** a collaborator's change to a file, as it applies here; see SuggestionsController.remoteEdit */
+	remoteEdit(file: string, before: string, after: string, edit: RemoteEdit): void {
+		void this.suggestions.remoteEdit(file, before, after, edit);
+	}
+
+	/** before a collaborator's changes go to disk, so the log never trails the file */
+	async beforeRemoteWrite(file: string, content: string): Promise<void> {
+		if (this.store.writable) await this.suggestions.beforeWrite(file, content);
 	}
 
 	/** a guest's catch-up: the host's whole log, served over the blob channel on join */

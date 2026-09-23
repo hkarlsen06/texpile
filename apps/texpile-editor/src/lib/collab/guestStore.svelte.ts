@@ -199,6 +199,7 @@ class GuestCollabController {
 			this.doc = doc;
 			this.session = session;
 			this.transport = transport;
+			session.setSuggesting(this.suggesting);
 			transport.connect();
 
 			// belt-and-braces: the relay now closes with a specific code for a bad join, but if it's
@@ -328,6 +329,26 @@ class GuestCollabController {
 	/** hand the viewer a fresh, intact copy (call before re-showing a PDF pane that was closed). */
 	refreshPdfView(): void {
 		if (this.pdfMaster) this.pdf = this.pdfMaster.slice().buffer;
+	}
+
+	/** the host records suggestions for its guests; a host from before that advertises no mode */
+	get hostRecords(): boolean {
+		return this.peers.some((p) => p.role === 'host' && p.suggesting !== undefined);
+	}
+
+	private suggesting = false;
+
+	/** this guest's mode, which the host records its edits in */
+	setSuggesting(on: boolean): void {
+		this.suggesting = on;
+		this.session?.setSuggesting(on);
+	}
+
+	/** who made a change this guest received and in which mode, or null for its own */
+	remoteAuthorOf(origin: unknown): ReturnType<CollabSession['authorOf']> | null {
+		const session = this.session;
+		const from = session?.senderOf(origin) ?? null;
+		return session && from !== null ? session.authorOf(from) : null;
 	}
 
 	ytextFor(rel: string): Y.Text | null {

@@ -6,6 +6,7 @@
 
 import type * as Y from 'yjs';
 import { LATEX_SIDECAR_RE } from '$lib/workspace/buildArtifacts';
+import type { TextSpan } from '$lib/comments/editGestures';
 import { manifestOf, locksOf, textOf, type ManifestEntry } from './session';
 
 export type MaterializeFs = {
@@ -103,10 +104,37 @@ export function spliceDiff(oldStr: string, newStr: string): { index: number; rem
 	return { index: start, remove: endOld - start, insert: newStr.slice(start, endNew) };
 }
 
+/** where a Y.Text change landed, as spans of the text after it; a deletion is an empty span */
+export function changedSpans(delta: Y.YTextEvent['delta']): TextSpan[] {
+	const out: TextSpan[] = [];
+	let at = 0;
+	for (const op of delta) {
+		if (op.retain) at += op.retain;
+		else if (op.insert !== undefined) {
+			const to = at + (typeof op.insert === 'string' ? op.insert.length : 1);
+			out.push({ from: at, to });
+			at = to;
+		} else if (op.delete) out.push({ from: at, to: at });
+	}
+	const merged: TextSpan[] = [];
+	for (const g of out) {
+		const prev = merged[merged.length - 1];
+		if (prev && g.from <= prev.to) prev.to = Math.max(prev.to, g.to);
+		else merged.push({ ...g });
+	}
+	return merged;
+}
+
 export class HostMaterializer {
-	onWrite: ((rel: string, before: string, after: string) => Promise<void>) | null = null;
+	/** awaited before each write-through, so whatever the write records lands first */
+	onWrite: ((rel: string, content: string) => Promise<void>) | null = null;
+	/** the peer a transaction origin came from, or null when it is this side's own */
+	senderOf: ((origin: unknown) => number | null) | null = null;
+	/** a peer's change to a shared file, as it applies: the file just before and just after it */
+	onRemoteChange: ((rel: string, before: string, after: string, from: number, spans: TextSpan[]) => void) | null = null;
 	private readonly writeTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	private readonly lastWritten = new Map<string, string>(); // rel -> LF content last synced with disk
+	private readonly running = new Map<string, string>(); // rel -> LF content as of the last transaction
 	private readonly observers = new Map<string, () => void>();
 	private destroyed = false;
 
@@ -169,9 +197,15 @@ export class HostMaterializer {
 	private observe(rel: string): void {
 		if (this.observers.has(rel)) return;
 		const t = textOf(this.doc, rel);
+		this.running.set(rel, t.toString());
 		const handler = (ev: Y.YTextEvent) => {
 			const origin = ev.transaction.origin;
+			const before = this.running.get(rel) ?? '';
+			const after = t.toString();
+			this.running.set(rel, after);
 			if (origin === SEED_ORIGIN) return;
+			const from = this.senderOf?.(origin) ?? null;
+			if (from !== null && before !== after) this.onRemoteChange?.(rel, before, after, from, changedSpans(ev.delta));
 			this.scheduleWrite(rel);
 		};
 		t.observe(handler);
@@ -198,12 +232,10 @@ export class HostMaterializer {
 		const content = textOf(this.doc, rel).toString();
 		const before = this.lastWritten.get(rel);
 		if (before === content) return;
-		if (before !== undefined) {
-			try {
-				await this.onWrite?.(rel, before, content);
-			} catch (e) {
-				this.onError?.(rel, e);
-			}
+		try {
+			await this.onWrite?.(rel, content);
+		} catch (e) {
+			this.onError?.(rel, e);
 		}
 		try {
 			await this.fs.writeText(this.joinPath(this.root, rel), fromLf(content, entry.eol ?? '\n'));

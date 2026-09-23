@@ -33,6 +33,8 @@ export type PeerInfo = {
 	name: string;
 	color: string;
 	role: 'host' | 'guest';
+	/** the peer's edit mode, absent when its build does not advertise one */
+	suggesting?: boolean;
 };
 
 export type SessionEndReason = 'host-ended' | 'relay-closed' | 'quota' | 'error' | 'no-session' | 'full' | 'host-outdated' | 'app-outdated';
@@ -142,6 +144,8 @@ export class CollabSession {
 	// seal/open are async; frames must apply in arrival order, so both directions run on chains
 	private sendChain: Promise<void> = Promise.resolve();
 	private recvChain: Promise<void> = Promise.resolve();
+	// the peer whose sync frame is being applied, so a Y.Text observer can name who made a change
+	private applyingFrom: number | null = null;
 
 	constructor(opts: {
 		doc: Y.Doc;
@@ -186,6 +190,22 @@ export class CollabSession {
 		this.awareness.setLocalStateField('user', user);
 	}
 
+	/** advertise whether this side is suggesting rather than editing */
+	setSuggesting(on: boolean): void {
+		if (this.awareness.getLocalState()?.suggesting !== on) this.awareness.setLocalStateField('suggesting', on);
+	}
+
+	/** the peer a change came from, when `origin` is a transaction this session applied off the wire */
+	senderOf(origin: unknown): number | null {
+		return origin === this ? this.applyingFrom : null;
+	}
+
+	/** who a peer's changes are recorded as: its name, and suggesting only when it says so */
+	authorOf(id: number): { by: string; mode: 'editing' | 'suggesting' } {
+		const peer = this.peers.get(id);
+		return { by: peer?.name ?? (id === this.authHostId ? 'Host' : 'Guest'), mode: peer?.suggesting ? 'suggesting' : 'editing' };
+	}
+
 	/** the host's Y clientID, learned from a relay-authenticated host frame. */
 	get hostId(): number | null {
 		return this.authHostId;
@@ -198,8 +218,11 @@ export class CollabSession {
 		this.peers.clear();
 		for (const [id, state] of this.awareness.getStates()) {
 			if (id === this.clientId) continue;
-			const user = (state as { user?: { name: string; color: string } }).user;
-			if (user) this.peers.set(id, { name: user.name, color: user.color, role: id === this.authHostId ? 'host' : 'guest' });
+			const { user, suggesting } = state as { user?: { name: string; color: string }; suggesting?: unknown };
+			if (!user) continue;
+			const peer: PeerInfo = { name: user.name, color: user.color, role: id === this.authHostId ? 'host' : 'guest' };
+			if (typeof suggesting === 'boolean') peer.suggesting = suggesting;
+			this.peers.set(id, peer);
 		}
 		this.events.onPeersChange?.(this.peers);
 	};
@@ -301,7 +324,12 @@ export class CollabSession {
 			case FrameType.SYNC: {
 				const dec = decoding.createDecoder(frame.payload);
 				const enc = encoding.createEncoder();
-				syncProtocol.readSyncMessage(dec, enc, this.doc, this);
+				this.applyingFrom = frame.from;
+				try {
+					syncProtocol.readSyncMessage(dec, enc, this.doc, this);
+				} finally {
+					this.applyingFrom = null;
+				}
 				// a step1 wants an answer; address it to the asker only
 				if (encoding.length(enc) > 0) {
 					this.post({ type: FrameType.SYNC, from: this.clientId, to: frame.from, payload: encoding.toUint8Array(enc) });

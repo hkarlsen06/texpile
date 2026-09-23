@@ -6,7 +6,7 @@ import * as Y from 'yjs';
 import { deriveSessionKeys } from '$lib/collab/e2e/keys';
 import { generateShareCode } from '$lib/collab/e2e/shareCode';
 import { CollabSession, textOf, type SessionEvents } from '$lib/collab/session';
-import { HostMaterializer, EDIT_ORIGIN } from '$lib/collab/materialize';
+import { HostMaterializer, EDIT_ORIGIN, changedSpans } from '$lib/collab/materialize';
 import { isSafeCommentEvent } from '$lib/collab/protocol';
 import type { RelayNotice } from '$lib/collab/protocol';
 import type { Transport, TransportStatus } from '$lib/collab/transport';
@@ -86,16 +86,16 @@ async function connect(log: CommentEvent[], hostOpens: string | null = '/w/main.
 	disk = { 'main.tex': TEXT, '.texpile/comments.jsonl': serializeLog(log) };
 	const key = (await deriveSessionKeys(generateShareCode())).contentKey;
 	const hub = new FakeHub();
-	const party = (role: 'host' | 'guest', events: SessionEvents) => {
+	const party = (role: 'host' | 'guest', name: string, events: SessionEvents) => {
 		const doc = new Y.Doc();
 		const transport = new FakeTransport(hub, role);
-		const session = new CollabSession({ doc, transport, key, role, user: { name: role, color: '#123456' }, events });
+		const session = new CollabSession({ doc, transport, key, role, user: { name, color: '#123456' }, events });
 		transport.start();
 		return { doc, session };
 	};
 
 	let hostText = TEXT;
-	const host = party('host', {
+	const host = party('host', 'louis', {
 		onControl: (payload) => {
 			if (payload.kind !== 'comment-event' || !isSafeCommentEvent(payload.event)) return;
 			void hostCtl.ingest(payload.event);
@@ -105,6 +105,14 @@ async function connect(log: CommentEvent[], hostOpens: string | null = '/w/main.
 			if (name === 'comments') host.session.sendBlob('comments', 0, new TextEncoder().encode(hostCtl.store.serialize()), from);
 		}
 	});
+	host.session.setSuggesting(false);
+	// the host's editor saves its own edits, then folds them into the doc
+	const hostEdit = (next: string) => {
+		hostText = next;
+		hostCtl.suggestions.textChanged('/w/main.tex', next);
+		disk['main.tex'] = next;
+		mat.hostEdit('main.tex', next);
+	};
 	const hostCtl = new CommentsController({
 		root: () => '/w',
 		preferredAuthor: () => '',
@@ -112,22 +120,32 @@ async function connect(log: CommentEvent[], hostOpens: string | null = '/w/main.
 		activeText: () => hostText,
 		mode: () => 'editing',
 		publish: (event) => host.session.sendControl({ kind: 'comment-event', event }),
-		applyEdit: async () => false,
+		applyEdit: async (e) => {
+			if (!hostOpens) return false;
+			hostEdit(hostText.slice(0, e.from) + e.insert + hostText.slice(e.to));
+			return true;
+		},
 		saveNow: () => {}
 	});
+	const writes: { tex: string; log: CommentEvent[] }[] = [];
 	const mat = new HostMaterializer(
 		host.doc,
 		'/w',
 		{
 			readBytes: async (p) => new TextEncoder().encode(disk[p.replace(/^\/w\//, '')]),
 			writeText: async (p, content) => {
-				disk[p.replace(/^\/w\//, '')] = content;
+				const rel = p.replace(/^\/w\//, '');
+				if (rel === 'main.tex') writes.push({ tex: content, log: logged() });
+				disk[rel] = content;
 			},
 			listFiles: async () => [{ rel: 'main.tex', size: disk['main.tex'].length }]
 		},
 		(root, rel) => `${root}/${rel}`
 	);
-	mat.onWrite = (rel, before, after) => hostCtl.adoptRemoteWrite(rel, before, after);
+	mat.onWrite = (rel, content) => hostCtl.beforeRemoteWrite(rel, content);
+	mat.senderOf = (origin) => host.session.senderOf(origin);
+	mat.onRemoteChange = (rel, before, after, from, gestures) =>
+		hostCtl.remoteEdit(rel, before, after, { ...host.session.authorOf(from), gestures });
 	await mat.seed();
 	await hostCtl.load('/w');
 	if (hostOpens) {
@@ -139,58 +157,88 @@ async function connect(log: CommentEvent[], hostOpens: string | null = '/w/main.
 		hostCtl.suggestions.textChanged(hostOpens, hostText);
 	}
 
-	let guestText = '';
-	const guest = party('guest', {
-		onControl: (payload) => {
-			if (payload.kind === 'comment-event') void guestCtl.ingest(payload.event);
-		},
-		onBlob: (name, _rev, bytes) => {
-			if (name === 'comments') guestCtl.adopt(new TextDecoder().decode(bytes), 'session/main.tex', guestText);
-		}
-	});
-	const guestEdit = (from: number, to: number, insert: string) => {
+	async function joinGuest(name: string) {
+		let text = '';
+		let mode: 'editing' | 'suggesting' = 'editing';
+		const guest = party('guest', name, {
+			onControl: (payload) => {
+				if (payload.kind === 'comment-event') void ctl.ingest(payload.event);
+			},
+			onBlob: (blob, _rev, bytes) => {
+				if (blob === 'comments') ctl.adopt(new TextDecoder().decode(bytes), 'session/main.tex', text);
+			}
+		});
 		const t = textOf(guest.doc, 'main.tex');
-		guest.doc.transact(() => {
-			if (to > from) t.delete(from, to - from);
-			if (insert) t.insert(from, insert);
-		}, EDIT_ORIGIN);
-	};
-	const guestCtl = new CommentsController({
-		root: () => 'session',
-		preferredAuthor: () => 'mei',
-		openFileAt: () => {},
-		activeText: () => guestText,
-		mode: () => 'editing',
-		compares: () => false,
-		publish: (event) => guest.session.sendControl({ kind: 'comment-event', event }),
-		applyEdit: async (e) => {
-			guestEdit(e.from, e.to, e.insert);
-			return true;
-		},
-		saveNow: () => {}
-	});
-	textOf(guest.doc, 'main.tex').observe(() => {
-		guestText = textOf(guest.doc, 'main.tex').toString();
-		guestCtl.suggestions.textChanged('session/main.tex', guestText);
-	});
-	await guestCtl.load(null);
-	await until(() => guestText === TEXT);
-	guestCtl.reanchor('session/main.tex', guestText);
-	guest.session.requestBlob('comments');
-	await until(() => guestCtl.threads.length === log.length);
+		const edit = (from: number, to: number, insert: string) => {
+			guest.doc.transact(() => {
+				if (to > from) t.delete(from, to - from);
+				if (insert) t.insert(from, insert);
+			}, EDIT_ORIGIN);
+		};
+		const ctl = new CommentsController({
+			root: () => 'session',
+			preferredAuthor: () => name,
+			openFileAt: () => {},
+			activeText: () => text,
+			mode: () => mode,
+			compares: () => false,
+			publish: (event) => guest.session.sendControl({ kind: 'comment-event', event }),
+			applyEdit: async (e) => {
+				edit(e.from, e.to, e.insert);
+				return true;
+			},
+			saveNow: () => {}
+		});
+		let running = '';
+		t.observe((ev) => {
+			const before = running;
+			text = running = t.toString();
+			const from = guest.session.senderOf(ev.transaction.origin);
+			if (from !== null && before)
+				ctl.remoteEdit('main.tex', before, text, { ...guest.session.authorOf(from), gestures: changedSpans(ev.delta) });
+			ctl.suggestions.textChanged('session/main.tex', text);
+		});
+		await ctl.load(null);
+		await until(() => text === hostText);
+		ctl.reanchor('session/main.tex', text);
+		guest.session.requestBlob('comments');
+		await until(() => ctl.threads.length === hostCtl.threads.length);
+		return {
+			ctl,
+			edit,
+			text: () => text,
+			/** type `words` one keystroke at a time, each just before `mark` */
+			type(words: string, mark: string) {
+				for (const ch of words) edit(text.indexOf(mark), text.indexOf(mark), ch);
+			},
+			async suggesting(on: boolean) {
+				mode = on ? 'suggesting' : 'editing';
+				guest.session.setSuggesting(on);
+				await until(() => host.session.peers.get(guest.doc.clientID)?.suggesting === on);
+			},
+			close: () => guest.session.destroy()
+		};
+	}
+
+	const guests: { close(): void }[] = [];
+	const first = await joinGuest('mei');
+	guests.push(first);
 
 	return {
 		hostCtl,
-		guestCtl,
+		guestCtl: first.ctl,
+		guest: first,
 		mat,
+		writes,
 		hostText: () => hostText,
-		guestText: () => guestText,
-		guestEdit,
-		hostEdit(next: string) {
-			hostText = next;
-			hostCtl.suggestions.textChanged('/w/main.tex', next);
-			mat.hostEdit('main.tex', next);
+		guestText: first.text,
+		guestEdit: first.edit,
+		async join(name: string) {
+			const g = await joinGuest(name);
+			guests.push(g);
+			return g;
 		},
+		hostEdit,
 		hostOpen(path: string | null) {
 			hostText = path ? disk['main.tex'] : '';
 			hostCtl.reanchor(path, hostText);
@@ -198,7 +246,7 @@ async function connect(log: CommentEvent[], hostOpens: string | null = '/w/main.
 		close() {
 			mat.destroy();
 			host.session.destroy();
-			guest.session.destroy();
+			for (const g of guests) g.close();
 		}
 	};
 }
@@ -281,5 +329,73 @@ it('carries a plain thread both ways: open, reply, resolve, edit and delete a me
 	expect(shape(hostThread())).toEqual({ id, file: 'main.tex', resolved: true, messages: [[id, 'mei', 'is this sharp?']] });
 	expect(logged().map((e) => e.t)).toEqual(['open', 'reply', 'resolve', 'edit', 'delete-message']);
 	expect(logged().some((e) => e.t === 'reply' && e.id === reply && e.by === 'louis')).toBe(true);
+	s.close();
+});
+
+const openSuggestions = (s: Awaited<ReturnType<typeof connect>>) =>
+	s.hostCtl.threads.filter((t) => t.restore !== undefined && !t.resolved).map((t) => [t.messages[0].by, t.anchor.quote, t.restore]);
+
+it('records what a guest suggests under their name, and rejecting it all gives back the exact original', async () => {
+	const s = await connect([]);
+	await s.guest.suggesting(true);
+
+	const at = TEXT.indexOf('sharp');
+	s.guestEdit(at, at + 5, '');
+	s.guest.type('blunt', ' for');
+	s.guest.type('fully ', 'smooth');
+	const cut = s.guestText().indexOf('We ');
+	s.guestEdit(cut, cut + 3, '');
+	const suggested = 'prove the estimator is blunt for fully smooth solutions.\n';
+	await until(() => disk['main.tex'] === suggested);
+	await s.hostCtl.suggestions.settle();
+	await until(() => openSuggestions(s).length === 3);
+	expect(openSuggestions(s).sort()).toEqual([
+		['mei', '', 'We '],
+		['mei', 'blunt', 'sharp'],
+		['mei', 'fully ', '']
+	]);
+	await until(() => s.guestCtl.threads.filter((t) => !t.resolved).length === 3);
+
+	for (const t of s.hostCtl.threads.filter((x) => !x.resolved)) {
+		await s.hostCtl.suggestions.settle();
+		expect(await s.hostCtl.suggestions.reject(t)).toBe(true);
+	}
+	await until(() => disk['main.tex'] === TEXT);
+	await until(() => s.guestText() === TEXT);
+	await s.hostCtl.store.append();
+	expect(s.hostCtl.threads.map((t) => t.decision)).toEqual(['rejected', 'rejected', 'rejected']);
+	await until(() => s.guestCtl.threads.every((t) => t.decision === 'rejected'));
+	s.close();
+});
+
+it('keeps two guests typing in one sentence at once apart', async () => {
+	const s = await connect([]);
+	const ada = await s.join('ada');
+	await s.guest.suggesting(true);
+	await ada.suggesting(true);
+
+	const mine = 'new ';
+	const theirs = 'very ';
+	for (let i = 0; i < Math.max(mine.length, theirs.length); i++) {
+		if (mine[i]) s.guest.type(mine[i], 'estimator');
+		if (theirs[i]) ada.type(theirs[i], 'smooth');
+	}
+	const both = 'We prove the new estimator is sharp for very smooth solutions.\n';
+	await until(() => disk['main.tex'] === both && s.guestText() === both && ada.text() === both);
+	await until(() => openSuggestions(s).length === 2);
+	expect(openSuggestions(s).sort()).toEqual([
+		['ada', 'very ', ''],
+		['mei', 'new ', '']
+	]);
+	s.close();
+});
+
+it('puts what a guest suggested in the log before the file it changed', async () => {
+	const s = await connect([]);
+	await s.guest.suggesting(true);
+	s.guest.type('new ', 'estimator');
+	await until(() => disk['main.tex']?.includes('new estimator'));
+	const first = s.writes.find((w) => w.tex.includes('new estimator'))!;
+	expect(first.log.some((e) => e.t === 'open' && e.by === 'mei' && e.anchor.quote === 'new ')).toBe(true);
 	s.close();
 });
