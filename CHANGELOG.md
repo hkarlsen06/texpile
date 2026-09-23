@@ -12,6 +12,7 @@ Release notes for Texpile Desktop. Add notes under `## [Unreleased]` as you work
 - fix: changing the language in the welcome screen no longer opens it a second time or loses the folder it was opening
 - fix: the transparent window on macOS shows the desktop through it and stays readable in dark mode
 - fix: shortcut hints use the macOS spelling on a Mac, and the subscript hint names its real key
+- fix: undo in a shared session never rolls the document back past what was typed in it
 
 ## [1.2.0] - 2026-09-20
 

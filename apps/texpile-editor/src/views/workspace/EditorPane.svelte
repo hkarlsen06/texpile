@@ -204,6 +204,12 @@
 		if (!v || !loadedPath || session.collabFor(loadedPath)) return;
 		restoreVisualPosition(v, loadedPath, texSource, sourceMap);
 	}
+
+	// a shared file steps only through its own history: the workspace one swaps in a whole local snapshot, which would
+	// write over everyone else's edits. still consumed, so the browser's own undo never runs
+	function stepHistoryUnlessShared(dir: 'undo' | 'redo'): boolean {
+		return session.collabFor(loadedPath) ? true : onHistoryBoundary(dir);
+	}
 </script>
 
 <div class="flex min-h-0 min-w-0 flex-col" style="grid-column: 1; grid-row: 2">
@@ -372,7 +378,7 @@
 								gotoLine={sourceGotoLine}
 								{onSyncToPdf}
 								initialScrollPos={sourceScrollAnchor}
-								{onHistoryBoundary}
+								onHistoryBoundary={stepHistoryUnlessShared}
 								diagnostics={kind === 'typ' ? undefined : sourceDiagnostics}
 								{onJumpToFile}
 								{onOpenFileAt}
@@ -404,7 +410,7 @@
 							{showRenderBar}
 							{onVisualChange}
 							{onVisualSelection}
-							{onHistoryBoundary}
+							onHistoryBoundary={stepHistoryUnlessShared}
 							{onVisualReady}
 							{onMdLink}
 							{onEditFrontmatter}
