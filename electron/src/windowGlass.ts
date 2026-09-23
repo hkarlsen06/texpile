@@ -21,11 +21,24 @@ function setGlass(win: BrowserWindow, on: boolean, solidFill: string): void {
 	if (process.platform === 'darwin') win.setVibrancy(on ? 'under-window' : null);
 	else win.setBackgroundMaterial(on ? 'acrylic' : 'none');
 	win.setBackgroundColor(on ? '#00000000' : solidFill);
+	nudge(win);
+}
+
+// macOS composites a page loaded (or reloaded) into a see-through window as opaque until the window next resizes, so the
+// material shows as black under it; a one pixel resize is the only thing found that makes it redraw
+function nudge(win: BrowserWindow): void {
+	if (process.platform !== 'darwin' || !glassOn || win.isDestroyed() || win.isFullScreen() || win.isMaximized()) return;
+	const [w, h] = win.getContentSize();
+	win.setContentSize(w + 1, h);
+	setTimeout(() => {
+		if (!win.isDestroyed()) win.setContentSize(w, h);
+	}, 100);
 }
 
 export function applySavedGlass(win: BrowserWindow, solidFill: string): void {
 	glassOn = glassWorks() && readSettings().transparentWindow === true;
 	if (glassOn) setGlass(win, true, solidFill);
+	win.webContents.on('did-finish-load', () => nudge(win));
 }
 
 export function registerWindowGlassIpc(solidFill: () => string): void {
