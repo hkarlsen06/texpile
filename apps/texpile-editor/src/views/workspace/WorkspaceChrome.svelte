@@ -31,7 +31,6 @@
 		scm,
 		treeOps,
 		guest,
-		modLabel,
 		showToc,
 		menu,
 		actions,
@@ -48,7 +47,6 @@
 		scm: Any;
 		treeOps: Any;
 		guest: boolean;
-		modLabel: string;
 		showToc: boolean;
 		/** menu-bar inputs that are not workspace state */
 		menu: {
@@ -153,7 +151,6 @@
 		<WorkspaceSidebar
 			width={layout.sidebarWidth}
 			{guest}
-			{modLabel}
 			bind:view={layout.sidebarView}
 			scmBusy={scm.busy}
 			{showToc}

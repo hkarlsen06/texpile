@@ -26,13 +26,13 @@
 	import type { FileHistory } from '$lib/workspace/fileHistory.svelte';
 	import type { GitStatusEntry, GitLogEntry, GitFileChange } from '$lib/workspace/git';
 	import { m } from '$lib/paraglide/messages';
+	import { combo } from '$lib/chrome/shortcutText';
 	import { Popover, Portal } from '@skeletonlabs/skeleton-svelte';
 	import { FilePlus, FolderPlus, RefreshCw, GitBranch, Search, MoreHorizontal } from '@lucide/svelte';
 
 	type Props = {
 		width: number;
 		guest: boolean;
-		modLabel: string;
 		view: 'explorer' | 'scm' | 'search';
 		scmBusy: boolean;
 		showToc: boolean;
@@ -81,7 +81,6 @@
 	let {
 		width,
 		guest,
-		modLabel,
 		view = $bindable(),
 		scmBusy,
 		showToc,
@@ -179,7 +178,7 @@
 						key: 'search',
 						icon: Search,
 						label: m.wsview_find_in_files(),
-						title: m.wsview_find_in_files_title({ combo: `${modLabel}+Shift+F` }),
+						title: m.wsview_find_in_files_title({ combo: combo('F', { shift: true }) }),
 						active: view === 'search',
 						run: () => (view === 'search' ? (view = 'explorer') : onOpenGlobalSearch())
 					}

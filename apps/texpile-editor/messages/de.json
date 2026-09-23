@@ -686,7 +686,7 @@
 	"vcs_no_branch": "kein Branch",
 	"vcs_refresh_title": "Aktualisieren",
 	"vcs_refresh_aria": "Versionskontrolle aktualisieren",
-	"vcs_commit_placeholder": "Nachricht ({modLabel}+Enter zum Committen)",
+	"vcs_commit_placeholder": "Nachricht ({combo} zum Committen)",
 	"vcs_no_changes": "Keine Änderungen",
 	"vcs_save_version_count": "Version speichern · {count} Dateien",
 	"vcs_save_version_one": "Version speichern · 1 Datei",

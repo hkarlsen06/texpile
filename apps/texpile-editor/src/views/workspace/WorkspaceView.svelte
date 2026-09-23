@@ -58,7 +58,6 @@
 	const canTrash = $derived(!!provider.trash && !!provider.restore);
 	// a guest session: host chrome (compile/terminal/git/file-ops/share) hidden
 	const guest = $derived(session.isGuest);
-	import { modLabel } from '$lib/platform';
 	import { hasVisualMode, isRawTextKind } from '$lib/workspace/documentBuffer.svelte';
 
 	// the open document, its parse/mode lifecycle, and the edit-persistence flow live in
@@ -314,7 +313,6 @@
 		{scm}
 		treeOps={files.treeOps}
 		{guest}
-		{modLabel}
 		{showToc}
 		menu={{
 			disabled: !doc.path,
@@ -349,7 +347,6 @@
 			{kind}
 			{nameOnly}
 			{folderEmpty}
-			{modLabel}
 			{dockShrunk}
 			draft={draftCtl}
 			typstPreviewHost={typstPreview.host}

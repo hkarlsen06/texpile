@@ -11,6 +11,7 @@ Release notes for Texpile Desktop. Add notes under `## [Unreleased]` as you work
 - fix: Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z work when the text is not focused
 - fix: the welcome screen no longer opens a second time after its language is changed
 - fix: the transparent window on macOS shows the desktop through it and stays readable in dark mode
+- fix: shortcut hints use the macOS spelling on a Mac, and the subscript hint names its real key
 
 ## [1.2.0] - 2026-09-20
 

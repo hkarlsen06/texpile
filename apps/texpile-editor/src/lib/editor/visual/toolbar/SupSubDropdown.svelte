@@ -2,7 +2,7 @@
 	import { tip } from '$lib/components/tooltip.svelte';
 	import { Popover, Portal } from '@skeletonlabs/skeleton-svelte';
 	import { ChevronDown, Check, Superscript, Subscript } from '@lucide/svelte';
-	import { modLabel } from '$lib/platform';
+	import { combo } from '$lib/chrome/shortcutText';
 	import { m } from '$lib/paraglide/messages';
 
 	type Props = {
@@ -22,8 +22,6 @@
 		open = false;
 		onToggle(which);
 	}
-
-	const modKey = modLabel;
 
 	const anyActive = $derived(sup || sub);
 </script>
@@ -58,7 +56,7 @@
 				>
 					<Superscript class="text-muted size-[18px] shrink-0" strokeWidth={2.25} />
 					<span class="flex-1">{m.tbar_superscript()}</span>
-					<span class="text-muted text-xs">{modKey}+.</span>
+					<span class="text-muted text-xs">{combo('.')}</span>
 					{#if sup}<Check class="ml-1 h-4 w-4 shrink-0" />{/if}
 				</button>
 				<button
@@ -69,7 +67,7 @@
 				>
 					<Subscript class="text-muted size-[18px] shrink-0" strokeWidth={2.25} />
 					<span class="flex-1">{m.tbar_subscript()}</span>
-					<span class="text-muted text-xs">{modKey}+,</span>
+					<span class="text-muted text-xs">{combo(',', { shift: true })}</span>
 					{#if sub}<Check class="ml-1 h-4 w-4 shrink-0" />{/if}
 				</button>
 			</Popover.Content>

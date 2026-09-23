@@ -686,7 +686,7 @@
 	"vcs_no_branch": "無分支",
 	"vcs_refresh_title": "重新整理",
 	"vcs_refresh_aria": "重新整理版本控制",
-	"vcs_commit_placeholder": "提交訊息（{modLabel}+Enter 提交）",
+	"vcs_commit_placeholder": "提交訊息（{combo} 提交）",
 	"vcs_no_changes": "沒有變更",
 	"vcs_save_version_count": "儲存版本 · {count} 個檔案",
 	"vcs_save_version_one": "儲存版本 · 1 個檔案",

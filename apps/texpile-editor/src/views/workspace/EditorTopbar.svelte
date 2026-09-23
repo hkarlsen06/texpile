@@ -15,6 +15,7 @@
 	import type { ComponentProps } from 'svelte';
 	import type { FileKind } from '$lib/workspace/documentBuffer.svelte';
 	import { m } from '$lib/paraglide/messages';
+	import { combo } from '$lib/chrome/shortcutText';
 	import EditModePicker from './EditModePicker.svelte';
 	import {
 		ArrowRight,
@@ -48,7 +49,6 @@
 		pdfPaneOpen: boolean;
 		draftPaused: boolean;
 		saving: boolean;
-		modLabel: string;
 		onSetViewMode: (m: 'visual' | 'source') => void;
 		onStopCompile: () => void;
 		onPauseDraft: () => void;
@@ -95,7 +95,6 @@
 		pdfPaneOpen,
 		draftPaused,
 		saving,
-		modLabel,
 		onSetViewMode,
 		onStopCompile,
 		onPauseDraft,
@@ -152,7 +151,7 @@
 				tone: 'error',
 				icon: Square,
 				label: m.wsview_stop_label(),
-				title: m.wsview_stop_compile_title({ combo: `${modLabel}+Alt+Enter` }),
+				title: m.wsview_stop_compile_title({ combo: combo('Enter', { alt: true }) }),
 				onclick: onStopCompile
 			};
 		// the preview is attached; closing the pane is its stop (the pane detaches the server task
@@ -181,7 +180,7 @@
 			tone: 'primary',
 			icon: Play,
 			label: live ? m.wsview_preview_label() : m.wsview_compile_label(),
-			title: live ? m.wsview_open_live_preview_title() : m.wsview_compile_title({ combo: `${modLabel}+Alt+Enter` }),
+			title: live ? m.wsview_open_live_preview_title() : m.wsview_compile_title({ combo: combo('Enter', { alt: true }) }),
 			onclick: onCompile
 		};
 	});

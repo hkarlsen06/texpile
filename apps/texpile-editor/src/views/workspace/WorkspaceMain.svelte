@@ -32,7 +32,6 @@
 		kind,
 		nameOnly,
 		folderEmpty,
-		modLabel,
 		dockShrunk,
 		draft,
 		typstPreviewHost,
@@ -95,7 +94,6 @@
 		pdfPaneOpen={layout.pdfPaneOpen}
 		draftPaused={draft.paused}
 		saving={saver.saving}
-		{modLabel}
 		onSetViewMode={actions.setViewMode}
 		onStopCompile={compiler.stopCompile}
 		onPauseDraft={actions.pauseDraft}

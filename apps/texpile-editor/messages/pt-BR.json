@@ -554,7 +554,7 @@
 	"vcs_no_branch": "sem branch",
 	"vcs_refresh_title": "Atualizar",
 	"vcs_refresh_aria": "Atualizar controle de versão",
-	"vcs_commit_placeholder": "Mensagem ({modLabel}+Enter para salvar)",
+	"vcs_commit_placeholder": "Mensagem ({combo} para salvar)",
 	"vcs_no_changes": "Sem alterações",
 	"vcs_save_version_count": "Salvar versão · {count} arquivos",
 	"vcs_save_version_one": "Salvar versão · 1 arquivo",

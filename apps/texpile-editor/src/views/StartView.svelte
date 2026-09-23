@@ -2,7 +2,7 @@
 	import { tip } from '$lib/components/tooltip.svelte';
 	import { navigate } from '$lib/router.svelte';
 	import { AppWindow, Folder, FolderOpen, Loader2, Settings, Users } from '@lucide/svelte';
-	import { modKey } from '$lib/platform';
+	import { combo } from '$lib/chrome/shortcutText';
 	import { whatsNewOpen, hasUnseenWhatsNew } from '$lib/whatsNew';
 	import AppFrame from '$lib/chrome/AppFrame.svelte';
 	import RecentFoldersModal from '$lib/modals/start/RecentFoldersModal.svelte';
@@ -145,7 +145,7 @@
 				<button class={rowClass} onclick={openNewWindow}>
 					<AppWindow class="text-muted size-4 shrink-0" />
 					<span>{m.start_new_window()}</span>
-					<span class="text-faint ml-auto shrink-0 pl-4 text-xs">{modKey('Shift', 'N')}</span>
+					<span class="text-faint ml-auto shrink-0 pl-4 text-xs">{combo('N', { shift: true })}</span>
 				</button>
 			{/if}
 			<button class={rowClass} onclick={showPrefs}>

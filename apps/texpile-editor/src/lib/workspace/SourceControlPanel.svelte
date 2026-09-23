@@ -8,7 +8,7 @@
 	import { pathLabels } from './history/pathLabels';
 	import { isBuildArtifact } from '$lib/workspace/buildArtifacts';
 	import type { GitStatusEntry, GitLogEntry, GitFileChange } from '$lib/workspace/git';
-	import { modLabel } from '$lib/platform';
+	import { combo } from '$lib/chrome/shortcutText';
 	import { m } from '$lib/paraglide/messages';
 
 	type Props = {
@@ -189,7 +189,7 @@
 							class="textarea resize-none text-sm rounded-container"
 							rows="2"
 							placeholder={m.vcs_save_placeholder()}
-							use:tip={m.vcs_commit_placeholder({ modLabel })}
+							use:tip={m.vcs_commit_placeholder({ combo: combo('Enter') })}
 							bind:value={message}
 							onkeydown={onKeydown}></textarea>
 						<button

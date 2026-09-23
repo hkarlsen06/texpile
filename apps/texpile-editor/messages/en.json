@@ -686,7 +686,7 @@
 	"vcs_no_branch": "no branch",
 	"vcs_refresh_title": "Refresh",
 	"vcs_refresh_aria": "Refresh source control",
-	"vcs_commit_placeholder": "Message ({modLabel}+Enter to commit)",
+	"vcs_commit_placeholder": "Message ({combo} to commit)",
 	"vcs_no_changes": "No changes",
 	"vcs_save_version_count": "Save version · {count} files",
 	"vcs_save_version_one": "Save version · 1 file",

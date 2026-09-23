@@ -26,7 +26,6 @@ export type WorkspaceMainProps = {
 	kind: FileKind;
 	nameOnly: boolean;
 	folderEmpty: boolean;
-	modLabel: string;
 	dockShrunk: boolean;
 	/** live-preview inputs: root, main file, recompile trigger, paused flag */
 	draft: DraftController;
