@@ -16,7 +16,8 @@ export const labelNodeSpec: NodeSpec = {
 	atom: true,
 	selectable: true,
 	attrs: { name: { default: '' } },
-	toDOM: (node) => ['span', { class: 'label-node', 'data-label-name': String(node.attrs.name) }],
+	// the name the chip shows: a removed label is struck from this form in suggestions
+	toDOM: (node) => ['span', { class: 'label-node', 'data-label-name': String(node.attrs.name) }, String(node.attrs.name)],
 	parseDOM: [
 		{
 			tag: 'span.label-node',

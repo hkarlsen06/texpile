@@ -121,8 +121,11 @@ export const baseNodes = {
 				}
 			}
 		],
+		// the text the chip reads as: a removed include is struck from this form in suggestions
 		toDOM(node) {
-			return ['div', { class: 'includedoc-node', 'data-path': node.attrs.path, 'data-command': node.attrs.command }];
+			const { path, command } = node.attrs;
+			const text = command === 'typst' ? `#include "${path}"` : `\\${command}{${path}}`;
+			return ['div', { class: 'includedoc-node', 'data-path': path, 'data-command': command }, ['code', text]];
 		}
 	} as NodeSpec,
 

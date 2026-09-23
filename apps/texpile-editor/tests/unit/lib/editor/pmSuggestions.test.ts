@@ -6,6 +6,7 @@ import { buildAnchor } from '$lib/comments/anchor';
 import { editMode, takeTypedSides, type SuggestionMark } from '$lib/comments/activeSuggestions.svelte';
 import { placePmSuggestions } from '$lib/editor/visual/extensions/pmSuggestionsPlace';
 import { pmSuggestions, pmSuggestionsKey, setPmSuggestions } from '$lib/editor/visual/extensions/pmSuggestions';
+import { goneBlocksElement } from '$lib/editor/visual/extensions/pmSuggestionWidgets';
 import { createCursorPlugin } from '$lib/editor/visual/extensions/cursor-plugin';
 import { parseLatexFile, parseLatexRegion } from '$lib/workspace/latexRoundtrip';
 
@@ -150,4 +151,12 @@ it('keeps struck words in their own tint while a selection crosses them and afte
 	expect(old.classList.contains('pm-range-selected')).toBe(false);
 	expect(old.style.getPropertyValue('--range-tint')).toBe(own);
 	view.destroy();
+});
+
+it('draws a struck include as the text its chip shows', () => {
+	const { doc } = parseLatexFile('\\input{intro}\n\n\\include{related}\n');
+	const blocks = [doc.child(0), doc.child(1)];
+	expect(goneBlocksElement(doc.type.schema, { head: [], blocks, tail: [] }, 'x', false).textContent).toBe(
+		'\\input{intro}\\include{related}'
+	);
 });

@@ -75,7 +75,8 @@ export function oldWordsElement(schema: Schema, runs: OldRun[], id: string, focu
 }
 
 // the node as it was, beside the one it is now: a formula typeset by the same renderer that draws the
-// new one, anything else as its source, since a node that draws itself has no words to strike
+// new one, anything else as its source, since a node that draws itself has no words to strike. One
+// that is all attributes (an include) has no source here, and reads as its schema form
 export function oldNodeElement(node: PMNode, id: string, focused: boolean): HTMLElement {
 	const block = node.isBlock;
 	const holder = document.createElement(block ? 'div' : 'span');
@@ -84,6 +85,7 @@ export function oldNodeElement(node: PMNode, id: string, focused: boolean): HTML
 	holder.dataset.comment = id;
 	holder.contentEditable = 'false';
 	if (isMath(node)) holder.appendChild(renderStaticMath(node.textContent, block));
+	else if (node.content.size === 0) holder.appendChild(serializerFor(node.type.schema).serializeNode(node));
 	else {
 		const code = document.createElement('code');
 		code.textContent = node.textContent;
