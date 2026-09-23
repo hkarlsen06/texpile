@@ -351,6 +351,11 @@ math-field {
 .ProseMirror-gapcursor:after {
 	border-top: var(--default-border-width) solid var(--color-surface-950-50) !important;
 }
+/* dropPastNodeViews.ts. mathlive turns pointer events back on inside its shadow root */
+.ProseMirror.pm-own-drag [contenteditable='false'],
+.ProseMirror.pm-own-drag math-field::part(container) {
+	pointer-events: none;
+}
 /* CM autocomplete/tooltips (rendered in <body> via tooltipsInBody) ship light; these put them on
    the theme in both modes */
 :root .cm-tooltip,

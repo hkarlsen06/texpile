@@ -58,6 +58,7 @@ import { createBoundaryClickPlugin } from '$lib/editor/visual/extensions/boundar
 import { wordSelectionTrim } from '$lib/editor/visual/extensions/wordSelectionTrim';
 import { createBlockHandlePlugin } from '$lib/editor/visual/extensions/block-handle-plugin.svelte';
 import { wholeBlockDragPlugin } from '$lib/editor/visual/extensions/wholeBlockDrag';
+import { dropPastNodeViewsPlugin } from '$lib/editor/visual/extensions/dropPastNodeViews';
 import { createNodeFlashPlugin } from '$lib/editor/visual/extensions/flash-plugin';
 import { drawnOrSource } from '$lib/editor/visual/extensions/drawnChips/DrawnChipView';
 import { drawnChipAtomsPlugin } from '$lib/editor/visual/extensions/drawnChips/drawnChipAtoms';
@@ -193,6 +194,7 @@ export function latexEditorPlugins(setup: LatexEditorSetup): Plugin[] {
 		wordSelectionTrim(),
 		createBlockHandlePlugin(),
 		wholeBlockDragPlugin(),
+		dropPastNodeViewsPlugin(),
 		footnoteNumbersPlugin(),
 		createNodeFlashPlugin(),
 		...pmComments({

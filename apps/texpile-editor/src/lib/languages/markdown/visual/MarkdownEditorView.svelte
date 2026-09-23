@@ -50,6 +50,7 @@
 	import { wordSelectionTrim } from '$lib/editor/visual/extensions/wordSelectionTrim';
 	import { createBlockHandlePlugin } from '$lib/editor/visual/extensions/block-handle-plugin.svelte';
 	import { wholeBlockDragPlugin } from '$lib/editor/visual/extensions/wholeBlockDrag';
+	import { dropPastNodeViewsPlugin } from '$lib/editor/visual/extensions/dropPastNodeViews';
 	import { createNodeFlashPlugin } from '$lib/editor/visual/extensions/flash-plugin';
 	import { remoteCursorsPlugin } from '$lib/editor/visual/extensions/remoteCursors';
 	import { MD_BLOCK_INSERT_ITEMS } from './blockInsertItems';
@@ -216,6 +217,7 @@
 			// the Notion-style + / drag / delete gutter, with the markdown insert set
 			createBlockHandlePlugin({ items: MD_BLOCK_INSERT_ITEMS }),
 			wholeBlockDragPlugin(),
+			dropPastNodeViewsPlugin(),
 			createNodeFlashPlugin(),
 			// collaborators' carets; VisualCollab feeds it, and is inert outside a shared session
 			remoteCursorsPlugin,
