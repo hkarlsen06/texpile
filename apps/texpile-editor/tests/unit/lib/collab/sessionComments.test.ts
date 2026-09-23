@@ -195,7 +195,7 @@ async function connect(log: CommentEvent[], hostOpens: string | null = '/w/main.
 			text = running = t.toString();
 			const from = guest.session.senderOf(ev.transaction.origin);
 			if (from !== null && before)
-				ctl.remoteEdit('main.tex', before, text, { ...guest.session.authorOf(from), gestures: changedSpans(ev.delta) });
+				ctl.remoteEdit('main.tex', before, text, { ...guest.session.authorOf(from), gestures: changedSpans(ev.delta, before, text) });
 			ctl.suggestions.textChanged('session/main.tex', text);
 		});
 		await ctl.load(null);

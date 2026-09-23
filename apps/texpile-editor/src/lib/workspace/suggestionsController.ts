@@ -23,7 +23,8 @@ import { carryGestures, type TextSpan } from '$lib/comments/editGestures';
 import { commonEnds } from '$lib/comments/suggestHunks';
 import { activeSuggestions, takeTypedSides } from '$lib/comments/activeSuggestions.svelte';
 import type { CommentStore } from '$lib/comments/store.svelte';
-import { anchorOf, sameFileState, sameMark, sameSuggestions, withoutRejected, type FileState, type RemoteEdit } from './suggestionStates';
+import { anchorOf, placedBehind, sameFileState, sameMark, sameSuggestions, withoutRejected } from './suggestionStates';
+import type { ExpectedReject, FileState, RemoteEdit } from './suggestionStates';
 
 const SPACE_WAIT_MS = 1000;
 
@@ -58,9 +59,6 @@ type UndoableAccept = { file: string; thread: CommentThread };
 
 /** an edit recorded for someone other than the reader: `gestures` is where it landed, `opened` what it opened */
 type AgentEdit = { by: string; note: string; gestures: TextSpan[]; opened: string[] };
-
-/** a Reject someone else made, whose words are still on their way here */
-type ExpectedReject = { file: string; s: PlacedSuggestion; text: string };
 
 export class SuggestionsController {
 	private states = new Map<string, FileState>();
@@ -108,7 +106,7 @@ export class SuggestionsController {
 			if (hit) placed.push({ ...base, from: hit.from, to: hit.to });
 			else if (s) placed.push({ ...base, from: s.from, to: s.to });
 			else lost.add(t.id);
-			order.set(t.id, s ? s.i : carried.size + (t.anchor.rank ?? 0));
+			order.set(t.id, s && !hit ? s.i : carried.size + (t.anchor.rank ?? 0));
 		}
 		placed.sort((a, b) => a.from - b.from || a.to - b.to || order.get(a.id)! - order.get(b.id)!);
 		const kept: PlacedSuggestion[] = [];
@@ -179,7 +177,7 @@ export class SuggestionsController {
 	expectReject(id: string): void {
 		for (const [file, state] of this.states) {
 			const s = state.placed.find((x) => x.id === id);
-			if (s) this.expected = [...this.expected.slice(1 - REJECTS_KEPT), { file, s, text: state.text }];
+			if (s) this.expected = [...this.expected.slice(1 - REJECTS_KEPT), { file, s, text: state.text, behind: placedBehind(state, s) }];
 		}
 	}
 
@@ -332,7 +330,8 @@ export class SuggestionsController {
 		const state = this.states.get(file);
 		if (!state || state.text === after) return;
 		if (this.rejectedElsewhere(file, state, after)) return;
-		if (await this.revisitReject(file, state, after)) return;
+		// a guest suggesting reopens nothing: the recorder takes the returning words as a new suggestion of theirs
+		if ((this.deps.compares() || mode === 'editing') && (await this.revisitReject(file, state, after))) return;
 		if (mode === 'editing' && state.placed.length === 0) {
 			this.states.set(file, { text: after, placed: [] });
 			if (!this.deps.compares()) this.refit(file);
@@ -370,7 +369,8 @@ export class SuggestionsController {
 		const r = this.expected.find((x) => x.file === file && x.text === state.text && withoutRejected(state, x.s).text === after);
 		if (!r) return false;
 		this.expected = this.expected.filter((x) => x !== r);
-		const now = withoutRejected(state, r.s);
+		// not from `state`: the refit on the resolve event has already dropped `r.s` from it
+		const now = withoutRejected(state, r.s, r.behind);
 		this.states.set(file, now);
 		if (file === this.deps.activeFile()) this.show(now.text, now.placed);
 		return true;

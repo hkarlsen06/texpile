@@ -32,6 +32,8 @@ export type PmCommentsSyncArgs = {
 	 * transactions, and looking them up mid-edit would read a map of text the editor is ahead of.
 	 */
 	epoch: () => number;
+	/** bumped when a collaborator's change is patched in: marks that came with it were placed on the text before it */
+	patched?: () => number;
 	selected: () => string | null;
 	/** the threads that could not be drawn in this view, for the panel's "not in this view" */
 	onPlaced?: (lost: string[]) => void;
@@ -78,6 +80,7 @@ export function syncPmComments(args: PmCommentsSyncArgs): void {
 
 	let lastMarks: SuggestionMark[] | null = null;
 	let lastMarksEpoch = -1;
+	let lastPatched = -1;
 	let placedAt = 0;
 	let later: ReturnType<typeof setTimeout> | null = null;
 	function placeSuggestions(v: EditorView, marks: SuggestionMark[]) {
@@ -102,9 +105,11 @@ export function syncPmComments(args: PmCommentsSyncArgs): void {
 		const v = args.view();
 		const marks = activeSuggestions.current;
 		const epoch = args.epoch();
-		if (!v || (marks === lastMarks && epoch === lastMarksEpoch)) return;
-		const swapped = epoch !== lastMarksEpoch;
+		const patched = args.patched?.() ?? 0;
+		if (!v || (marks === lastMarks && epoch === lastMarksEpoch && patched === lastPatched)) return;
+		const swapped = epoch !== lastMarksEpoch || patched !== lastPatched;
 		lastMarksEpoch = epoch;
+		lastPatched = patched;
 		const wait = placedAt + PLACE_MS - performance.now();
 		if (swapped || wait <= 0) return placeSuggestions(v, marks);
 		const doc = v.state.doc;

@@ -210,8 +210,9 @@ export function compareSuggestions(o: CompareInput): ComparedSuggestions {
 			if (back !== undefined) {
 				const e = entries[back];
 				e.restore = e.restore.slice(inserted.length);
-				// what is left of it stands after the words that came back
+				// what is left of it stands after the words that came back, and so do the Deletes stacked after it
 				e.point = h.bTo;
+				for (const i of points) if (i > back && entries[i].from === h.aFrom) entries[i].point = h.bTo;
 				if (!e.restore) e.fate = 'withdraw';
 				return;
 			}

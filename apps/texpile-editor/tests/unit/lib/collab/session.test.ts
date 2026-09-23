@@ -17,7 +17,10 @@ class FakeHub {
 	transports = new Set<FakeTransport>();
 	/** random extra delay per delivery, to shake out ordering assumptions. */
 	chaosMs = 0;
+	/** frames the relay has been handed */
+	sent = 0;
 	deliver(from: FakeTransport, data: Uint8Array): void {
+		this.sent++;
 		// mirror the real relay: stamp the sender's origin role so receivers get fromHost
 		const fromHost = from.role === 'host';
 		for (const t of this.transports) {
@@ -176,6 +179,21 @@ describe('collab session end-to-end', () => {
 		await until(() => disk.get('main.tex')!.content.includes('G: ') && disk.get('main.tex')!.content.includes('H-line'));
 
 		mat.destroy();
+		host.session.destroy();
+		guest.session.destroy();
+	});
+
+	it('goes quiet once a guest has joined and both sides have caught up', async () => {
+		const key = (await deriveSessionKeys(generateShareCode())).contentKey;
+		const hub = new FakeHub();
+		const host = await makeParty(hub, 'host', 'Host', key);
+		const guest = await makeParty(hub, 'guest', 'Guest', key);
+		await until(() => host.session.peers.size === 1 && guest.session.peers.size === 1);
+		await new Promise((r) => setTimeout(r, 200));
+		const settled = hub.sent;
+		await new Promise((r) => setTimeout(r, 500));
+		expect(hub.sent - settled).toBe(0);
+
 		host.session.destroy();
 		guest.session.destroy();
 	});

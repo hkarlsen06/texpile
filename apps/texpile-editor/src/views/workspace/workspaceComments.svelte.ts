@@ -47,11 +47,14 @@ export class WorkspaceComments {
 			// a guest suggests only through a host that records it; an older host would take it as editing
 			return suggesting.current && !fileMode.current && (!d.guest() || collabGuest.hostRecords) ? 'suggesting' : 'editing';
 		}
+		// a guest has no git repo to fall back to (its root is the 'session' sentinel), but it DOES
+		// have the name it joined with - that is what every peer already sees on its cursor
+		function preferredAuthor(): string {
+			return userData.current.commentAuthor || userData.current.collabName || (d.guest() ? collabGuest.selfName : '');
+		}
 		this.ctl = new CommentsController({
 			root: () => workspaceRoot.current,
-			// a guest has no git repo to fall back to (its root is the 'session' sentinel), but it DOES
-			// have the name it joined with - that is what every peer already sees on its cursor
-			preferredAuthor: () => userData.current.commentAuthor || userData.current.collabName || (d.guest() ? collabGuest.selfName : ''),
+			preferredAuthor,
 			// new anchors and event resolution read the LIVE buffer; the reanchor snapshot goes stale
 			// under remote edits in a shared session (see the controller's activeText comment)
 			activeText: () => this.activeText(),
@@ -89,12 +92,15 @@ export class WorkspaceComments {
 		let lastMode = mode();
 		$effect(() => {
 			const next = mode();
+			const author = preferredAuthor();
 			editMode.current = next;
 			untrack(() => {
 				// a guest's typing so far goes out before its new mode does, so the host records it in the old one
 				if (d.guest() && next !== lastMode) d.flushSave();
-				if (d.guest()) collabGuest.setSuggesting(next === 'suggesting');
-				else collabHost.setSuggesting(next === 'suggesting');
+				if (d.guest()) {
+					collabGuest.setSuggesting(next === 'suggesting');
+					collabGuest.setAuthor(author);
+				} else collabHost.setSuggesting(next === 'suggesting');
 			});
 			if (next === lastMode) return;
 			const was = lastMode;
@@ -118,7 +124,7 @@ export class WorkspaceComments {
 				const file = this.ctl.activeFile;
 				const root = workspaceRoot.current;
 				if (!who || !file || !root || before === running || relativeTo(root, path) !== file) return;
-				this.ctl.remoteEdit(file, before, running, { ...who, gestures: changedSpans(ev.delta) });
+				this.ctl.remoteEdit(file, before, running, { ...who, gestures: changedSpans(ev.delta, before, running) });
 			};
 			t.observe(onChange);
 			return () => t.unobserve(onChange);

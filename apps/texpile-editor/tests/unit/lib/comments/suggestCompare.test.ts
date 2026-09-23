@@ -398,6 +398,33 @@ describe('an edit meeting a suggestion', () => {
 		expect(rejected).toBe(before);
 	});
 
+	// Deletes by two people stacked at one spot: typing back your own middle one keeps the ones after it after the words
+	it.each([
+		['at once', ['b ']],
+		['a key at a time', ['b', ' ']]
+	])('puts back your own Delete from the middle of a stack in its place, typed %s', (_name, keys) => {
+		const original = 'a b c d.';
+		let text = 'd.';
+		let placed: PlacedSuggestion[] = [
+			{ id: 'a', from: 0, to: 0, restore: 'a ', author: 'mei' },
+			{ id: 'b', from: 0, to: 0, restore: 'b ', author: 'me' },
+			{ id: 'c', from: 0, to: 0, restore: 'c ', author: 'mei' }
+		];
+		let at = 0;
+		for (const key of keys) {
+			const after = text.slice(0, at) + key + text.slice(at);
+			placed = run(text, after, placed, 'suggesting').placed;
+			text = after;
+			at += key.length;
+		}
+		expect(text).toBe('b d.');
+		expect(placed.map((s) => [s.id, s.from, s.restore])).toEqual([
+			['a', 0, 'a '],
+			['c', 2, 'c ']
+		]);
+		expect(placed.reduceRight((t, s) => t.slice(0, s.from) + s.restore + t.slice(s.to), text)).toBe(original);
+	});
+
 	it('suggests by word in text with no spaces', () => {
 		const r = run('我们证明了这个方法是可靠的', '我们证明了这个方法是稳定的', [], 'suggesting');
 		expect(r.placed).toHaveLength(1);

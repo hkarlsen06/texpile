@@ -132,6 +132,7 @@
 				// collabRemotePatch: a collaborator's edit patched in from the shared doc. It is
 				// already IN the shared doc, so reporting it as a local change would echo it back
 				if (onLocalChange && transaction.docChanged && !transaction.getMeta('collabRemotePatch')) onLocalChange(newState.doc);
+				if (transaction.getMeta('collabRemotePatch')) remotePatches++;
 				if (onSelectionChange && (transaction.selectionSet || transaction.docChanged)) onSelectionChange();
 			}
 		});
@@ -148,6 +149,7 @@
 	let mountedPath: string | null = null;
 	/** bumped only on doc SWAPS (see pmCommentsSync); typing maps ranges instead */
 	let docEpoch = $state(0);
+	let remotePatches = $state(0);
 	$effect(() => {
 		const next = localValue;
 		const path = docPath;
@@ -176,6 +178,7 @@
 		body: () => bodyRange,
 		parse: () => regionParser,
 		epoch: () => docEpoch,
+		patched: () => remotePatches,
 		selected: () => selectedComment,
 		onPlaced: (lost) => onCommentsPlaced?.(lost),
 		pendingActive: () => commentPendingActive

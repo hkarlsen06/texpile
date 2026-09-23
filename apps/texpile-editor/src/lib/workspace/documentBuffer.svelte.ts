@@ -59,6 +59,8 @@ export type DocumentBufferDeps = {
 	scheduleSave(path: string | null, content: string): void;
 	/** drop a queued write (the buffer already matches disk) */
 	discardQueuedSave(): void;
+	/** hand an edit to a shared session even when it leaves the file as saved */
+	shareEdit?(path: string | null, content: string): void;
 	/** write immediately, notifying the user; force bypasses the external-write guard (conflict
 	 * modal's "keep mine", where the user has seen disk differs and chosen to overwrite) */
 	writeNow(path: string, content: string, force?: boolean): void;
@@ -277,6 +279,8 @@ export class DocumentBuffer {
 		if (this.texSource === this.diskBaseline) {
 			if (isDirty.current) isDirty.current = false;
 			this.deps.discardQueuedSave();
+			// the shared text still holds the edit being undone (a guest's baseline never moves at all)
+			this.deps.shareEdit?.(this.path, this.texSource);
 			return;
 		}
 		isDirty.current = true;

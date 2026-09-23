@@ -49,6 +49,9 @@ export class WorkspaceDoc {
 		this.doc = new DocumentBuffer({
 			scheduleSave: (path, content) => d.saver().schedule(path, content),
 			discardQueuedSave: () => d.saver().discard(),
+			shareEdit: (path, content) => {
+				if (path) d.session().edit(path, content);
+			},
 			writeNow: (path, content, force) => void d.saver().enqueue(path, content, true, force),
 			rebuildVisual: () => this.rebuildVisualFromSource(),
 			isVisualMode: () => this.modes.mode === 'visual',

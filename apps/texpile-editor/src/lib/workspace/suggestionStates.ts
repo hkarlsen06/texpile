@@ -9,15 +9,21 @@ export type FileState = { text: string; placed: PlacedSuggestion[] };
 /** a collaborator's change as it applied: who made it, in which mode, and where it landed */
 export type RemoteEdit = { by: string; mode: EditMode; gestures: TextSpan[] };
 
-/** the file once `s` is rejected: its words put back, and the suggestions after it moved with them */
-export function withoutRejected(state: FileState, s: PlacedSuggestion): FileState {
-	const delta = s.restore.length - (s.to - s.from);
+/** a Reject someone else made, whose words are still on their way here, and what stood behind it at its spot */
+export type ExpectedReject = { file: string; s: PlacedSuggestion; text: string; behind: Set<string> };
+
+/** the suggestions at the spot where `s` ends that stand after it */
+export function placedBehind(state: FileState, s: PlacedSuggestion): Set<string> {
 	const at = state.placed.findIndex((x) => x.id === s.id);
+	return new Set(state.placed.filter((x, i) => x.from === s.to && i > at).map((x) => x.id));
+}
+
+/** the file once `s` is rejected: its words put back, and the suggestions after it moved with them */
+export function withoutRejected(state: FileState, s: PlacedSuggestion, behind = placedBehind(state, s)): FileState {
+	const delta = s.restore.length - (s.to - s.from);
 	const placed = state.placed
 		.filter((x) => x.id !== s.id)
-		.map((x) =>
-			x.from > s.to || (x.from === s.to && state.placed.indexOf(x) > at) ? { ...x, from: x.from + delta, to: x.to + delta } : x
-		);
+		.map((x) => (x.from > s.to || (x.from === s.to && behind.has(x.id)) ? { ...x, from: x.from + delta, to: x.to + delta } : x));
 	return { text: state.text.slice(0, s.from) + s.restore + state.text.slice(s.to), placed };
 }
 
