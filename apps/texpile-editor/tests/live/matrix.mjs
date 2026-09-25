@@ -21,6 +21,19 @@ const VITE = 5177;
 const only = (process.argv.find((a) => a.startsWith('--only=')) || '').slice(7);
 const [onlyFixture, onlyScenario] = only ? only.split(':') : [null, null];
 
+// one edit, so the compile after it is the patch's own: a row it drew or moved that the engine set elsewhere is
+// a wrong render. (A session of several keys has no such compile, so the app does not grade moved rows.)
+function gradeVerify(events, res) {
+	for (const e of events) {
+		if (e.kind !== 'patch-verify') continue;
+		const d = e.detail ?? {};
+		if (d.verdict === 'wrong' || (d.flowDrift ?? 0) > 0.5) {
+			res.outcome = 'WRONG';
+			res.reasons.push(`VERIFY-WRONG/p${d.page}/drift${d.drift}/flow${d.flowDrift ?? 0}`);
+		}
+	}
+}
+
 const waitHttp = async (url, tries = 120) => {
 	for (let i = 0; i < tries; i++) {
 		try {
@@ -145,21 +158,33 @@ try {
 				}
 				res = classify(ev);
 				if (d.transient && res.outcome === 'NOFEEDBACK') res.outcome = 'TRANSIENT';
+				if (!sc.thenOp) gradeVerify(ev, res);
 				if (process.env.MATRIX_DEBUG) console.log('   events:', JSON.stringify(ev).slice(0, 2500));
 			}
 			if (process.env.MATRIX_SHOT)
 				await page.screenshot({ path: path.join(here, 'results', `shot-${fx.name}-${sc.name}.png`), fullPage: true });
+			// baseline resync: make sure a compile has landed with the edited source. It is also the
+			// only grade an ADOPTED patch gets: no reconcile runs behind one, so what it painted meets
+			// the engine's own records here, as records-adopted-drift, or not at all
+			base = edited;
+			if (sc.thenOp) base = applyOp(edited, { ...sc, op: sc.thenOp }) ?? edited;
+			await post('/write', { root, content: base });
+			await page.evaluate(() => window.__live.recompile());
+			const resync = await collectUntilQuiet(page, { quietMs: 1200, maxMs: 25000 });
+			if (!sc.thenOp && res.outcome !== 'WRONG') gradeVerify(resync, res);
+			for (const e of resync) {
+				if (e.kind !== 'records-adopted-drift') continue;
+				const d = e.detail ?? {};
+				res.reasons.push(`ADOPTED-DRIFT/dy${d.maxDy}/dx${d.maxDx}/rows${d.rows}v${d.freshRows}`);
+				// a render claimed exact that the engine placed elsewhere; the rest is record rounding
+				if (d.maxDy > 0.5 || d.maxDx > 0.5 || d.rows !== d.freshRows) res.outcome = 'WRONG';
+			}
+			if (process.env.MATRIX_DEBUG) console.log('   resync:', JSON.stringify(resync).slice(0, 1500));
 			const ceilOk = sc.expect.includes(res.outcome);
 			console.log(
 				`  ${sc.name}: ${res.outcome}${res.latencyMs != null ? ` ${res.latencyMs}ms` : ''} ${ceilOk ? 'AT-CEILING' : `(ceiling ${sc.expect.join('|')})`} ${res.reasons.join(',')}`
 			);
 			rows.push({ fixture: fx.name, ...sc, ...res });
-			// baseline resync: make sure a compile has landed with the edited source
-			base = edited;
-			if (sc.thenOp) base = applyOp(edited, { ...sc, op: sc.thenOp }) ?? edited;
-			await post('/write', { root, content: base });
-			await page.evaluate(() => window.__live.recompile());
-			await collectUntilQuiet(page, { quietMs: 1200, maxMs: 25000 });
 		}
 		await post('/stop', {});
 	}

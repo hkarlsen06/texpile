@@ -185,11 +185,87 @@ function keptApart(c: DocChange, before: PMNode, after: PMNode): DocChange[] {
 	return [head, tail].filter((x) => x.toA > x.fromA || x.toB > x.fromB).flatMap((x) => keptApart(x, before, after));
 }
 
+function edgeScore(doc: PMNode, from: number, to: number): number {
+	const $from = doc.resolve(from);
+	const $to = doc.resolve(to);
+	const starts = $from.parentOffset === 0 && $to.parentOffset === 0;
+	const ends = $from.parentOffset === $from.parent.content.size && $to.parentOffset === $to.parent.content.size;
+	function edge(pos: number) {
+		return pos <= 0 || pos >= doc.content.size || atWordEdge(doc, pos);
+	}
+	return (starts || ends ? 4 : 0) + (edge(from) ? 1 : 0) + (edge(to) ? 1 : 0);
+}
+
+// what one side holds and the other does not can often be read at more than one place: "two¶three" less
+// "three" is "two¶" taken from the start, or "wo¶t" a letter in, and the diff takes whichever it met
+// first. The reader took out the item, so the place whose ends meet block edges, then word edges, wins
+function slideToEdges(c: DocChange, before: PMNode, after: PMNode, lo: number, hi: number): DocChange {
+	const taken = c.toB === c.fromB;
+	if (taken === (c.toA === c.fromA)) return c;
+	const doc = taken ? before : after;
+	const from = taken ? c.fromA : c.fromB;
+	const to = taken ? c.toA : c.toB;
+	function token(pos: number) {
+		return tokensOf(doc.content, pos, pos + 1)[0];
+	}
+	let best = 0;
+	let bestScore = edgeScore(doc, from, to);
+	for (let k = -1; from + k >= lo && token(from + k) === token(to + k); k--) {
+		const score = edgeScore(doc, from + k, to + k);
+		if (score > bestScore) [best, bestScore] = [k, score];
+	}
+	for (let k = 1; to + k <= hi && token(from + k - 1) === token(to + k - 1); k++) {
+		const score = edgeScore(doc, from + k, to + k);
+		if (score > bestScore) [best, bestScore] = [k, score];
+	}
+	return best ? { fromA: c.fromA + best, toA: c.toA + best, fromB: c.fromB + best, toB: c.toB + best } : c;
+}
+
+function tokenAt(doc: PMNode, pos: number): Token {
+	return tokensOf(doc.content, pos, pos + 1)[0];
+}
+
+// the second of two cuts slid back over what stands between them, when it can be: "of a line leaves a wide" less
+// "a line leaves" is one cut, and the diff can meet it as "of " and "line leaves a" with the first "a" kept
+function slidTogether(prev: DocChange, c: DocChange, before: PMNode, after: PMNode): DocChange | null {
+	const taken = prev.toB === prev.fromB && c.toB === c.fromB;
+	const added = prev.toA === prev.fromA && c.toA === c.fromA;
+	if (!taken && !added) return null;
+	const doc = taken ? before : after;
+	const [from, to, gap] = taken ? [c.fromA, c.toA, c.fromA - prev.toA] : [c.fromB, c.toB, c.fromB - prev.toB];
+	for (let k = 1; k <= gap; k++) if (tokenAt(doc, from - k) !== tokenAt(doc, to - k)) return null;
+	return taken ? { ...prev, toA: c.toA - gap } : { ...prev, toB: c.toB - gap };
+}
+
+// one edit's cuts (or insertions) that can be read as one are, so it strikes as the one run it was; the cuts of two
+// edits stay apart, since each belongs to its own suggestion
+function joinedAcrossKept(changes: DocChange[], before: PMNode, after: PMNode, compared: DocChange[]): DocChange[] {
+	const out: DocChange[] = [];
+	for (const c of changes) {
+		const prev = out[out.length - 1];
+		const oneEdit = prev && compared.some((s) => s.fromA <= prev.fromA && c.toA <= s.toA && s.fromB <= prev.fromB && c.toB <= s.toB);
+		const joined = oneEdit ? slidTogether(prev, c, before, after) : null;
+		if (joined) out[out.length - 1] = joined;
+		else out.push(c);
+	}
+	return out;
+}
+
+// a heading or a paragraph closing as the other is the same close: a cut from a heading into the paragraph after
+// it leaves the paragraph's words closing as the heading, and read as a change there the cut was compared to the
+// end of the document and drawn as whole words retyped. A block that did change kind shows it at its opening. Only
+// those two: words closing as a caption were taken into a figure, which is a change the comparison must see
+const JOINED = new Set(['>paragraph', '>heading']);
+
+function sameClose(a: Token, b: Token): boolean {
+	return a === b || (JOINED.has(String(a)) && JOINED.has(String(b)));
+}
+
 function readSame(before: PMNode, fromA: number, toA: number, after: PMNode, fromB: number, toB: number): boolean {
 	if (toA < fromA || toA - fromA !== toB - fromB) return false;
 	const a = tokensOf(before.content, fromA, toA);
 	const b = tokensOf(after.content, fromB, toB);
-	return a.length === b.length && a.every((t, i) => t === b[i]);
+	return a.length === b.length && a.every((t, i) => sameClose(t, b[i]));
 }
 
 // the stretches, joined wherever what lies between two of them does not read the same on both sides
@@ -223,12 +299,24 @@ export function diffDocs(before: PMNode, after: PMNode, stretches: DocChange[] =
 	// one step per stretch, each at the place the steps before it have left it; a single map of several
 	// ranges would do, but prosemirror-changeset offsets a third range by the second one's size alone.
 	// A stretch empty on both sides would come back as an empty change
-	const maps = apart(before, after, stretches)
-		.filter((s) => s.toA > s.fromA || s.toB > s.fromB)
-		.map((s) => new StepMap([s.fromB, s.toA - s.fromA, s.toB - s.fromB]));
+	const compared = apart(before, after, stretches).filter((s) => s.toA > s.fromA || s.toB > s.fromB);
+	const maps = compared.map((s) => new StepMap([s.fromB, s.toA - s.fromA, s.toB - s.fromB]));
 	const set = ChangeSet.create(before, undefined, encoder).addSteps(after, maps, 0);
-	const changes = set.changes.flatMap((c) => keptApart({ fromA: c.fromA, toA: c.toA, fromB: c.fromB, toB: c.toB }, before, after));
-	return wholeWords(changes, after);
+	const changes = joinedAcrossKept(
+		set.changes.flatMap((c) => keptApart({ fromA: c.fromA, toA: c.toA, fromB: c.fromB, toB: c.toB }, before, after)),
+		before,
+		after,
+		compared
+	);
+	const slid = changes.map((c, i) => {
+		const prev = changes[i - 1];
+		const next = changes[i + 1];
+		const taken = c.toB === c.fromB;
+		const lo = prev ? (taken ? prev.toA : prev.toB) : 0;
+		const hi = next ? (taken ? next.fromA : next.fromB) : (taken ? before : after).content.size;
+		return slideToEdges(c, before, after, lo, hi);
+	});
+	return wholeWords(slid, after);
 }
 
 /** the characters of a range, one placeholder per node that is not text */

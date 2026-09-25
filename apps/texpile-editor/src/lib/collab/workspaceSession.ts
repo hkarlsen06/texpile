@@ -21,7 +21,6 @@ import {
 import { toaster } from '$lib/modals/toaster-svelte';
 import { m } from '$lib/paraglide/messages';
 import type { EditSession } from '$lib/collab/editSession';
-import type { CommentEvent } from '$lib/comments/log';
 import type { RemoteEdit } from '$lib/workspace/suggestionStates';
 import type { DocumentBuffer } from '$lib/workspace/documentBuffer.svelte';
 import type { VisualParser } from '$lib/workspace/visualParse.svelte';
@@ -60,9 +59,9 @@ export function visualCollabBridge(deps: VisualCollabBridgeDeps) {
 			// reference handshake: the editor sees its own live doc and skips the state swap
 			doc.visualDoc = liveDoc;
 			doc.lastDoc = liveDoc;
-			// what places suggestions and new comments on the text; a kept caret block leaves the old
-			// map until the next local edit writes one
+			// what places suggestions, comments and carets on the text
 			if (liveDoc.eq(parsed.doc)) doc.sourceMap = parsed.map;
+			else doc.restate(liveDoc);
 		},
 		commit(path: string, content: string) {
 			isDirty.current = true;
@@ -78,10 +77,6 @@ export type SessionHandlerDeps = {
 	/** a guest changed files on the host's disk (upload / rename / delete) */
 	refreshTree(): void;
 	expectedPdfPath(): string | null;
-	/** a guest's review comment, to apply and persist here: the host owns the log file */
-	applyCommentEvent(event: CommentEvent): void;
-	/** the whole log, served to a guest joining mid-review */
-	commentLog(): string;
 	/** a guest's change to a shared file, recorded under their name and mode */
 	recordGuestEdit(rel: string, before: string, after: string, edit: RemoteEdit): void;
 	/** awaited before a guest's changes are written, so the log lands before the file */
@@ -103,10 +98,7 @@ export function attachSessionHandlers(session: EditSession, deps: SessionHandler
 		deps.runCompile();
 	};
 	session.onFileOp = () => deps.refreshTree();
-	// straight onto collabHost, not the EditSession interface: comments are host-only, and a guest
-	// has neither a log to serve nor a disk to write it to
-	collabHost.onCommentEvent = (event) => deps.applyCommentEvent(event);
-	collabHost.commentLog = () => deps.commentLog();
+	// straight onto collabHost, not the EditSession interface: only the host records guests' edits
 	collabHost.onGuestEdit = (rel, before, after, edit) => deps.recordGuestEdit(rel, before, after, edit);
 	collabHost.beforeGuestWrite = (rel, content) => deps.beforeGuestWrite(rel, content);
 	session.onSyncRequest = async (payload, from) => {
@@ -172,8 +164,6 @@ export function attachSessionHandlers(session: EditSession, deps: SessionHandler
 		session.onCompileRequest = null;
 		session.onSyncRequest = null;
 		session.onFileOp = null;
-		collabHost.onCommentEvent = null;
-		collabHost.commentLog = null;
 		collabHost.onGuestEdit = null;
 		collabHost.beforeGuestWrite = null;
 		collabHost.onTypstScroll = null;

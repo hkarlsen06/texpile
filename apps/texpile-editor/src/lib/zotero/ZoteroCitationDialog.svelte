@@ -139,7 +139,7 @@
 
 {#if zoteroPicker.open}
 	<div
-		class="app-scrim fixed inset-0 z-1300 flex items-start justify-center bg-black/40 p-4 pt-[8vh]"
+		class="app-scrim fixed inset-0 z-1300 flex items-start justify-center bg-black/40 p-4 [--scrim-top:8vh]"
 		role="presentation"
 		onmousedown={(e) => e.target === e.currentTarget && zoteroPicker.hide()}
 	>

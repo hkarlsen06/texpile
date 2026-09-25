@@ -178,6 +178,26 @@ export function whitespaceChange(before: string, h: Hunk, inserted: string): Whi
 	return { at: h.aFrom + p, cut: cut.length, spaced: /\s/.test(cut) && /\s/.test(put) };
 }
 
+// a list item's marker in markdown and typst, and the spaces before it: how deep the item sits
+const ITEM = /^([ \t]*)([-+*]|\d+[.)]|\/)(?=[ \t])/;
+
+function itemDepths(text: string, from: number, to: number): string {
+	const start = text.lastIndexOf('\n', from - 1) + 1;
+	const end = text.indexOf('\n', to);
+	return text
+		.slice(start, end < 0 ? text.length : end)
+		.split('\n')
+		.flatMap((line) => {
+			const m = ITEM.exec(line);
+			return m ? [`${m[1].replace(/\t/g, '    ').length}${m[2]}`] : [];
+		})
+		.join(' ');
+}
+
+function movesItem(before: string, after: string, h: Hunk): boolean {
+	return itemDepths(before, h.aFrom, h.aTo) !== itemDepths(after, h.bFrom, h.bTo);
+}
+
 export function paragraphShape(text: string): string {
 	return text
 		.replace(/(\n[ \t\r]*){2,}/g, '\n\n')
@@ -194,10 +214,12 @@ function spaceAround(text: string, from: number, to: number): string {
 	return text.slice(start, end);
 }
 
-export function neutral(before: string, after: string, h: Hunk): boolean {
+/** `lists`: the spaces before a list marker are the item's depth (markdown, typst) */
+export function neutral(before: string, after: string, h: Hunk, lists = false): boolean {
 	const c = whitespaceChange(before, h, after.slice(h.bFrom, h.bTo));
 	if (!c) return false;
 	if (paragraphShape(spaceAround(before, h.aFrom, h.aTo)) !== paragraphShape(spaceAround(after, h.bFrom, h.bTo))) return false;
+	if (lists && movesItem(before, after, h)) return false;
 	return c.spaced || /\s/.test(before[c.at - 1] ?? ' ') || /\s/.test(before[c.at + c.cut] ?? ' ');
 }
 
@@ -222,12 +244,12 @@ function wordAround(text: string, pos: number): [number, number] | null {
 	return [from, to];
 }
 
-export function joinGestures(hunks: Hunk[], before: string, after: string, gestures: TextSpan[], exact = false): Hunk[] {
+export function joinGestures(hunks: Hunk[], before: string, after: string, gestures: TextSpan[], exact = false, lists = false): Hunk[] {
 	if (gestures.length === 0) return hunks;
 	const out: Hunk[] = [];
 	let open: { hunk: Hunk; gesture: TextSpan } | null = null;
 	for (const h of hunks) {
-		const real = exact || !neutral(before, after, h);
+		const real = exact || !neutral(before, after, h, lists);
 		const gesture = real ? gestures.find((g) => g.from <= h.bTo && h.bFrom <= g.to) : undefined;
 		if (open && gesture && gesture === open.gesture) {
 			while (out[out.length - 1] !== open.hunk) out.pop();
@@ -243,17 +265,26 @@ export function joinGestures(hunks: Hunk[], before: string, after: string, gestu
 	return out;
 }
 
-export function snapToWords(hunks: Hunk[], before: string, after: string, spans: SuggestionSpan[], exact = false): Hunk[] {
+export function snapToWords(hunks: Hunk[], before: string, after: string, spans: SuggestionSpan[], exact = false, lists = false): Hunk[] {
 	function touches(from: number, to: number) {
 		return spans.some((s) => s.from <= to && s.to >= from);
 	}
 	const snapped = hunks.map((h) => {
-		if (touches(h.aFrom, h.aTo) || (!exact && neutral(before, after, h))) return h;
+		if (touches(h.aFrom, h.aTo) || (!exact && neutral(before, after, h, lists))) return h;
+		// an item moved a level reads as a change to the item, not as spaces nobody can see
+		if (lists && whitespaceChange(before, h, after.slice(h.bFrom, h.bTo)) && movesItem(before, after, h)) {
+			const end = before.indexOf('\n', h.aTo);
+			const tail = (end < 0 ? before.length : end) - h.aTo;
+			return { ...h, aTo: h.aTo + tail, bTo: h.bTo + tail };
+		}
 		// a change that only adds or only takes away stands where it was made, the way an addition already does at the end
 		// of a word. Letters and digits only: a space or a mark inside a word changes which words are there, and that
 		// reads better as the whole word
 		const oneWay = h.aFrom === h.aTo ? after.slice(h.bFrom, h.bTo) : h.bFrom === h.bTo ? before.slice(h.aFrom, h.aTo) : '';
 		if (WORDLY.test(oneWay)) return h;
+		// and so does a cut across lines: grown to whole words at its ends, what is left of them read as typed
+		// (a cut from inside one heading to inside the next showed the joined word as new)
+		if (h.bFrom === h.bTo && oneWay.includes('\n')) return h;
 		const left = wordAround(before, h.aFrom);
 		const right = wordAround(before, h.aTo);
 		const grow = left && !touches(left[0], h.aFrom) ? h.aFrom - left[0] : 0;

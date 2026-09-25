@@ -6,6 +6,7 @@ import { workspaceRoot, mainFile } from '$lib/workspace/workspaceStore';
 import { compileLog } from '$lib/stores/compileLogStore';
 import { sourceCmView } from '$lib/stores/editorStore';
 import { openToolchainPrefs } from '$lib/stores/dialogStore';
+import { settings } from '$lib/settings';
 import { toaster } from '$lib/modals/toaster-svelte';
 import { trailingDebounce } from '$lib/trailingDebounce';
 import { collabHost } from '$lib/collab/hostStore.svelte';
@@ -47,7 +48,7 @@ export type TypstPreviewHooks = {
 	flushSaves: () => Promise<unknown>;
 	refreshTree: () => Promise<void> | void;
 	/** inverse-sync landing, shared with SyncTeX: visual stays visual, source jumps the line */
-	syncJumpToFileLine: (file: string, line: number) => void;
+	syncJumpToFileLine: (file: string, line: number, column?: number) => void;
 };
 
 export class TypstPreviewController {
@@ -59,6 +60,9 @@ export class TypstPreviewController {
 	private starting = false;
 	/** the document the running task was started FOR; a main switch away from it re-attaches */
 	private attachedFile: string | null = null;
+	/** tinymist was not found at the last start. No retry until the preview is switched off and on or the Toolchain
+	 *  folders change: anything the start reads can re-run it (a config re-read after every save did), and each run toasted */
+	private tinymistMissing = $state(false);
 
 	private readonly hooks: TypstPreviewHooks;
 
@@ -113,6 +117,7 @@ export class TypstPreviewController {
 				// shows (name + the Toolchain prefs action); only a resolved-but-failed start
 				// falls through to the generic failure below
 				if (!(await tinymistResolved())) {
+					this.tinymistMissing = true;
 					toaster.error({
 						title: m.compile_tool_missing_title(),
 						description: m.compile_tool_missing({ tool: 'tinymist' }),
@@ -383,7 +388,7 @@ export class TypstPreviewController {
 					return;
 				}
 				// tinymist speaks zero-based LSP positions; the jump helper wants one-based lines
-				this.hooks.syncJumpToFileLine(jump.filepath, jump.start[0] + 1);
+				this.hooks.syncJumpToFileLine(jump.filepath, jump.start[0] + 1, jump.start[1]);
 			});
 			return () => setPreviewJumpHandler(null);
 		});
@@ -399,7 +404,8 @@ export class TypstPreviewController {
 			// tracked: switching the main from one .typ to ANOTHER keeps `want` true, so without
 			// this the task attached to the old document would run - and stream to guests - forever
 			const target = this.hooks.getMainFile();
-			if (want && this.host === null && !this.starting) {
+			if (!want) this.tinymistMissing = false;
+			if (want && this.host === null && !this.starting && !this.tinymistMissing) {
 				this.starting = true;
 				void this.open().finally(() => (this.starting = false));
 			} else if (this.host !== null && (!want || target !== this.attachedFile)) {
@@ -408,6 +414,15 @@ export class TypstPreviewController {
 				this.host = null;
 				this.detach();
 			}
+		});
+
+		// the folders in Preferences moved PATH, so a tinymist that was missing may be there now
+		let toolDirs = JSON.stringify(settings.current.toolDirs ?? []);
+		$effect(() => {
+			const now = JSON.stringify(settings.current.toolDirs ?? []);
+			if (now === toolDirs) return;
+			toolDirs = now;
+			this.tinymistMissing = false;
 		});
 
 		// the preview stream's host end

@@ -6,9 +6,10 @@ import type { Node as PMNode } from 'prosemirror-model';
 import type { PmSuggestionRange } from './pmSuggestionsPlace';
 import { editMode, mapSuggestionEdges, noteTypedSide, typingSide } from '$lib/comments/activeSuggestions.svelte';
 import type { CaretSide } from '$lib/comments/oldWordsCaret';
-import { breakMark, goneBlocksElement, oldNodeElement, oldWordsElement, suggestionTint } from './pmSuggestionWidgets';
+import { breakMark, goneBlocksElement, lineEnd, oldNodeElement, oldWordsElement, suggestionTint } from './pmSuggestionWidgets';
 import { rangeAttrs } from '$lib/editor/visual/highlight/paintRange';
 import { isSelfRendered } from '../diff/selfRendered';
+import { liftPosition } from './liftPosition';
 import { caretSideWhereItLanded, oldWordsClick, oldWordsKeyDown } from './pmOldWordsCaret';
 import { hasOldWords, pmSuggestionsKey, type PmSuggestionsMeta, type PmSuggestionsState } from './pmSuggestionsState';
 
@@ -81,27 +82,85 @@ function build(doc: PMNode, ranges: PmSuggestionRange[], focused: string | null,
 			continue;
 		}
 		if (r.gone) {
-			const { gone } = r;
-			// side 1 so it hangs below the caret's own line rather than pushing it down: the caret sits
-			// where the blocks were taken from, which is the join the reader is standing on
-			decos.push(
-				Decoration.widget(r.from, () => goneBlocksElement(schema, gone, id, on), {
-					side: 1,
-					ignoreSelection: true,
-					key: `gone-${id}-${on}-${gone.head.map((r) => r.text).join('')}|${gone.blocks.map((b) => b.toString()).join('')}|${gone.tail.map((r) => r.text).join('')}`
-				})
-			);
+			const { head, blocks, tail, depth } = r.gone;
+			// words from the blocks the change broke into are struck where they stood, and the line the
+			// first one ended still ends there until the suggestion is decided, with the blocks it took
+			// whole between the two. With nothing of the line on one side of the join, the blocks stand
+			// before or after the line instead, at the level they came from: otherwise they would leave an
+			// empty line the caret lands on
+			const $join = doc.resolve(r.from);
+			const textblock = $join.parent.isTextblock;
+			const split =
+				textblock && (head.length > 0 || $join.parentOffset > 0) && (tail.length > 0 || $join.parentOffset < $join.parent.content.size);
+			const lead = head.length === 0 && tail.length > 0 && $join.parentOffset === 0;
+			const out = textblock ? (lead ? $join.before() : $join.after()) : r.from;
+			const at = liftPosition(doc, out, depth);
+			// the caret stands before all of the words or after all of them, as beside any other old words
+			const after = (caret?.at === r.from ? caret.side : typingSide(r)) === 'after';
+			function side(k: number) {
+				return after ? k - 5 : k;
+			}
+			// the line breaker reads the two by their part, as one run of offsets
+			function words(runs: typeof head, k: number, part: 'head' | 'tail') {
+				const start = part === 'tail' ? head.reduce((n, run) => n + run.text.length, 0) : 0;
+				decos.push(
+					Decoration.widget(
+						r.from,
+						() => {
+							const element = oldWordsElement(schema, runs, id, on, start);
+							element.dataset.part = part;
+							return element;
+						},
+						{ side: side(k), ignoreSelection: true, key: `gone-${part}-${id}-${on}-${after}-${runs.map((run) => run.text).join('')}` }
+					)
+				);
+			}
+			if (head.length) words(head, 1, 'head');
+			if (split)
+				decos.push(
+					Decoration.widget(r.from, () => breakMark('removed', id, on), {
+						side: side(2),
+						ignoreSelection: true,
+						key: `gone-brk-${id}-${on}-${after}`
+					})
+				);
+			const gone = blocks.map((b) => b.toString()).join('');
+			if (split)
+				decos.push(
+					Decoration.widget(
+						r.from,
+						() => {
+							if (!blocks.length) return lineEnd(id);
+							const box = goneBlocksElement(schema, blocks, id, on);
+							box.dataset.lineEnd = '';
+							return box;
+						},
+						{ side: side(3), ignoreSelection: true, key: `gone-end-${id}-${on}-${after}-${gone}` }
+					)
+				);
+			if (tail.length) words(tail, 4, 'tail');
+			if (blocks.length && !split)
+				decos.push(
+					Decoration.widget(at, () => goneBlocksElement(schema, blocks, id, on), {
+						side: lead ? -1 : 1,
+						ignoreSelection: true,
+						key: `gone-${id}-${on}-${gone}`
+					})
+				);
 			continue;
 		}
 		if (r.brk) {
 			const { brk, old } = r;
 			decos.push(
 				Decoration.widget(r.from, () => breakMark(brk, id, on), {
-					side: brk === 'added' ? 1 : -1,
+					side: brk === 'added' ? 1 : -2,
 					ignoreSelection: true,
 					key: `brk-${id}-${on}-${brk}`
 				})
 			);
+			// after the space that joined the two, if one did
+			if (brk === 'removed')
+				decos.push(Decoration.widget(r.to, () => lineEnd(id), { side: -1, ignoreSelection: true, key: `brk-end-${id}` }));
 			if (old.length)
 				decos.push(
 					Decoration.widget(r.from, () => oldWordsElement(schema, old, id, on), {

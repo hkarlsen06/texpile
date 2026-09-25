@@ -265,15 +265,38 @@ function typesetOn(
 }
 /* eslint-enable no-param-reassign */
 
-// One item of a page skeleton: a line as a bare box, a glue at natural size, a penalty.
+// One item of a page skeleton: a line as a bare box, a glue at natural size, a kern, a penalty, a
+// whatsit or mark (x), or the \topskip glue over the box after it (t), which the engine sets itself.
 export type SkeletonItem =
-	{ t: 'b'; h: number; d: number } | { t: 'g'; w: number; st: number; sto: number; sh: number; sho: number } | { t: 'p'; p: number };
+	| { t: 'b'; h: number; d: number }
+	| { t: 'g'; w: number; st: number; sto: number; sh: number; sho: number }
+	| { t: 'k'; w: number }
+	| { t: 'p'; p: number }
+	| { t: 'x' }
+	| { t: 't' };
+
+// capacity: charge a last depth beyond \maxdepth like the page builder, and maxDepth names that
+// \maxdepth. pack: set the list to the target height instead of breaking it.
+export type SkeletonMode = { capacity?: boolean; pack?: boolean; maxDepth?: number };
 
 export type SkeletonResult =
-	{ ok: true; kA: number; kB: number; gs: number; gsn: number; go: number; ys: number[]; nys?: number[] } | { ok: false; error: string };
+	| {
+			ok: true;
+			kA: number;
+			kB: number;
+			nA: number;
+			gs: number;
+			gsn: number;
+			go: number;
+			ys: number[];
+			nys?: number[];
+			iy: number[];
+			end: number;
+	  }
+	| { ok: false; error: string };
 
 /* eslint-disable no-param-reassign -- same callback-slot protocol as typesetOn */
-function skeletonOn(state: Daemon, items: SkeletonItem[], targetPt: number, capacity?: boolean): Promise<SkeletonResult> {
+function skeletonOn(state: Daemon, items: SkeletonItem[], targetPt: number, mode: SkeletonMode): Promise<SkeletonResult> {
 	return new Promise((resolve) => {
 		let settled = false;
 		const timer = setTimeout(() => {
@@ -302,40 +325,52 @@ function skeletonOn(state: Daemon, items: SkeletonItem[], targetPt: number, capa
 					go: Number(s.go) || 0,
 					ys: Array.isArray(s.ys) ? (s.ys as number[]).map(Number) : [],
 					// the same stack at natural glue: what a column the engine did not fill looks like
-					nys: Array.isArray(s.nys) ? (s.nys as number[]).map(Number) : undefined
+					nys: Array.isArray(s.nys) ? (s.nys as number[]).map(Number) : undefined,
+					nA: Number(s.nA) || 0,
+					// where every node of the packed box starts
+					iy: Array.isArray(s.iy) ? (s.iy as number[]).map(Number) : [],
+					end: Number(s.end) || 0
 				});
 		};
-		const lines = items.map((it) =>
-			it.t === 'b'
-				? `b ${it.h.toFixed(4)} ${it.d.toFixed(4)}`
-				: it.t === 'g'
-					? `g ${it.w.toFixed(4)} ${it.st.toFixed(4)} ${it.sto} ${it.sh.toFixed(4)} ${it.sho}`
-					: `p ${Math.round(it.p)}`
-		);
-		// 'cap' = a capacity fit test: the split charges depth beyond \maxdepth like the
-		// page builder; calibration/layout splits keep \vsplit's free allowance
-		state.child.stdin!.write(`SKELETON ${targetPt.toFixed(4)} ${lines.length}${capacity ? ' cap' : ''}\n${lines.join('\n')}\nEND\n`);
+		const lines = items.map((it) => {
+			switch (it.t) {
+				case 'b':
+					return `b ${it.h.toFixed(4)} ${it.d.toFixed(4)}`;
+				case 'g':
+					return `g ${it.w.toFixed(4)} ${it.st.toFixed(4)} ${it.sto} ${it.sh.toFixed(4)} ${it.sho}`;
+				case 'k':
+					return `k ${it.w.toFixed(4)}`;
+				case 'p':
+					return `p ${Math.round(it.p)}`;
+				default:
+					return it.t;
+			}
+		});
+		const flags =
+			(mode.capacity ? ' cap' : '') + (mode.pack ? ' pack' : '') + (mode.maxDepth === undefined ? '' : ` md=${mode.maxDepth.toFixed(4)}`);
+		state.child.stdin!.write(`SKELETON ${targetPt.toFixed(4)} ${lines.length}${flags}\n${lines.join('\n')}\nEND\n`);
 	});
 }
 /* eslint-enable no-param-reassign */
 
 // Re-split a page's dimension skeleton on the warm daemon: the engine's own vert_break
 // answers whether an edit moved the page break, and with what glue state.
-export async function splitSkeleton(body: {
-	root: string;
-	mainFile: string;
-	engineDir: string;
-	items: SkeletonItem[];
-	targetPt: number;
-	capacity?: boolean;
-}): Promise<SkeletonResult> {
+export async function splitSkeleton(
+	body: {
+		root: string;
+		mainFile: string;
+		engineDir: string;
+		items: SkeletonItem[];
+		targetPt: number;
+	} & SkeletonMode
+): Promise<SkeletonResult> {
 	const run = queue.then(async (): Promise<SkeletonResult> => {
 		try {
 			armIdleStop();
 			const split = splitPreamble(path.join(body.root, body.mainFile));
 			if (!split) return { ok: false, error: 'no \\begin{document} in main file' };
 			const state = await ensureDaemon(body.root, body.engineDir, split.preamble);
-			return await skeletonOn(state, body.items, body.targetPt, body.capacity);
+			return await skeletonOn(state, body.items, body.targetPt, body);
 		} catch (e) {
 			return { ok: false, error: e instanceof Error ? e.message : String(e) };
 		}

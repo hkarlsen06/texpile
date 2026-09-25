@@ -86,7 +86,7 @@ function texd_step()
 			split = l:match("^SPLIT (%S+)")
 		elseif l:match("^SKELETON ") then
 			local starget, scnt, sflags = l:match("^SKELETON (%S+) (%d+)(.*)")
-			texd_skeleton(tonumber(starget), tonumber(scnt), sflags and sflags:find("cap", 1, true) ~= nil)
+			texd_skeleton(tonumber(starget), tonumber(scnt), sflags or "")
 			return
 		elseif l == "GLYPHS" then
 			want_glyphs = true
@@ -151,20 +151,25 @@ function texd_step()
 	end
 end
 
--- Rebuild a page's vertical list as dimension-only nodes and let the ENGINE re-split it:
--- tex.splitbox runs vert_break, the routine behind \vsplit, so "did this edit move the
--- page break" is answered by TeX, not JS arithmetic. NOT the page builder's routine --
--- that one is separate (buildpage.c, which never calls vert_break) and adds
--- insert_penalties to an otherwise identical cost formula. The two coincide on a list
--- carrying no insertions, which is what makes the skeleton's refusal of footnote pages
--- load-bearing rather than conservative. Items arrive one per line: `b h d` (box),
--- `g w st sto sh sho` (glue, natural width), `p n` (penalty); dims in pt. Answers one R
--- with kA/kB (boxes that fit / spilled), the packed A box's glue state, and every A box's
--- baseline.
-function texd_skeleton(target, cnt, cap)
+-- Rebuild a column's vertical list as dimension-only nodes and let the ENGINE answer for it.
+-- Two questions, one list format:
+--   split: tex.splitbox runs vert_break, the routine behind \vsplit. It is the page builder's
+--     own cost formula without insert_penalties, so on a list carrying no insertions it picks
+--     the page builder's break; md is the \maxdepth the firing packed the page with.
+--   pack: node.vpack to the column's height, the way the output routine sets the column.
+-- Items arrive one per line: `b h d` (box), `g w st sto sh sho` (glue, natural width), `k w`
+-- (kern), `p n` (penalty), `x` (a whatsit or mark: no size, but a glue after it may break), and
+-- `t`, the \topskip glue the page builder puts over the box that follows, set here from this
+-- engine's own \topskip. Dims in pt. Answers one R with kA/kB (boxes that fit / spilled), the
+-- packed box's glue state, and every packed box's baseline.
+function texd_skeleton(target, cnt, flags)
 	local t0 = os.gettimeofday()
 	local HL, VL, GL, KN = node.id("hlist"), node.id("vlist"), node.id("glue"), node.id("kern")
+	local cap = flags:find("cap", 1, true) ~= nil
+	local pack = flags:find("pack", 1, true) ~= nil
+	local md = tonumber(flags:match("md=(%S+)"))
 	local head, tail, bad
+	local tops = {}
 	local function append(n)
 		if tail then tail.next = n; n.prev = tail else head = n end
 		tail = n
@@ -189,15 +194,37 @@ function texd_skeleton(target, cnt, cap)
 			n.shrink = math.floor((tonumber(sh) or 0) * 65536)
 			n.shrink_order = tonumber(sho) or 0
 			append(n)
+		elseif k == "k" then
+			local n = node.new(KN)
+			n.kern = math.floor((tonumber(l:match("^k (%S+)")) or 0) * 65536)
+			append(n)
 		elseif k == "p" then
 			local n = node.new("penalty")
 			n.penalty = tonumber(l:match("^p (%S+)")) or 0
+			append(n)
+		elseif k == "x" then
+			append(node.new("whatsit", "user_defined"))
+		elseif k == "t" then
+			local n = node.new(GL)
+			tops[#tops + 1] = n
 			append(n)
 		else
 			bad = "item: " .. l
 		end
 	end
 	readline() -- END keeps the stream aligned either way
+	-- the page builder's rule (tex.web 1001): \topskip less the height of the box it sits over,
+	-- never below zero, keeping \topskip's stretch and shrink
+	if not bad then
+		local w, st, sh, sto, sho = tex.getglue("topskip")
+		for _, g in ipairs(tops) do
+			local b = g.next
+			while b and b.id ~= HL and b.id ~= VL do b = b.next end
+			if not b then bad = "topskip without a box"; break end
+			g.width = math.max(0, w - b.height)
+			g.stretch, g.stretch_order, g.shrink, g.shrink_order = st, sto, sh, sho
+		end
+	end
 	if bad or not head then
 		if head then node.flush_list(head) end
 		respond(string.format('texpile-warm@@R {"skel":true,"ms":0,"error":%q}', tostring(bad or "empty")))
@@ -208,24 +235,33 @@ function texd_skeleton(target, cnt, cap)
 		tex.vbadness = 10000
 		tex.vfuzz = 16383 * 65536
 		tex.setglue("splittopskip", 0)
-		-- a CAPACITY split charges a last line's depth beyond \maxdepth against the goal,
-		-- like the page builder deciding a fit; calibration and layout splits keep \vsplit's
-		-- free allowance -- their targets were measured to the last BASELINE, and a charge
-		-- there would refuse every column ending in a deep line the page already carries.
-		-- Set both ways: the register persists across requests.
-		tex.dimen.splitmaxdepth = cap and tex.dimen.maxdepth or 1073741823
-		tex.box[254] = node.vpack(head)
-		local a = tex.splitbox(254, math.floor(target * 65536), "exactly")
-		-- TWO baselines per box. ys is the split as packed: "exactly" stretches the glue to
-		-- reach the target, which is the engine's own layout only where the engine also
-		-- filled the column. nys is the same stack at NATURAL glue, which is what a column
-		-- the engine did not fill actually looks like -- the document's last column, and
-		-- every page of a \raggedbottom class. Neither is derived: both are this box's own
-		-- glue read two ways the engine defines.
-		local ys, nys, kA = {}, {}, 0
+		local a, kB = nil, 0
+		if pack then
+			a = node.vpack(head, math.floor(target * 65536), "exactly")
+		else
+			-- a CAPACITY split charges a last line's depth beyond \maxdepth against the goal,
+			-- like the page builder deciding a fit; md names the firing's own \maxdepth.
+			-- Set every time: the register persists across requests.
+			tex.dimen.splitmaxdepth = md and math.floor(md * 65536) or (cap and tex.dimen.maxdepth or 1073741823)
+			tex.box[254] = node.vpack(head)
+			a = tex.splitbox(254, math.floor(target * 65536), "exactly")
+			local rem = tex.box[254]
+			if rem and rem.head then
+				for n in node.traverse(rem.head) do
+					if n.id == HL or n.id == VL then kB = kB + 1 end
+				end
+			end
+		end
+		-- TWO baselines per box. ys is the list as packed: "exactly" sets the glue to reach the
+		-- target. nys is the same stack at NATURAL glue. Both are this box's own glue read two
+		-- ways the engine defines.
+		-- iy: where every node of the packed box starts, so each glue's set width is the gap to the next
+		local ys, nys, iy, kA, nA = {}, {}, {}, 0, 0
 		if a then
 			local cy, ny = 0, 0
 			for n in node.traverse(a.head) do
+				nA = nA + 1
+				iy[#iy + 1] = string.format("%.4f", cy / 65536.0)
 				if n.id == HL or n.id == VL then
 					cy = cy + n.height
 					ny = ny + n.height
@@ -243,17 +279,10 @@ function texd_skeleton(target, cnt, cap)
 				end
 			end
 		end
-		local kB = 0
-		local rem = tex.box[254]
-		if rem and rem.head then
-			for n in node.traverse(rem.head) do
-				if n.id == HL or n.id == VL then kB = kB + 1 end
-			end
-		end
 		respond(string.format(
-			'texpile-warm@@R {"skel":true,"ms":%.4f,"kA":%d,"kB":%d,"gs":%.6f,"gsn":%d,"go":%d,"ys":[%s],"nys":[%s]}',
-			(os.gettimeofday() - t0) * 1000.0, kA, kB, a and a.glue_set or 0, a and a.glue_sign or 0,
-			a and a.glue_order or 0, table.concat(ys, ","), table.concat(nys, ",")))
+			'texpile-warm@@R {"skel":true,"ms":%.4f,"kA":%d,"kB":%d,"nA":%d,"gs":%.6f,"gsn":%d,"go":%d,"ys":[%s],"nys":[%s],"iy":[%s],"end":%.4f}',
+			(os.gettimeofday() - t0) * 1000.0, kA, kB, nA, a and a.glue_set or 0, a and a.glue_sign or 0,
+			a and a.glue_order or 0, table.concat(ys, ","), table.concat(nys, ","), table.concat(iy, ","), a and (a.height + a.depth) / 65536.0 or 0))
 		if a then node.flush_list(a) end
 	end)
 	if not ok then

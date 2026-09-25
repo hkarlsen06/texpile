@@ -333,6 +333,8 @@ function soundLeaves(doc: PMNode, body: ParseBody, block: Segment, leaves: Segme
 
 const blockOrigins = new WeakMap<PMNode, BlockOrigin>();
 const docParses = new WeakMap<PMNode, ParseOrigins>();
+// what the parse knew of one container's children: never a document's own parse
+const containerParses = new WeakSet<ParseOrigins>();
 
 /**
  * Record what the parse knew about every top-level block of `doc`, the document it made from `body`
@@ -449,6 +451,7 @@ function rememberContainers(
 		const own = blockOrigins.get(node);
 		const bounds = own && own.srcFrom !== undefined ? { from: own.srcFrom, to: own.srcTo! } : null;
 		const parse: ParseOrigins = { origins: [], tail: null, verbatim, from: body ? body.from : 0, defects };
+		containerParses.add(parse);
 		let at = pos + 1;
 		let prevEnd: number | null = null;
 		let i = 0;
@@ -535,9 +538,10 @@ export function adoptParse(doc: PMNode, parse: ParseOrigins): void {
 export function parseOf(doc: PMNode): ParseOrigins | undefined {
 	const known = docParses.get(doc);
 	if (known) return known;
+	// a block Shift+Tab or a drag brought up from inside a container remembers that container's record
 	for (let i = 0; i < doc.childCount; i++) {
 		const o = blockOrigins.get(doc.child(i));
-		if (o) return o.parse;
+		if (o && !containerParses.has(o.parse)) return o.parse;
 	}
 	return undefined;
 }

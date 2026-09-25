@@ -23,15 +23,16 @@ export function registerAgentIpc(): void {
 			: { ok: false, error: 'bad request' }
 	);
 
-	ipcMain.handle('agent:run', async (_e, req: { id?: unknown; prompt?: unknown }) => {
+	ipcMain.handle('agent:run', async (_e, req: { id?: unknown; prompt?: unknown; system?: unknown }) => {
 		if (typeof req?.id !== 'string' || typeof req.prompt !== 'string') return { ok: false, error: 'bad request' };
+		const system = typeof req.system === 'string' ? req.system : '';
 		const s = readSettings();
 		const argv = agentArgv(s.aiAgent, s.aiAgentCommand, s.aiAgentModel);
 		if (!argv) return { ok: false, error: 'no agent is set in Preferences' };
 		const abort = new AbortController();
 		running.set(req.id, abort);
 		try {
-			return await runAgent(argv, req.prompt, abort.signal, agentStdio(s.aiAgent));
+			return await runAgent(argv, { system, request: req.prompt }, abort.signal, agentStdio(s.aiAgent));
 		} finally {
 			running.delete(req.id);
 		}

@@ -64,6 +64,14 @@ describe('sourceFragments', () => {
 		]);
 	});
 
+	// an abstract's centered title starts 25pt left of its body, and read by left edge the two were two columns
+	it('keeps lines that start at other left edges in the column box the page recorded as one', () => {
+		const col = { t: 'col', x: 62, y: 600, w: 345, h: 550, d: 0 };
+		const r = sourceFragments(ctxOf({ 1: [col, pl(63, 12, 1, 62), pl(79.5, 12, 1, 87)] }), FILES, 'main.tex', 12, 12);
+		if ('bail' in r) throw new Error(r.bail);
+		expect(r.frags.map((f) => f.lines.map((l) => l.x))).toEqual([[62, 87]]);
+	});
+
 	it('orders a page straddle by page, whichever column each half sits in', () => {
 		// page 2's fragment opens a column further LEFT than page 1's; reading order is still
 		// page first, or the continuation would be handed back as the opening

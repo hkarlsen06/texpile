@@ -4,6 +4,8 @@
 // missing \end{itemize}.
 import { describe, it, expect } from 'vitest';
 import { Fragment, type Node } from 'prosemirror-model';
+import { EditorState, TextSelection, type Command } from 'prosemirror-state';
+import { createDedentListCommand, createIndentListCommand, createSplitListCommand } from 'prosemirror-flat-list';
 import { schema } from '$lib/languages/latex/schema/latexPMSchema';
 import { parseLatexFile, serializeLatexFile } from '$lib/workspace/latexRoundtrip';
 import { serializeToLatex } from '$lib/languages/latex/serializer/latexSerializer';
@@ -57,5 +59,57 @@ describe('adjacent same-kind lists from separate environments', () => {
 		const out = serializeToLatex(doc);
 		expect(count(out, '\\begin{itemize}')).toBe(1);
 		expect(count(out, '\\end{itemize}')).toBe(1);
+	});
+});
+
+// the first write after the edit, before the save check: what the source view and a collaborator see
+describe('an item added to a list or moved a level', () => {
+	const LISTS = `\\documentclass{article}
+\\begin{document}
+\\begin{enumerate}
+	\\item First.
+	\\item Second.
+	\\begin{enumerate}
+		\\item Nested.
+	\\end{enumerate}
+\\end{enumerate}
+
+\\begin{itemize}
+	\\item A.
+	\\begin{itemize}
+		\\item B.
+		\\item C.
+	\\end{itemize}
+	\\item D.
+\\end{itemize}
+\\end{document}
+`;
+
+	function edit(words: string, command: Command, typed = ''): string {
+		const parsed = parseLatexFile(LISTS);
+		let at = -1;
+		parsed.doc.descendants((node, pos) => {
+			if (at < 0 && node.isText && node.text!.includes(words)) at = pos + node.text!.indexOf(words) + words.length;
+			return at < 0;
+		});
+		let state = EditorState.create({ doc: parsed.doc });
+		state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, at)));
+		expect(command(state, (tr) => (state = state.apply(tr)))).toBe(true);
+		if (typed) state = state.apply(state.tr.insertText(typed));
+		return serializeLatexFile(parsed, state.doc);
+	}
+
+	it.each([
+		['a new last item', 'D.', createSplitListCommand(), 'New.'],
+		['a new nested item', 'Nested.', createSplitListCommand(), 'New.'],
+		['a nested item brought out', 'Nested.', createDedentListCommand(), ''],
+		['an item brought out beside the next', 'C.', createDedentListCommand(), ''],
+		['an item taken in beside the nested ones', 'D.', createIndentListCommand(), '']
+	])('%s keeps one environment per list', (_name, words, command, typed) => {
+		const out = edit(words, command, typed);
+		expect(count(out, '\\begin{enumerate}')).toBe(count(out, '\\end{enumerate}'));
+		expect(count(out, '\\begin{itemize}')).toBe(2);
+		expect(count(out, '\\end{itemize}')).toBe(2);
+		if (typed) expect(out).toContain(`\\item ${typed}`);
 	});
 });

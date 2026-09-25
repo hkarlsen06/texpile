@@ -1,7 +1,7 @@
 import { it, expect } from 'vitest';
 import { refinePrompt } from '$lib/ai/refinePrompt';
 
-const ask = (path: string) => refinePrompt({ ask: 'Shorten it.', path, passage: 'Some words.', before: '', after: '' });
+const ask = (path: string) => refinePrompt({ ask: 'Shorten it.', path, passage: 'Some words.', before: '', after: '' }).system;
 
 it('tells the agent the format and extension of the file, but not its name or folder', () => {
 	const typst = ask('C:/Users/mei/thesis/chapters/results.typ');

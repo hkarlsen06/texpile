@@ -1,6 +1,15 @@
 import { ROW_CLUSTER } from '../heuristics/tolerances';
 import type { GlyphRow, PageRecord } from './geometry.types';
 
+/** the engine's own baseline among glyphs that round to one: the value most of them sit on */
+export function exactBaseline(glyphs: PageRecord[]): number {
+	const count = new Map<number, number>();
+	for (const g of glyphs) count.set(g.y, (count.get(g.y) ?? 0) + 1);
+	let best = glyphs[0].y as number;
+	for (const [y, n] of count) if (n > (count.get(best) ?? 0)) best = y;
+	return best;
+}
+
 // Group glyphs into visual text rows (script baselines clustered like colBase), each a
 // codepoint sequence + x offsets sorted by x. Shared by all locate tiers.
 export function glyphRows(glyphs: PageRecord[], gap: number): GlyphRow[] {
@@ -26,6 +35,7 @@ export function glyphRows(glyphs: PageRecord[], gap: number): GlyphRow[] {
 		all.sort((a, b) => a.x - b.x);
 		out.push({
 			y: rep,
+			base: exactBaseline(yc.get(rep)!),
 			cs: all.map((g) => g.c as number),
 			xs: all.map((g) => g.x as number),
 			left: Math.min(...all.map((g) => g.x as number))

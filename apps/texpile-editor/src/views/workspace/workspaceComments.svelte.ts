@@ -10,6 +10,7 @@ import { userData } from '$lib/storage/userData';
 import { collabGuest } from '$lib/collab/guestStore.svelte';
 import { collabHost } from '$lib/collab/hostStore.svelte';
 import { isSafeRel } from '$lib/collab/protocol';
+import { shareComments } from '$lib/collab/sharedComments';
 import { changedSpans } from '$lib/collab/materialize';
 import type * as Y from 'yjs';
 import { editorViewStore, sourceCmView } from '$lib/stores/editorStore';
@@ -72,19 +73,12 @@ export class WorkspaceComments {
 				return !!v && revealPmComment(v, id);
 			},
 			liveAnchors: (text) => this.liveAnchors(text),
-			// a guest's events go up to the host, which owns the log; a host's go out to every guest.
-			// Solo, both are no-ops and the log is just a file.
-			publish: (event) => {
-				if (d.guest()) collabGuest.sendComment(event);
-				else if (collabHost.active) collabHost.broadcastComment(event);
-			},
 			mode,
 			compares: () => !d.guest(),
 			rewraps: () => d.modes.mode === 'visual' && hasVisualMode(d.kind()),
 			applyEdit: (edit) => this.applyEdit(edit),
 			markDecision: (seq) => this.markDecision(seq),
-			saveNow: () => d.flushSave(),
-			resync: () => collabHost.resendCommentLog()
+			saveNow: () => d.flushSave()
 		});
 
 		$effect(() => onDecisionStep((s) => void this.ctl.suggestions.revisitAccept(s.seq, s.undone)));
@@ -144,26 +138,26 @@ export class WorkspaceComments {
 		});
 		$effect(() => {
 			// null for a guest: their workspaceRoot is the sentinel 'session', not a path, and the log
-			// lives on the host's disk. Comments in a shared session need the session protocol to carry
-			// their events; until it does, a guest has no log rather than a broken one.
+			// they follow is the session's, below.
 			//
 			// Null in single-file mode too: the root there is only the file's own folder, so the log it
 			// points at is some other project's - and writing to it would drop a .texpile beside a file
 			// we are visiting, holding threads that project will never see.
 			void this.ctl.load(d.guest() || fileMode.current ? null : workspaceRoot.current);
 		});
-		// A guest has no disk, so its log arrives over the wire: single events as they happen, and the
-		// whole thing once on join. load(null) above leaves it empty until then rather than reading a
-		// path built from the 'session' sentinel.
+		// in a session the log is a list in the shared doc, which a guest has from the moment it joins;
+		// the host puts its own log in first and keeps writing the file
+		$effect(() => {
+			const guest = d.guest();
+			if (guest ? !collabGuest.joined : !collabHost.active) return;
+			// untracked: sharing re-reads the threads it rewrites
+			return untrack(() => {
+				const log = guest ? collabGuest.sharedComments : collabHost.sharedComments;
+				return log ? shareComments(this.ctl, log, guest ? 'guest' : 'host') : undefined;
+			});
+		});
 		$effect(() => {
 			if (!d.guest()) return;
-			collabGuest.onCommentEvent = (event) => void this.ctl.ingest(event);
-			collabGuest.onCommentLog = (log) =>
-				this.ctl.adopt(
-					log,
-					d.doc.path,
-					untrack(() => this.activeText())
-				);
 			// this guest clicked the streamed preview; the host's tinymist resolved the span and sent
 			// the answer back here - the same landing an own-preview click gets on the host
 			collabGuest.onTypstJump = (p) => {
@@ -171,14 +165,8 @@ export class WorkspaceComments {
 				d.jumpToFileLine(p.file, Math.floor(p.line) + 1);
 			};
 			return () => {
-				collabGuest.onCommentEvent = null;
-				collabGuest.onCommentLog = null;
 				collabGuest.onTypstJump = null;
 			};
-		});
-		$effect(() => {
-			// re-asked on every reconnect: events sent while we were away are only in the host's log
-			if (d.guest() && collabGuest.status === 'online') collabGuest.requestComments();
 		});
 		$effect(() => {
 			// keyed on doc.path AND the view mode - NOT on the text, because while the editor is live

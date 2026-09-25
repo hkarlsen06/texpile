@@ -149,6 +149,7 @@ export class DraftDispatcher {
 					orig: d.orig,
 					transient: d.transient,
 					floatInner: d.floatInner,
+					floatTabular: d.floatTabular,
 					listItem: d.listItem,
 					cmdChanged: d.cmdChanged,
 					interiorEdit: d.interiorEdit,

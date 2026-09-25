@@ -1,11 +1,12 @@
 import { it, expect } from 'vitest';
 import type { Node as PMNode } from 'prosemirror-model';
+import { EditorState, TextSelection } from 'prosemirror-state';
 import { buildAnchor } from '$lib/comments/anchor';
 import type { SuggestionMark } from '$lib/comments/activeSuggestions.svelte';
 import { placePmSuggestions, type PmSuggestionRange } from '$lib/editor/visual/extensions/pmSuggestionsPlace';
 import { parseMarkdownFile, parseMarkdownRegion } from '$lib/languages/markdown/visual/roundtrip';
 import { parseTypstFile, parseTypstRegion } from '$lib/languages/typst/visual/roundtrip';
-import { bodyOffsetOf, parseLatexFile, parseLatexRegion } from '$lib/workspace/latexRoundtrip';
+import { bodyOffsetOf, parseLatexFile, parseLatexRegion, serializeLatexFileDetailed } from '$lib/workspace/latexRoundtrip';
 
 const latex = { parse: parseLatexFile, region: (preamble: string) => (src: string) => parseLatexRegion(src, preamble) };
 const markdown = { parse: parseMarkdownFile, region: () => parseMarkdownRegion };
@@ -253,6 +254,57 @@ it('stands a paragraph taken out where it stood, as a block of its own', () => {
 	expect(gone.from).toBe(doc.child(0).nodeSize);
 });
 
+// Louis's screenshot: a table taken out stood as its caption and one line a cell
+it('keeps a table and a list taken out whole, to be drawn as they were', () => {
+	const source = '\\begin{document}\nOpening words one.\n\\end{document}\n';
+	const restore =
+		'stay.\n\n\\begin{table}[h]\n\\centering\n\\begin{tabular}{ll}\na & b \\\\\nc & d \\\\\n\\end{tabular}\n\\caption{Two rows.}\n\\end{table}\n\n' +
+		'\\begin{itemize}\n\\item first\n\\item second\n\\end{itemize}\n\nThe last ';
+	const { ranges, partial } = placed(source, [mark(source, 'cut', '', restore, source.indexOf('one.'))]);
+	expect([...partial]).toEqual([]);
+	const gone = ranges.find((r) => r.gone)!.gone!;
+	expect(gone.head.map((run) => run.text).join('')).toBe('stay.');
+	expect(gone.blocks.map((b: PMNode) => b.type.name)).toEqual(['table_wrapper', 'list', 'list']);
+	expect(gone.blocks[0].textContent).toBe('Two rows.abcd');
+	expect(gone.tail.map((run) => run.text).join('')).toBe('The last ');
+});
+
+// as the comparison records a bullet deleted from its start to the next one's: the letter the two items
+// start with made "wo¶t" read as what went
+it('takes a list item out whole, not the item less its first letter plus the first of the next', () => {
+	const source = '\\begin{document}\n\\begin{enumerate}\n\\item one\n\\item three\n\\end{enumerate}\n\\end{document}\n';
+	const { doc, ranges, partial } = placed(source, [mark(source, 'item', 'three', 'two\n\\item three')]);
+	expect([...partial]).toEqual([]);
+	const [gone] = ranges;
+	expect(gone.gone?.head).toEqual([]);
+	expect(gone.gone?.blocks.map((b: PMNode) => `${b.type.name} ${b.textContent}`)).toEqual(['list two']);
+	expect(gone.gone?.tail).toEqual([]);
+	expect(doc.resolve(gone.from).depth).toBe(0);
+});
+
+// the map a write gives each item a block where a parse gives the whole list one, and the stretch
+// read as different from the one on screen: the item went to a region
+it('takes a list item out whole on the document as edited, before any parse', () => {
+	const parsed = parseLatexFile(
+		'\\begin{document}\n\\begin{enumerate}\n\\item one\n\\item two\n\\item three\n\\end{enumerate}\n\\end{document}\n'
+	);
+	let state = EditorState.create({ doc: parsed.doc });
+	const at = (word: string) => {
+		let pos = -1;
+		state.doc.descendants((node, p) => void (node.text === word && (pos = p)));
+		return pos;
+	};
+	state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, at('two'), at('three'))).deleteSelection());
+	const { text, map } = serializeLatexFileDetailed(parsed, state.doc);
+	const from = text.indexOf('three');
+	const s = { id: 'item', from, to: from + 5, restore: 'two\n\\item three', mine: true, anchor: buildAnchor(text, from, from + 5) };
+	const body = { from: bodyOffsetOf(parsed), to: text.length - parsed.postamble.length };
+	const { ranges, partial } = placePmSuggestions(state.doc, [s], { text, map, body, parse: latex.region(parsed.preamble) });
+	expect([...partial]).toEqual([]);
+	expect(ranges.map((r) => r.gone?.blocks.map((b: PMNode) => b.textContent))).toEqual([['two']]);
+	expect(state.doc.resolve(ranges[0].from).depth).toBe(0);
+});
+
 it('marks a paragraph break that came or went with a bar rather than words', () => {
 	const split = '\\begin{document}\nFirst half of the line\n\nand the second half.\n\\end{document}\n';
 	const at = split.indexOf('\n\nand');
@@ -261,6 +313,17 @@ it('marks a paragraph break that came or went with a bar rather than words', () 
 	const joined = '\\begin{document}\nFirst half of the line and the second half.\n\\end{document}\n';
 	const removed = placed(joined, [mark(joined, 'join', ' ', '\n\n', at)]);
 	expect(removed.ranges.map((r) => r.brk)).toEqual(['removed']);
+});
+
+it('tints an item Tab or Shift+Tab moved a level, with no break drawn', () => {
+	for (const format of [markdown, typst]) {
+		const nested = '- one\n  - two\n- three\n';
+		const indented = placed(nested, [mark(nested, 'in', '  ', '', nested.indexOf('  - two'))], format);
+		expect(indented.ranges.map((r) => [r.brk, r.format, indented.doc.nodeAt(r.from)?.textContent])).toEqual([[undefined, true, 'two']]);
+		const flat = '- one\n- two\n- three\n';
+		const dedented = placed(flat, [mark(flat, 'out', '', '  ', flat.indexOf('- two'))], format);
+		expect(dedented.ranges.map((r) => [r.brk, r.format, dedented.doc.nodeAt(r.from)?.textContent])).toEqual([[undefined, true, 'two']]);
+	}
 });
 
 // a letter taken from the very start of a heading belongs INSIDE that heading: drawn at the join it
@@ -334,4 +397,26 @@ it('strikes only the Chinese word a change took, and the includes taken with it'
 	expect(gone.gone!.blocks.map((b: PMNode) => `${b.type.name} ${b.attrs.path}`)).toEqual(['includedoc intro', 'includedoc related']);
 	const typed = ranges.find((r) => !r.gone)!;
 	expect(doc.textBetween(typed.from, typed.to)).toBe('hello codex');
+});
+
+// "end of a line leaves a wide" less "unlucky ... leaves" also reads as two cuts with the first "a" kept, and
+// did once a change in the next paragraph put both paragraphs in one comparison
+it('strikes one run of words taken out as one run, when its last word also stands after it', () => {
+	const cut =
+		'\\begin{document}\n\nThe way a paragraph is broken into lines  a good part of how a page looks. A first fit method fills ' +
+		'each line with as many words as the measure allows and then moves on, which means that an  a wide hole behind it. ' +
+		'Nobody planned the hole. It is only what was left over after the line had been filled, and the lines that follow ' +
+		'inherit whatever that choice pushed down to them.\n\nKnuth and Plass described a different approach in 1981. Their ' +
+		'method looks at the paragraph as a whole, gives every possible line a badness that grows with the cube of how far its ' +
+		'spaces must stretch or shrink, and then looks for the sequence of breaks with the smallest total.\n\\end{document}\n';
+	const words = 'unlucky long word near the end of a line leaves';
+	const { ranges } = placed(cut, [
+		mark(cut, 'first', '', 'decides', cut.indexOf('lines ') + 6),
+		mark(cut, 'cut', '', words, cut.indexOf('an ') + 3),
+		mark(cut, 'next', 'looks', 'searches', cut.indexOf('looks for'))
+	]);
+	const struck = Object.fromEntries(ranges.map((r) => [r.id, r.old.map((run) => run.text).join('')]));
+	expect(ranges.length).toBe(3);
+	expect(struck.cut.trim()).toBe(words);
+	expect([struck.first.trim(), struck.next]).toEqual(['decides', 'searches']);
 });

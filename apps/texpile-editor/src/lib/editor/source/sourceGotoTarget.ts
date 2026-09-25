@@ -3,8 +3,17 @@ import type { EditorState } from '@codemirror/state';
 // SyncTeX gives only a line number, which is stale whenever the buffer differs from the compiled
 // .tex. when the double-clicked word is known, anchor on content instead: select it on the
 // reported line, else on the nearest line containing it. this is what survives line drift.
-export function resolveGotoTarget(doc: EditorState['doc'], req: { line: number; selectText?: string }): { from: number; to: number } {
+export function resolveGotoTarget(
+	doc: EditorState['doc'],
+	req: { line: number; selectText?: string; column?: number }
+): { from: number; to: number } {
 	const line = Math.min(Math.max(1, Math.floor(req.line)), doc.lines);
+	// the Typst preview knows the clicked character, not just its line
+	if (req.column !== undefined) {
+		const at = doc.line(line);
+		const pos = at.from + Math.min(Math.max(0, req.column), at.length);
+		return { from: pos, to: pos };
+	}
 	const word = req.selectText?.trim();
 	if (word && word.length >= 2) {
 		const here = doc.line(line);

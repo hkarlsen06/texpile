@@ -78,7 +78,21 @@ function bar(way: 'added' | 'removed'): HTMLElement {
 	return el;
 }
 
-/** struck words with a bar wherever they held a break, so a deletion that spans lines reads as one */
+// The file no longer has the struck words' lines, so they are drawn inside the line they were cut from, and a break
+// there starts a row of its own: the deleted lines stand where they were rather than run together behind bars. Only
+// a blank line has nothing to strike, and keeps the bar
+function wordsOnLines(words: string): (string | HTMLElement)[] {
+	const lines = words.split(/\r?\n/);
+	const parts: (string | HTMLElement)[] = [];
+	for (const [i, line] of lines.entries()) {
+		if (i > 0) parts.push(document.createElement('br'));
+		if (line) parts.push(line);
+		else if (i > 0 && i < lines.length - 1) parts.push(bar('removed'));
+	}
+	return parts;
+}
+
+/** words with a bar wherever they held a break */
 function wordsWithBars(words: string, way: 'added' | 'removed'): (string | HTMLElement)[] {
 	const parts: (string | HTMLElement)[] = [];
 	for (const [i, piece] of words.split('\n').entries()) {
@@ -128,7 +142,7 @@ class SuggestedWords extends WidgetType {
 		span.dataset.comment = this.id;
 		span.append(
 			document.createElement('wbr'),
-			...wordsWithBars(this.text, this.kind === 'old' ? 'removed' : 'added'),
+			...(this.kind === 'old' ? wordsOnLines(this.text) : wordsWithBars(this.text, 'added')),
 			document.createElement('wbr')
 		);
 		return span;

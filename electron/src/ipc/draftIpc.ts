@@ -44,7 +44,7 @@ export function registerDraftIpc(): void {
 	});
 	handleFsE(
 		'draft:skeleton',
-		async (e, body: { root: string; mainFile: string; items: draftDaemon.SkeletonItem[]; targetPt: number; capacity?: boolean }) => {
+		async (e, body: { root: string; mainFile: string; items: draftDaemon.SkeletonItem[]; targetPt: number } & draftDaemon.SkeletonMode) => {
 			if (draftBusy(e, body.root)) return { ok: false, error: 'engine-busy' };
 			draftOwner = { wcId: e.sender.id, root: body.root };
 			return draftDaemon.splitSkeleton({ ...body, engineDir: luaDir() });

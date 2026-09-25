@@ -34,6 +34,7 @@
 
 	const GAP = 6;
 	const EDGE_GAP = 16;
+	const NOTHING_PLACED = new Map<string, number>();
 
 	let rail = $state<HTMLElement | null>(null);
 	const geometry = new RailGeometry();
@@ -52,7 +53,11 @@
 				mutate: view.dom,
 				resize: view.dom,
 				scroll: scroller,
-				measure: () => measurePmAnchors(view, el, !!untrack(() => ctl.pending))
+				// with nothing to place, no layout read on every key and every scroll frame
+				measure: () =>
+					untrack(() => !ctl.pending && activeSuggestions.current.length === 0 && threads.every((t) => t.resolved))
+						? NOTHING_PLACED
+						: measurePmAnchors(view, el, !!untrack(() => ctl.pending))
 			});
 		}
 		const view = cmView;

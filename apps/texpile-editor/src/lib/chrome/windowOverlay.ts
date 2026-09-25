@@ -70,12 +70,28 @@ function scrimLayers(): string[] {
 }
 
 /**
+ * macOS draws the traffic lights over the page with no overlay to say where: the bar they sit in
+ * gives its height to the stylesheet instead, as --mac-titlebar, which a scrim keeps its dialog below
+ */
+function reportTrafficLightRow(el: HTMLElement): () => void {
+	const root = document.documentElement.style;
+	const ro = new ResizeObserver(() => root.setProperty('--mac-titlebar', `${el.getBoundingClientRect().height}px`));
+	ro.observe(el);
+	return () => {
+		ro.disconnect();
+		root.removeProperty('--mac-titlebar');
+	};
+}
+
+/**
  * Report `el`'s height and colours to the overlay, and keep reporting as they change.
  *
- * Returns a teardown. A no-op on macOS and in the browser build, where there is no overlay.
+ * Returns a teardown. A no-op in the browser build, where there is no overlay; on macOS the row is
+ * reported to the stylesheet instead.
  */
 export function syncWindowOverlay(el: HTMLElement): () => void {
 	const api = nativeBridge() as OverlayApi | undefined;
+	if (isMac && api) return reportTrafficLightRow(el);
 	if (isMac || !api?.windowSetOverlay) return () => {};
 
 	// last values sent: the observers below fire on plenty of changes that move neither, and an IPC

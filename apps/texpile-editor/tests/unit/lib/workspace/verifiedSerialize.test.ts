@@ -1,9 +1,11 @@
 // the save check: a file must parse back to the document it was written from, and when it does
 // not, only the blocks written from the document are written whole, never the untouched ones
 import { describe, it, expect } from 'vitest';
-import { EditorState } from 'prosemirror-state';
+import { EditorState, TextSelection } from 'prosemirror-state';
+import { createDedentListCommand } from 'prosemirror-flat-list';
 import { Fragment, type Node as PMNode } from 'prosemirror-model';
 import { parseLatexFile, serializeLatexFileDetailed } from '$lib/workspace/latexRoundtrip';
+import { parseMarkdownFile, serializeMarkdownFileDetailed } from '$lib/languages/markdown/visual/roundtrip';
 import { changedBlocks, verifiedSerialize, type Serialized } from '$lib/workspace/verifiedSerialize';
 import { FORMATS, prng, randomEdit } from './visualEditsFuzz';
 
@@ -116,6 +118,53 @@ describe('the save check', () => {
 		expect(v.rung).toBe(0);
 		expect(v.checked).toBe(false);
 		expect(v.text).toBe(first.text);
+	});
+
+	it('is silent on a description item Shift+Tab took out of its list, its label now plain bold', async () => {
+		const parsed = parseLatexFile(
+			'\\documentclass{article}\n\\begin{document}\n\\begin{description}\n\t\\item[Term] its definition.\n\\end{description}\n\\end{document}\n'
+		);
+		let state = EditorState.create({ doc: parsed.doc });
+		state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 3)));
+		expect(createDedentListCommand()(state, (tr) => (state = state.apply(tr)))).toBe(true);
+		expect(state.doc.firstChild!.type.name).toBe('paragraph');
+		const v = await verifiedSerialize({
+			format: 'tex',
+			doc: state.doc,
+			first: serializeLatexFileDetailed(parsed, state.doc),
+			serialize: (d, afresh) => serializeLatexFileDetailed(parsed, d, afresh),
+			reparse: realParse
+		});
+		expect(v.rung).toBe(0);
+		expect(v.text).toContain('\n\\textbf{Term} its definition.\n');
+	});
+
+	it('is silent on a markdown footnote reference whose definition was deleted, read back as its characters', async () => {
+		const parsed = parseMarkdownFile('Text with a note[^1] here.\n\n[^1]: The note body.\n\nTail.\n');
+		const doc = parsed.doc.copy(Fragment.fromArray([parsed.doc.child(0), parsed.doc.child(2)]));
+		const v = await verifiedSerialize({
+			format: 'md',
+			doc,
+			first: serializeMarkdownFileDetailed(parsed, doc),
+			serialize: (d, afresh) => serializeMarkdownFileDetailed(parsed, d, afresh),
+			reparse: (t) => Promise.resolve(parseMarkdownFile(t).doc)
+		});
+		expect(v.rung).toBe(0);
+		expect(v.text).toBe('Text with a note[^1] here.\n\nTail.\n');
+	});
+
+	it('writes a reference link whose definition was deleted as the link the editor still shows', async () => {
+		const parsed = parseMarkdownFile('A [reference link][ref] here.\n\n[ref]: https://example.com\n\nTail.\n');
+		const doc = parsed.doc.copy(Fragment.fromArray([parsed.doc.child(0), parsed.doc.child(2)]));
+		const v = await verifiedSerialize({
+			format: 'md',
+			doc,
+			first: serializeMarkdownFileDetailed(parsed, doc),
+			serialize: (d, afresh) => serializeMarkdownFileDetailed(parsed, d, afresh),
+			reparse: (t) => Promise.resolve(parseMarkdownFile(t).doc)
+		});
+		expect(v.rung).toBe(1);
+		expect(v.text).toBe('A [reference link](https://example.com) here.\n\nTail.\n');
 	});
 
 	it('is silent on every fixture after random edits, in every format', async () => {

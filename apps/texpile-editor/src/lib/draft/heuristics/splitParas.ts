@@ -168,7 +168,9 @@ export function wrapItem(t: string, w?: string, line?: number, file?: string) {
 	if (!w) return t;
 	const pin = w === 'enumerate' && line !== undefined ? counterBefore('enumi', line, file) : null;
 	const setc = w === 'enumerate' ? `\\setcounter{enumi}{${pin ?? 0}}` : '';
-	return `\\begin{${w}}${setc}\\item ${t}\\end{${w}}`;
+	// \par: the daemon opens a paragraph before the text, and beamer's itemize writes a color change into it,
+	// which TeX then sets as an empty line the page never had
+	return `\\par\\begin{${w}}${setc}\\item ${t}\\end{${w}}`;
 }
 // comment stripping is ONLY for JS-side lexing guards (brace balance); dispatched text
 // ships verbatim -- the engine's own catcodes decide what a % means. Comment chars come

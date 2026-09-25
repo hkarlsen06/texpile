@@ -16,13 +16,29 @@ export function sameOffsets(a: Pick<GlyphRow, 'xs'>, b: Pick<GlyphRow, 'xs'>): b
 	return a.xs.length === b.xs.length && a.xs.every((x, i) => Math.abs(x - a.xs[0] - (b.xs[i] - b.xs[0])) <= 0.5);
 }
 
+// the painter sets every row of the daemon's box at one offset, so a row that starts elsewhere against the
+// band's first row than the daemon's does (an indented first line reproduced unindented) is not this typeset
+export function sameRowStart(
+	a: Pick<GlyphRow, 'xs'>,
+	b: Pick<GlyphRow, 'xs'>,
+	a0: Pick<GlyphRow, 'xs'>,
+	b0: Pick<GlyphRow, 'xs'>
+): boolean {
+	return Math.abs(a.xs[0] - b.xs[0] - (a0.xs[0] - b0.xs[0])) <= 0.5;
+}
+
 // index of the first row that does not match the daemon's reproduction, glyph-for-glyph and
 // offset-for-offset; -1 when every row does. A refusal names the row so a bail can be read
 // rather than reproduced.
 export function firstRowMismatch(bandRows: Pick<GlyphRow, 'cs' | 'xs'>[], dRows: Pick<GlyphRow, 'cs' | 'xs'>[]): number {
 	if (bandRows.length !== dRows.length) return Math.min(bandRows.length, dRows.length);
 	for (let i = 0; i < bandRows.length; i++)
-		if (!sameCodepoints(bandRows[i].cs, dRows[i].cs) || !sameOffsets(bandRows[i], dRows[i])) return i;
+		if (
+			!sameCodepoints(bandRows[i].cs, dRows[i].cs) ||
+			!sameOffsets(bandRows[i], dRows[i]) ||
+			!sameRowStart(bandRows[i], dRows[i], bandRows[0], dRows[0])
+		)
+			return i;
 	return -1;
 }
 

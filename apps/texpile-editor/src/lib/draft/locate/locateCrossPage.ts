@@ -6,7 +6,7 @@ import { COL_GUTTER, LINE_GAP_FALLBACK, ROW_BREAK } from '../heuristics/toleranc
 import { columnWindows } from '../heuristics/columnWindows';
 import { glyphRows } from '../geometry/glyphRows';
 import { median } from '../geometry/median';
-import { sameCodepoints, sameOffsets } from '../geometry/rowEquality';
+import { sameCodepoints, sameOffsets, sameRowStart } from '../geometry/rowEquality';
 import type { Cal, CalBail, LocateContext } from './locate.types';
 
 // Split locate: the paragraph's first nA lines END a column and the remaining nB lines
@@ -69,7 +69,12 @@ export async function locateCrossPage(
 		for (let s = 0; s + len <= rows.length; s++) {
 			let ok = true;
 			for (let i = 0; i < len && ok; i++) {
-				if (!sameCodepoints(rows[s + i].cs, dRows[off + i].cs) || !sameOffsets(rows[s + i], dRows[off + i])) ok = false;
+				if (
+					!sameCodepoints(rows[s + i].cs, dRows[off + i].cs) ||
+					!sameOffsets(rows[s + i], dRows[off + i]) ||
+					!sameRowStart(rows[s + i], dRows[off + i], rows[s], dRows[off])
+				)
+					ok = false;
 				else if (i > 0 && rows[s + i].y - rows[s + i - 1].y > gap * ROW_BREAK) ok = false;
 			}
 			if (ok) out.push(s);

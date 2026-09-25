@@ -8,6 +8,7 @@
 		label: string;
 		note?: string;
 		aside?: string;
+		disabled?: boolean;
 		onpick: () => void;
 	};
 	const props: Props = $props();
@@ -18,9 +19,12 @@
 	role={props.kind}
 	aria-checked={props.checked}
 	onclick={props.onpick}
+	disabled={props.disabled}
 	class="rounded-container flex items-center gap-3 border px-3.5 py-2.5 text-left {props.checked
 		? 'border-primary-500 preset-tonal-primary'
-		: 'border-surface-200-800 bg-surface-100-900 hover:preset-tonal'}"
+		: props.disabled
+			? 'border-surface-200-800 bg-surface-100-900 opacity-50'
+			: 'border-surface-200-800 bg-surface-100-900 hover:preset-tonal'}"
 >
 	{#if props.kind === 'checkbox'}
 		<span

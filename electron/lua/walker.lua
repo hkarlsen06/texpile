@@ -15,6 +15,8 @@ local MATH  = node.id("math")
 local INS   = node.id("ins")
 local PENALTY = node.id("penalty")
 local WHATSIT = node.id("whatsit")
+local MARK = node.id("mark")
+local ADJUST = node.id("adjust")
 local ok_mk, MKERN = pcall(node.id, "margin_kern")
 if not ok_mk then MKERN = -1 end
 local ok_dir, DIR = pcall(node.id, "dir")
@@ -339,6 +341,40 @@ local function columnSuffix(n)
 	return string.format(',"c":%d', a)
 end
 
+-- a box LaTeX placed a float or \marginpar after, by the page height at that point (page-extract)
+local function anchorSuffix(n)
+	if not M.anchorattr then return "" end
+	return node.has_attribute(n, M.anchorattr) == 1 and ',"fa":1' or ""
+end
+
+-- where this record sits: the output firing it came from, and whether it is inside a line box
+-- rather than on a vertical list of its own
+local function listSuffix(n)
+	return columnSuffix(n) .. (in_line_box > 0 and ',"z":1' or "")
+end
+
+-- the \baselineskip, \lineskip and \lineskiplimit TeX computed this interline glue from
+-- (page-extract stamps them at the line break). Absent on glue no paragraph put there
+local function interlineSuffix(n)
+	local a = M.ilattrs
+	if not a or (n.subtype ~= 1 and n.subtype ~= 2) then return "" end
+	local v = {}
+	for k = 1, 7 do
+		local x = node.has_attribute(n, a[k])
+		if x == nil then return "" end
+		v[k] = x / pt
+	end
+	return string.format(',"il":[%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f]', v[1], v[2], v[3], v[4], v[5], v[6], v[7])
+end
+
+-- the paragraph a line came from: page-extract stamps every line box with the serial of the paragraph it
+-- broke, and records that paragraph's parameters under it (pi)
+local function paraSuffix(n)
+	if not M.paraattr then return "" end
+	local a = node.has_attribute(n, M.paraattr)
+	return (a and a > 0) and string.format(',"pi":%d', a) or ""
+end
+
 local function sourceSuffix(head)
 	if not (M.srcline and head) then return "" end
 	local l, f = firstGlyphSource(head, 0)
@@ -363,9 +399,12 @@ local function emitColumn(emit, stamp, left, top, box)
 	-- its goal and an exact re-split reproduces the engine's spacing; gord > 0 means a fil
 	-- took it and the column did not fill. The shipout box carries none of this (measured: 0
 	-- on every page of every fixture) -- the stretch lives one level in, on this box.
-	emit(string.format('{"t":"col","i":%d,"x":%.4f,"y":%.4f,"w":%.4f,"h":%.4f,"d":%.4f,"gs":%.6f,"gsn":%d,"gord":%d}',
+	-- g, md: the page goal and \maxdepth the firing packed this galley to (page-extract)
+	local goal = M.goals and M.goals[stamp]
+	emit(string.format('{"t":"col","i":%d,"x":%.4f,"y":%.4f,"w":%.4f,"h":%.4f,"d":%.4f,"gs":%.6f,"gsn":%d,"gord":%d%s}',
 		stamp, left / pt, (top + box.height) / pt, box.width / pt, box.height / pt, box.depth / pt,
-		box.glue_set or 0, box.glue_sign or 0, box.glue_order or 0))
+		box.glue_set or 0, box.glue_sign or 0, box.glue_order or 0,
+		goal and string.format(',"g":%.4f,"md":%.4f', goal[1] / pt, goal[2] / pt) or ""))
 	return true
 end
 
@@ -508,9 +547,17 @@ local function walk(head, parent, x, y, emit, fonts, last_ef, colorStack, rtl, s
 			local opened = cs ~= nil and emitColumn(emit, cs, x, top, n)
 			local wasCol = in_column
 			in_column = in_column or cs ~= nil
-			in_line_box = in_line_box + 1
+			-- a column is a vertical list of its own, not a box inside a line
+			local wasLine = in_line_box
+			in_line_box = opened and 0 or in_line_box + 1
+			-- marked like any vbox: a reader follows nesting by the markers, whatever list a box sits in
+			-- inl: a box inside a line, which no vertical list holds as an item
+			emit(string.format('{"t":"vbox","x":%.4f,"y":%.4f,"w":%.4f,"h":%.4f,"d":%.4f%s,"inl":1}',
+				x / pt, (top + n.height) / pt, n.width / pt, n.height / pt, n.depth / pt,
+				(n.width > pt and (n.height + n.depth) > pt) and "" or ',"sm":1'))
 			walk_vlist(n.head, n, x, top, emit, fonts, colorStack)
-			in_line_box = in_line_box - 1
+			emit('{"t":"vboxend"}')
+			in_line_box = wasLine
 			in_column = wasCol
 			if opened then emit('{"t":"colend"}') end
 			if not rtl then x = x + n.width end
@@ -577,9 +624,14 @@ walk_vlist = function(head, parent, x, y, emit, fonts, colorStack)
 			-- box. Display-math lines (equation subtypes) are galley boxes the same way --
 			-- without them a display reads as a gap full of stray fraction rules.
 			if n.subtype == HL_LINE or n.subtype == HL_EQ or n.subtype == HL_EQNO then
-				emit(string.format('{"t":"pl","x":%.4f,"y":%.4f,"w":%.4f,"h":%.4f,"d":%.4f%s%s}',
+				emit(string.format('{"t":"pl","x":%.4f,"y":%.4f,"w":%.4f,"h":%.4f,"d":%.4f%s%s%s%s}',
 					(x + (n.shift or 0)) / pt, cy / pt, n.width / pt, n.height / pt, n.depth / pt,
-					sourceSuffix(n.head), columnSuffix(n)))
+					sourceSuffix(n.head), paraSuffix(n), listSuffix(n), anchorSuffix(n)))
+			else
+				-- any other box on a vertical list (\hbox, \null, \centerline): a list item as rigid as a line,
+				-- which the page's list has to hold as a box for the engine to break it the same way
+				emit(string.format('{"t":"hb","x":%.4f,"y":%.4f,"w":%.4f,"h":%.4f,"d":%.4f%s%s}',
+					(x + (n.shift or 0)) / pt, cy / pt, n.width / pt, n.height / pt, n.depth / pt, listSuffix(n), anchorSuffix(n)))
 			end
 			-- drawing box sitting directly in vertical material (\vbox{\hbox{tikz}}).
 			-- Paragraph LINES are exempt: walk() captures just the inner drawing box,
@@ -606,14 +658,18 @@ walk_vlist = function(head, parent, x, y, emit, fonts, colorStack)
 			-- so the page skeleton needs this marker to know that run is not flowing content
 			-- it may re-break. (The page's own container box carries one too; the skeleton
 			-- tells them apart by whether the box holds only PART of the column.)
-			if n.width > pt and (n.height + n.depth) > pt then
-				emit(string.format('{"t":"vbox","x":%.4f,"y":%.4f,"w":%.4f,"h":%.4f,"d":%.4f}',
-					(x + (n.shift or 0)) / pt, (cy + n.height) / pt, n.width / pt, n.height / pt, n.depth / pt))
-			end
+			-- vboxend closes it: a box on the page's vertical list (a float placed here) is one item there, and
+			-- the skeleton must know which records are its content rather than the list's
+			-- every vbox is marked, a small one too (sm): on the list it is one box whatever its size
+			local small = not (n.width > pt and (n.height + n.depth) > pt)
+			emit(string.format('{"t":"vbox","x":%.4f,"y":%.4f,"w":%.4f,"h":%.4f,"d":%.4f%s%s%s}',
+				(x + (n.shift or 0)) / pt, (cy + n.height) / pt, n.width / pt, n.height / pt, n.depth / pt,
+				listSuffix(n), anchorSuffix(n), small and ',"sm":1' or ""))
 			local wasCol = in_column
 			in_column = in_column or cs ~= nil
 			walk_vlist(n.head, n, x + (n.shift or 0), cy, emit, fonts, colorStack)
 			in_column = wasCol
+			emit('{"t":"vboxend"}')
 			if opened then emit('{"t":"colend"}') end
 			cy = cy + n.height + n.depth
 		elseif id == GLUE then
@@ -621,7 +677,8 @@ walk_vlist = function(head, parent, x, y, emit, fonts, colorStack)
 			if n.leader and n.leader.id == RULE and n.subtype >= LEADERS_MIN and n.subtype <= LEADERS_MAX then
 				local h, d = resolveRuleHD(n.leader, parent)
 				-- parent can be an ins node (no width field) when walking a footnote body
-				emit(string.format('{"t":"rule","x":%.4f,"y":%.4f,"w":%.4f,"h":%.4f,"d":%.4f%s}',
+				-- ld: the ink of the glue below it, not an item of the list
+				emit(string.format('{"t":"rule","x":%.4f,"y":%.4f,"w":%.4f,"h":%.4f,"d":%.4f%s,"ld":1}',
 					x / pt, (cy + h) / pt, (parent.width or 0) / pt, h / pt, d / pt, colSuffix(colorStack)))
 			end
 			-- EVERY vertical glue, rigid included. The stretchables say where the engine would
@@ -630,25 +687,29 @@ walk_vlist = function(head, parent, x, y, emit, fonts, colorStack)
 			-- subtracting the stretchables from the observed gap, which was the one invented
 			-- number inside the break certificate. nw = the NATURAL width (w is the effective,
 			-- post-stretch value): the skeleton rebuilds each glue at its natural size and lets
-			-- the engine re-stretch it.
-			emit(string.format('{"t":"vg","x":%.4f,"y":%.4f,"w":%.4f,"nw":%.4f,"st":%.4f,"sto":%d,"sh":%.4f,"sho":%d}',
-				x / pt, cy / pt, eff / pt, (n.width or 0) / pt, (n.stretch or 0) / pt, n.stretch_order or 0, (n.shrink or 0) / pt, n.shrink_order or 0))
+			-- the engine re-stretch it. gk = the glue's subtype: 1 \lineskip and 2 \baselineskip are the
+			-- interline glue, which a skeleton must recompute beside a line whose height or depth changed
+			emit(string.format('{"t":"vg","x":%.4f,"y":%.4f,"w":%.4f,"nw":%.4f,"st":%.4f,"sto":%d,"sh":%.4f,"sho":%d,"gk":%d%s%s}',
+				x / pt, cy / pt, eff / pt, (n.width or 0) / pt, (n.stretch or 0) / pt, n.stretch_order or 0, (n.shrink or 0) / pt, n.shrink_order or 0, n.subtype or 0,
+				listSuffix(n), interlineSuffix(n)))
 			cy = cy + eff
 		elseif id == PENALTY then
 			-- pen: vertical break penalties (interline, club/widow, section \nobreak) --
 			-- invisible ink, but the page skeleton needs them to re-ask the engine where
 			-- a page breaks after an edit
-			emit(string.format('{"t":"pen","y":%.4f,"p":%d}', cy / pt, n.penalty or 0))
+			emit(string.format('{"t":"pen","y":%.4f,"p":%d%s}', cy / pt, n.penalty or 0, listSuffix(n)))
 		elseif id == KERN then
 			-- vk: an interline kern carries real height the skeleton has to place, exactly
-			-- like a rigid glue; carries no x, so consumers take it positionally (like pen)
-			if (n.kern or 0) ~= 0 then emit(string.format('{"t":"vk","y":%.4f,"w":%.4f%s}', cy / pt, n.kern / pt, in_line_box > 0 and ',"z":1' or "")) end
+			-- like a rigid glue; carries no x, so consumers take it positionally (like pen). A zero one
+			-- still counts on a vertical list of its own: a kern before glue is a place the page may break
+			if (n.kern or 0) ~= 0 or in_line_box == 0 then emit(string.format('{"t":"vk","y":%.4f,"w":%.4f%s}', cy / pt, n.kern / pt, listSuffix(n))) end
 			cy = cy + n.kern
 		elseif id == RULE then
 			local w, h, d = n.width, resolveRuleHD(n, parent)
 			if w == RUNNING then w = parent.width or 0 end
-			emit(string.format('{"t":"rule","x":%.4f,"y":%.4f,"w":%.4f,"h":%.4f,"d":%.4f%s}',
-				x / pt, (cy + h) / pt, w / pt, h / pt, d / pt, colSuffix(colorStack)))
+			-- v: a rule on a vertical list is an item of it, where one inside a line (a strut) is ink
+			emit(string.format('{"t":"rule","x":%.4f,"y":%.4f,"w":%.4f,"h":%.4f,"d":%.4f%s%s%s,"v":1}',
+				x / pt, (cy + h) / pt, w / pt, h / pt, d / pt, colSuffix(colorStack), listSuffix(n), anchorSuffix(n)))
 			cy = cy + h + d
 		elseif id == DIR then
 			flags.dir = true
@@ -659,6 +720,10 @@ walk_vlist = function(head, parent, x, y, emit, fonts, colorStack)
 			elseif st == W_SETMATRIX or st == W_SAVE or st == W_RESTORE then flags.transform = true
 			elseif st == W_SPECIAL or st == W_LATE_SPECIAL or st == W_LATE_LUA then flags.escape = true
 			end
+			if in_line_box == 0 then emit(string.format('{"t":"vx","y":%.4f%s}', cy / pt, listSuffix(n))) end
+		elseif id == MARK or id == ADJUST or id == INS then
+			-- vx: nothing to draw, but glue after it is a place the page may break, as after a box
+			if in_line_box == 0 then emit(string.format('{"t":"vx","y":%.4f%s}', cy / pt, listSuffix(n))) end
 		end
 	end
 	return cy
@@ -723,12 +788,28 @@ function M.lines(head, y0)
 			-- block's top-level list (not nested inside a paragraph line).
 			local cs = columnStamp(line.head)
 			local opened = cs ~= nil and emitColumn(emit, cs, line.shift or 0, y, line)
+			emit(string.format('{"t":"vbox","x":%.4f,"y":%.4f,"w":%.4f,"h":%.4f,"d":%.4f}',
+				(line.shift or 0) / pt, (y + line.height) / pt, line.width / pt, line.height / pt, line.depth / pt))
 			local wasCol = in_column
 			in_column = in_column or cs ~= nil
 			walk_vlist(line.head, line, line.shift or 0, y, emit, fonts, colorStack)
 			in_column = wasCol
+			emit('{"t":"vboxend"}')
 			if opened then emit('{"t":"colend"}') end
 			y = y + line.height + line.depth
+		elseif line.id == KERN then
+			emit(string.format('{"t":"vk","y":%.4f,"w":%.4f}', y / pt, (line.kern or 0) / pt))
+			y = y + (line.kern or 0)
+		elseif line.id == RULE then
+			local w, h, d = line.width, line.height, line.depth
+			if w == RUNNING then w = 0 end
+			if h == RUNNING then h = 0 end
+			if d == RUNNING then d = 0 end
+			emit(string.format('{"t":"rule","x":0,"y":%.4f,"w":%.4f,"h":%.4f,"d":%.4f,"v":1}', (y + h) / pt, w / pt, h / pt, d / pt))
+			y = y + h + d
+		elseif line.id == WHATSIT or line.id == MARK or line.id == ADJUST then
+			if line.id == WHATSIT and line.subtype == COLORSTACK_SUBTYPE then applyColorstack(line, colorStack) end
+			emit(string.format('{"t":"vx","y":%.4f}', y / pt))
 		elseif line.id == INS then
 			-- footnote body: \insert material migrated out of the paragraph into this list.
 			-- Emitted as a note group with n-prefixed record types and LOCAL y from 0, so
@@ -741,8 +822,8 @@ function M.lines(head, y0)
 			end
 			emit('{"t":"noteend"}')
 		elseif line.id == GLUE then
-			emit(string.format('{"t":"vg","x":0,"y":%.4f,"w":%.4f,"nw":%.4f,"st":%.4f,"sto":%d,"sh":%.4f,"sho":%d}',
-				y / pt, line.width / pt, (line.width or 0) / pt, (line.stretch or 0) / pt, line.stretch_order or 0, (line.shrink or 0) / pt, line.shrink_order or 0))
+			emit(string.format('{"t":"vg","x":0,"y":%.4f,"w":%.4f,"nw":%.4f,"st":%.4f,"sto":%d,"sh":%.4f,"sho":%d,"gk":%d}',
+				y / pt, line.width / pt, (line.width or 0) / pt, (line.stretch or 0) / pt, line.stretch_order or 0, (line.shrink or 0) / pt, line.shrink_order or 0, line.subtype or 0))
 			y = y + line.width
 		elseif line.id == PENALTY then
 			emit(string.format('{"t":"pen","y":%.4f,"p":%d}', y / pt, line.penalty or 0))

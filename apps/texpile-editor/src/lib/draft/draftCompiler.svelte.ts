@@ -21,6 +21,8 @@ export class DraftCompiler {
 	compiling = $state(false);
 	status = $state('');
 	error = $state<string | null>(null);
+	/** the engine was not found; the banner offers the Toolchain folders */
+	missingTool = $state<string | null>(null);
 	// one live preview at a time: another window owns the warm engine (main's draftOwner);
 	// this preview is paused until the user explicitly takes the engine over
 	busyElsewhere = $state(false);
@@ -111,6 +113,7 @@ export class DraftCompiler {
 		// all; only a fresh compile announces "Compiling project…"
 		if (!reason.startsWith('abandon:') && !reason.startsWith('quiet:')) this.status = m.draft_status_compiling();
 		this.error = null;
+		this.missingTool = null;
 		try {
 			const r = await n.draftCompile({ root: this.hooks.root(), mainFile: this.hooks.mainFile() });
 			if (myToken !== this.compileToken) {
@@ -123,10 +126,14 @@ export class DraftCompiler {
 			} else if (!(r as { superseded?: boolean }).superseded) {
 				// svelte-check doesn't reliably narrow this cross-module discriminated union.
 				// A service-side 'superseded' isn't an error -- the newer compile will render.
-				const fail = r as { error: string; log?: string };
+				const fail = r as { error: string; log?: string; tool?: string };
 				if (fail.error === 'engine-busy') {
 					// another window owns the live-preview engine: pause with the banner
 					this.busyElsewhere = true;
+					this.status = '';
+				} else if (fail.error === 'engine-missing' && fail.tool) {
+					this.missingTool = fail.tool;
+					this.error = m.draft_engine_missing({ tool: fail.tool });
 					this.status = '';
 				} else {
 					// The message only, never fail.log. This banner's job is "the preview could not be

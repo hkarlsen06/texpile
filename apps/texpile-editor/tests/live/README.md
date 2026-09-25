@@ -15,6 +15,8 @@ Per scenario the driver applies a pure string edit to the fixture buffer, runs
 - `TRANSIENT`/`HOLD` - mid-typing repaired render / held preview (unbalanced input)
 - `NOOP` - render-identical edit, correctly ignored
 - `NOFEEDBACK` - nothing happened (a bug unless the scenario is a deliberate no-op)
+- `WRONG` - an exact patch was adopted, and the compile after it placed the rows elsewhere
+  (`ADOPTED-DRIFT` in the reasons; an adopted patch has no reconcile behind it, so this is its only grade)
 
 Run from `apps/texpile-editor`. There is no build step: the bridge bundles the engine from
 `electron/src` with esbuild on start, and vite dev serves the renderer from source.

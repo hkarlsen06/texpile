@@ -12,7 +12,7 @@ import { contextAround, refinedText, refinePrompt } from './refinePrompt';
 import type { RefineAction } from './refineActions';
 
 type AgentBridge = {
-	run(id: string, prompt: string): Promise<{ ok: true; text: string } | { ok: false; error: string; cancelled?: true }>;
+	run(id: string, prompt: string, system?: string): Promise<{ ok: true; text: string } | { ok: false; error: string; cancelled?: true }>;
 	cancel(id: string): void;
 	detect(): Promise<Record<PresetAgent, boolean>>;
 	models(agent: PresetAgent): Promise<AgentModelList>;
@@ -91,7 +91,7 @@ export class SelectionRefiner {
 		const dialect = dialectOfPath(this.deps.path() ?? '');
 		const passage = text.slice(span.from, span.to);
 		const anchor = buildAnchor(text, span.from, span.to);
-		const prompt = refinePrompt({
+		const { system, request } = refinePrompt({
 			ask: action.ask,
 			path: this.deps.path() ?? '',
 			passage,
@@ -106,7 +106,7 @@ export class SelectionRefiner {
 			action: { label: m.ai_refine_cancel(), onClick: () => bridge.cancel(id) }
 		});
 		try {
-			const answer = await bridge.run(id, prompt);
+			const answer = await bridge.run(id, request, system);
 			toaster.dismiss(toast);
 			if (!answer.ok) {
 				if (!answer.cancelled) toaster.error({ title: m.ai_refine_failed({ agent }), description: answer.error });

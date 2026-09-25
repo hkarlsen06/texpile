@@ -351,12 +351,25 @@ export function renderChildren(node: Node, inTableCell: boolean): string {
 /**
  * Two lists the source wrote as separate environments stay separate: the verbatim layer emits a
  * pristine neighbour with its own \begin and \end, so coalescing a regenerated one into it left
- * an unbalanced environment. Editor-made list nodes carry no source group and still coalesce.
+ * an unbalanced environment. Editor-made list nodes carry no source group and still coalesce, and
+ * so do items a Tab or Shift+Tab brought together: the file ended no environment between them.
  */
 function sameSourceList(a: Node, b: Node): boolean {
 	const oa = blockOriginOf(a);
 	const ob = blockOriginOf(b);
-	return !oa || !ob || (oa.parse === ob.parse && oa.index - oa.member === ob.index - ob.member);
+	if (!oa || !ob || (oa.parse === ob.parse && oa.index - oa.member === ob.index - ob.member)) return true;
+	return !(oa.member === oa.size - 1 && ob.member === 0);
+}
+
+/** whether `parent`'s child at `index` is written as more of the list environment before it, with no \begin of its own */
+function continuesList(parent: Node, index: number): boolean {
+	const node = parent.child(index);
+	const prev = index > 0 ? parent.child(index - 1) : null;
+	if (node.type.name !== 'list' || prev?.type.name !== 'list' || prev.attrs.kind !== node.attrs.kind || !sameSourceList(prev, node))
+		return false;
+	const own = ownEnvName(node);
+	const prevEnv = runEnvName(prev, { parent, index: index - 1 }) ?? (node.attrs.kind === 'ordered' ? 'enumerate' : 'itemize');
+	return own === null || own === prevEnv;
 }
 
 /** the environment name a list node carries itself, if any */
@@ -365,7 +378,7 @@ function ownEnvName(node: Node): string | null {
 }
 
 /** the environment name the first node of this run of list nodes carries, if any */
-function runEnvName(node: Node, ctx: Ctx): string | null {
+function runEnvName(node: Node, ctx: Pick<Ctx, 'parent' | 'index'>): string | null {
 	if (!ctx.parent) return typeof node.attrs.envName === 'string' ? node.attrs.envName : null;
 	const kind = node.attrs.kind;
 	for (let i = ctx.index; i >= 0; i--) {
@@ -412,8 +425,7 @@ function headsItem(ctx: Ctx | undefined): boolean {
 
 function splitLeadingLabel(item: Node): { latex: string; body: Node; glued: boolean } | null {
 	if (item.type.name !== 'paragraph') return null;
-	// through the LAST marked node, not the first unmarked one: an atom in the middle of a label
-	// (`\item[A $x$ B]` puts inline math there) carries no marks of its own
+	// through the LAST marked node, not the first unmarked one
 	let last = -1;
 	for (let i = 0; i < item.childCount; i++) {
 		const child = item.child(i);
@@ -553,6 +565,8 @@ const assembly = createBlockAssembly((node, ctx) => serializeNode(node, ctx), {
 	mapInlineLeaves,
 	// a comment runs to the end of its line: nothing may follow it on that line
 	endsLine: (text) => /(^|[^\\])(\\\\)*%[^\n]*$/.test(text),
+	continues: continuesList,
+	standsAlone: (parsed) => !parsed.isTextblock || splitLeadingLabel(parsed) === null,
 	// a control word ending the fresh bytes would fuse with a letter beginning the kept tail, and in
 	// prose the line breaks either side of a line taken out would meet as a blank line, a new paragraph
 	keepApart: (bytes, tail, head, _gone, parent) => {
@@ -724,7 +738,7 @@ const NODES: Record<string, NodeHandler> = {
 	environment: (node) => {
 		const name = String(node.attrs.name ?? 'environment');
 		const args = String(node.attrs.args ?? ''); // verbatim \begin{name}<args> (e.g. "{0.5\textwidth}")
-		return `\\begin{${name}}${args}\n${renderChildren(node, false)}\\end{${name}}\n`;
+		return `\\begin{${name}}${args}\n${envBody(node)}\\end{${name}}\n`;
 	},
 
 	// sourceForm remembers which shape the file used. the command form only fits a single-
@@ -802,21 +816,14 @@ const NODES: Record<string, NodeHandler> = {
 	// prosemirror-flat-list: each `list` node is ONE item; same-kind siblings coalesce.
 	list(node, ctx) {
 		const kind = String(node.attrs.kind ?? 'bullet');
-		const prev = prevSibling(ctx);
-		const next = nextSibling(ctx);
 		const defaultEnv = kind === 'ordered' ? 'enumerate' : 'itemize';
 		// a description environment is remembered on the run's first node; the rest inherit it. A
 		// node naming an environment of its own opens a new run: a description after an itemize
 		// is not its continuation, whatever the kinds say
 		const envName = runEnvName(node, ctx);
 		const env = envName ?? defaultEnv;
-		const own = ownEnvName(node);
-		const prevEnv = prev?.type.name === 'list' ? (runEnvName(prev, { ...ctx, index: ctx.index - 1 }) ?? defaultEnv) : null;
-		const prevSame =
-			prev?.type.name === 'list' && prev.attrs.kind === kind && sameSourceList(prev, node) && (own === null || own === prevEnv);
-		const nextOwn = next?.type.name === 'list' ? ownEnvName(next) : null;
-		const nextSame =
-			next?.type.name === 'list' && next.attrs.kind === kind && sameSourceList(node, next) && (nextOwn === null || nextOwn === env);
+		const prevSame = !!ctx.parent && continuesList(ctx.parent, ctx.index);
+		const nextSame = !!ctx.parent && !!nextSibling(ctx) && continuesList(ctx.parent, ctx.index + 1);
 		// \item[label]: the editor shows it as leading bold text, so it is taken back out of the
 		// body before the bracket is rewritten. The SOURCE label is preferred while the run still
 		// says the same thing, since re-serializing turns a tie into a no-break space and a `--`

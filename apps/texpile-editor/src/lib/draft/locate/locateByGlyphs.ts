@@ -5,7 +5,7 @@ import { columnWindows } from '../heuristics/columnWindows';
 import { extraCalVariants } from '../heuristics/calVariants';
 import { glyphRows } from '../geometry/glyphRows';
 import { median } from '../geometry/median';
-import { sameCodepoints, sameCodepointsDigitTolerant, sameOffsets } from '../geometry/rowEquality';
+import { sameCodepoints, sameCodepointsDigitTolerant, sameOffsets, sameRowStart } from '../geometry/rowEquality';
 import type { Cal, CalBail, LocateContext } from './locate.types';
 
 // Glyph-fingerprint location: find the daemon's typeset of the UNEDITED paragraph on the page
@@ -109,7 +109,12 @@ export async function locateByGlyphs(
 						let okRun = true,
 							seam = false;
 						for (let i = 0; i < Nv && okRun; i++) {
-							if (!rowEq(rows[s + i].cs, dRows[i].cs) || !sameOffsets(rows[s + i], dRows[i])) okRun = false;
+							if (
+								!rowEq(rows[s + i].cs, dRows[i].cs) ||
+								!sameOffsets(rows[s + i], dRows[i]) ||
+								!sameRowStart(rows[s + i], dRows[i], rows[s], dRows[0])
+							)
+								okRun = false;
 							else if (i > 0) {
 								// a big page gap breaks the run only when it exceeds the daemon's OWN
 								// gap at this index by a line-height or more: interposed material is
@@ -150,7 +155,8 @@ export async function locateByGlyphs(
 							for (let i = 1; i < Nv; i++) pg.push(rows[s + i].y - rows[s + i - 1].y);
 							if (Math.abs(median(pg) - v.calGap) > GLUE_GAP_TOL) {
 								ctx.emit('locate-glyph-stretched', { pageNo, b1, bk, N: Nv });
-								return { pageNo, b1, bk, paraLeft, colL, colR, ...win, approx: true, approxStretch: true };
+								// a band whose digits differ from the page's is not the page's band at other spacing
+								return { pageNo, b1, bk, paraLeft, colL, colR, ...win, approx: true, ...(digits ? {} : { approxStretch: true }) };
 							}
 						}
 						ctx.emit(digits ? 'locate-glyph-digits' : 'locate-glyph-ok', { pageNo, b1, bk, N: Nv, indent: v.indent, seam });

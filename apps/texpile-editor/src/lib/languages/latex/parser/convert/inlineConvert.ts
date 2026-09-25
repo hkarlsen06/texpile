@@ -8,6 +8,7 @@ import { ignoredMacros, SCOPED_SWITCHES } from '../macros';
 import { macroHandlers } from './macroHandlers';
 import { schema } from '../../schema/latexPMSchema';
 import { containsTabular } from './tableConvert';
+import { isBlockNode } from './blockKinds';
 import { capture, macroSpan, mathBodyRawSpan, nodeRawSpan, positionSpan, prefixSpans, rawTextNode, startOf } from './origCapture';
 import { bindTextToChips } from './chipText';
 import { drawnCommand } from '$lib/languages/latex/drawnCommands';
@@ -98,6 +99,20 @@ export function groupAfterRawChip(node: Node, prevAst: Node | null, lastPm: PmNo
 	return buildNode('inline_latex', null, [rawTextNode(nodeRawSpan(node), printRaw(node))]);
 }
 
+// a group scoping a font switch ({\large ...}) must keep its braces or the switch leaks past it
+function scopesSwitch(content: Node[]): boolean {
+	const first = content.find((n) => !(n.type === 'whitespace' || n.type === 'parbreak' || n.type === 'comment'));
+	return !!first && first.type === 'macro' && SCOPED_SWITCHES.has((first as Macro).content);
+}
+
+/** a group read through with its braces dropped that holds a block, which stands on its own once the file is written without them */
+export function plainGroupHoldsBlock(node: Node): boolean {
+	if (node.type !== 'group') return false;
+	const content = node.content ?? [];
+	if (scopesSwitch(content) || containsTabular(content)) return false;
+	return content.some((n) => isBlockNode(n, true) || plainGroupHoldsBlock(n));
+}
+
 export function convertNodesToInline(nodes: Node[], ctx: ConversionContext): PmNode[] {
 	const result: PmNode[] = [];
 	let prevAst: Node | null = null;
@@ -114,7 +129,7 @@ export function convertNodesToInline(nodes: Node[], ctx: ConversionContext): PmN
 			prevAst = node;
 			continue;
 		}
-		if (closesSymbol(node, prevAst, result[result.length - 1])) {
+		if (closesSymbol(node, prevAst, result[result.length - 1]) || endsCharacterWord(node, prevAst, result[result.length - 1])) {
 			prevAst = node;
 			continue;
 		}
@@ -125,13 +140,28 @@ export function convertNodesToInline(nodes: Node[], ctx: ConversionContext): PmN
 	return applyLigaturesToNodes(bindTextToChips(collapseTextNodes(result)));
 }
 
+// characters written as control words, which TeX reads the space after as the end of the name
+const CHARACTER_WORDS = new Set(['textbackslash', 'textasciitilde', 'textasciicircum', 'ldots', 'dots', 'textendash', 'textemdash']);
+
+/** the space after such a word is gone from the page (\textbackslash input reads \input), so it is part of the character's bytes */
+export function endsCharacterWord(node: Node, prevAst: Node | null, last: PmNode | undefined): boolean {
+	if (node.type !== 'whitespace' || prevAst?.type !== 'macro' || !CHARACTER_WORDS.has((prevAst as Macro).content)) return false;
+	return growsOver(node, last);
+}
+
 /**
  * The empty group closing a symbol macro (`\textasciicircum{}`, `\ss{}`) is part of what the
  * character was written as: the character's bytes grow over it, so a cut after the character
  * lands after the group rather than inside the call
  */
 function closesSymbol(node: Node, prevAst: Node | null, last: PmNode | undefined): boolean {
-	if (node.type !== 'group' || (node.content ?? []).length > 0 || prevAst?.type !== 'macro' || !last?.isText) return false;
+	if (node.type !== 'group' || (node.content ?? []).length > 0 || prevAst?.type !== 'macro') return false;
+	return growsOver(node, last);
+}
+
+// the text before `node` takes its bytes, when that text's last run ends right where it starts
+function growsOver(node: Node, last: PmNode | undefined): boolean {
+	if (!last?.isText) return false;
 	const at = positionSpan(node);
 	const spans = spansOf(last);
 	const tail = spans?.[spans.length - 1];
@@ -210,11 +240,9 @@ export function convertNodeToInline(node: Node, ctx: ConversionContext): PmNode[
 					return convertNodesToInline(getMacroFirstArg(hl), { ...ctx, marks: [...ctx.marks, { type: 'highlight', attrs: { color } }] });
 				}
 			}
-			// a group scoping a font switch ({\large ...}) must keep its braces or the switch
-			// leaks past it. the chip carries ctx.marks itself (no text child to carry a
-			// surrounding \texttt mark), same reasoning as the unknown-macro chip above.
-			const firstMeaningful = gcontent.find((n) => !(n.type === 'whitespace' || n.type === 'parbreak' || n.type === 'comment'));
-			if (firstMeaningful && firstMeaningful.type === 'macro' && SCOPED_SWITCHES.has((firstMeaningful as Macro).content)) {
+			// the chip carries ctx.marks itself (no text child to carry a surrounding \texttt mark),
+			// same reasoning as the unknown-macro chip above.
+			if (scopesSwitch(gcontent)) {
 				const text = printRaw(node);
 				const chip = buildNode('inline_latex', null, [textNode(text, null, positionSpans(node, text))]);
 				return [ctx.marks.length > 0 ? chip.mark(realMarks(ctx.marks)) : chip];

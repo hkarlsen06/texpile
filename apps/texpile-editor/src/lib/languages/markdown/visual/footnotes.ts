@@ -3,8 +3,6 @@
 // `[^label]` reference an inline chip, so neither is read as a link nor escaped into brackets
 import type { MarkdownIt, StateBlock, StateInline } from 'markdown-it';
 
-type FootnoteEnv = { footnoteLabels?: Set<string> };
-
 const DEFINITION = /^\[\^([^\s\]]+)\]:/;
 const REFERENCE = /^\[\^([^\s\]]+)\]/;
 
@@ -43,17 +41,17 @@ function footnoteDefinition(state: StateBlock, startLine: number, endLine: numbe
 	token.map = [startLine, next];
 	token.content = state.getLines(startLine, next, state.blkIndent, false);
 	token.meta = { label: m[1] };
-	const env = state.env as FootnoteEnv;
-	(env.footnoteLabels ??= new Set()).add(m[1]);
 	state.line = next;
 	return true;
 }
 
+// a chip whether or not its definition is in the file: deleting the definition leaves the reference as it was drawn,
+// and bringing the definition back makes it a footnote again. As plain text it would be escaped into \[^label\]
 function footnoteReference(state: StateInline, silent: boolean): boolean {
-	const labels = (state.env as FootnoteEnv).footnoteLabels;
-	if (!labels || state.src.charCodeAt(state.pos) !== 0x5b) return false;
+	if (state.src.charCodeAt(state.pos) !== 0x5b) return false;
 	const m = REFERENCE.exec(state.src.slice(state.pos, Math.min(state.posMax, state.pos + 200)));
-	if (!m || !labels.has(m[1])) return false;
+	// `[^x](url)` is a link whose text starts with a caret
+	if (!m || state.src.charCodeAt(state.pos + m[0].length) === 0x28) return false;
 	if (!silent) {
 		const token = state.push('footnote_reference', '', 0);
 		token.content = m[0];

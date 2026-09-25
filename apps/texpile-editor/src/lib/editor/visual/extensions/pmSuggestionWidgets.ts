@@ -1,7 +1,8 @@
 // the elements a suggestion's old content is drawn with, and the mark a moved break gets
 import { DOMSerializer, type Node as PMNode, type Schema } from 'prosemirror-model';
-import type { GoneContent, OldRun } from './pmSuggestionsPlace';
+import type { OldRun } from './pmSuggestionsPlace';
 import { renderStaticMath } from './mathlivebridge/mathStatic';
+import { oldContentSerializer } from './oldContentSerializer';
 import { tintElement } from '$lib/editor/visual/highlight/paintRange';
 
 const SUGGESTION_TINTS = {
@@ -18,20 +19,13 @@ export function suggestionTint(kind: keyof typeof SUGGESTION_TINTS, focused: boo
 }
 
 let graphemes: Intl.Segmenter | undefined;
-const serializers = new WeakMap<Schema, DOMSerializer>();
-
-function serializerFor(schema: Schema): DOMSerializer {
-	let s = serializers.get(schema);
-	if (!s) serializers.set(schema, (s = DOMSerializer.fromSchema(schema)));
-	return s;
-}
 
 function isMath(node: PMNode): boolean {
 	return node.type.name === 'inline_math' || node.type.name === 'block_math';
 }
 
 function withMarks(schema: Schema, inner: Node, marks: readonly OldRun['marks'][number][]): Node {
-	const serializer = serializerFor(schema);
+	const serializer = oldContentSerializer(schema);
 	return marks.reduceRight<Node>((content, mark) => {
 		const { dom, contentDOM } = DOMSerializer.renderSpec(document, serializer.marks[mark.type.name](mark, true));
 		// dressed like the link mark, without its target: these words are gone from the document
@@ -42,22 +36,21 @@ function withMarks(schema: Schema, inner: Node, marks: readonly OldRun['marks'][
 }
 
 // one span a character, named by its offset in the words: the line breaker ends lines inside them by
-// marking these (lineBreakPlugin), which no decoration could reach
-export function oldWordsElement(schema: Schema, runs: OldRun[], id: string, focused: boolean): HTMLElement {
+// marking these (lineBreakPlugin), which no decoration could reach. `start` goes on from the words of
+// the same suggestion drawn before these, so the two never share an offset
+export function oldWordsElement(schema: Schema, runs: OldRun[], id: string, focused: boolean, start = 0): HTMLElement {
 	graphemes ??= new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 	const span = document.createElement('span');
 	span.className = `pm-suggest-old${focused ? ' pm-suggest-focused' : ''}`;
 	tintElement(span, suggestionTint('old', focused));
 	span.dataset.comment = id;
-	let offset = 0;
+	let offset = start;
 	for (const run of runs) {
 		const characters = document.createDocumentFragment();
 		if (run.node) {
 			const character = document.createElement('span');
 			character.dataset.i = String(offset);
-			character.appendChild(
-				isMath(run.node) ? renderStaticMath(run.node.textContent, false) : serializerFor(schema).serializeNode(run.node)
-			);
+			character.appendChild(oldContentSerializer(schema).serializeNode(run.node));
 			characters.appendChild(character);
 			offset += run.text.length;
 		} else {
@@ -85,7 +78,7 @@ export function oldNodeElement(node: PMNode, id: string, focused: boolean): HTML
 	holder.dataset.comment = id;
 	holder.contentEditable = 'false';
 	if (isMath(node)) holder.appendChild(renderStaticMath(node.textContent, block));
-	else if (node.content.size === 0) holder.appendChild(serializerFor(node.type.schema).serializeNode(node));
+	else if (node.content.size === 0) holder.appendChild(oldContentSerializer(node.type.schema).serializeNode(node));
 	else {
 		const code = document.createElement('code');
 		code.textContent = node.textContent;
@@ -94,32 +87,16 @@ export function oldNodeElement(node: PMNode, id: string, focused: boolean): HTML
 	return holder;
 }
 
-function runsElement(schema: Schema, runs: OldRun[]): HTMLElement {
-	const line = document.createElement('p');
-	for (const run of runs) {
-		const inner: Node = run.node
-			? isMath(run.node)
-				? renderStaticMath(run.node.textContent, false)
-				: serializerFor(schema).serializeNode(run.node)
-			: document.createTextNode(run.text);
-		line.appendChild(withMarks(schema, inner, run.marks));
-	}
-	return line;
-}
-
-// content gone from the document across block edges, so there is nothing left in it to strike. It
-// takes a block of its own where it was taken from, which is what the diff view does with a removed
-// block; the end and start of the blocks it broke off from are its first and last lines
-export function goneBlocksElement(schema: Schema, gone: GoneContent, id: string, focused: boolean): HTMLElement {
+// blocks gone from the document whole, so there is nothing left in it to strike. They take a block of
+// their own where they were taken from, which is what the diff view does with a removed block
+export function goneBlocksElement(schema: Schema, blocks: PMNode[], id: string, focused: boolean): HTMLElement {
 	const holder = document.createElement('div');
 	holder.className = `pm-suggest-old pm-suggest-gone${focused ? ' pm-suggest-focused' : ''}`;
 	tintElement(holder, suggestionTint('old', focused));
 	holder.dataset.comment = id;
 	holder.contentEditable = 'false';
-	const serializer = serializerFor(schema);
-	if (gone.head.length) holder.appendChild(runsElement(schema, gone.head));
-	for (const block of gone.blocks) holder.appendChild(serializer.serializeNode(block));
-	if (gone.tail.length) holder.appendChild(runsElement(schema, gone.tail));
+	const serializer = oldContentSerializer(schema);
+	for (const block of blocks) holder.appendChild(serializer.serializeNode(block));
 	return holder;
 }
 
@@ -133,4 +110,13 @@ export function breakMark(way: 'added' | 'removed', id: string, focused: boolean
 	span.dataset.comment = id;
 	span.contentEditable = 'false';
 	return span;
+}
+
+/** the line a removed break ended, still ended until the suggestion is decided, as Docs and Word draw it */
+export function lineEnd(id: string): HTMLElement {
+	const br = document.createElement('br');
+	br.dataset.comment = id;
+	br.dataset.lineEnd = '';
+	br.contentEditable = 'false';
+	return br;
 }

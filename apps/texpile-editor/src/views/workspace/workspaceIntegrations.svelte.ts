@@ -154,8 +154,6 @@ export class WorkspaceIntegrations {
 				isBusy: () => d.compiler().busy,
 				refreshTree: () => void d.files().refreshTree(),
 				expectedPdfPath: () => d.compiler().expectedPdfPath(),
-				applyCommentEvent: (event) => void d.commentsCtl.ingest(event),
-				commentLog: () => d.commentsCtl.store.serialize(),
 				recordGuestEdit: (rel, before, after, edit) => d.commentsCtl.remoteEdit(rel, before, after, edit),
 				beforeGuestWrite: (rel, content) => d.commentsCtl.beforeRemoteWrite(rel, content),
 				typstScrollForGuest: (rel, line, character) => d.typstPreview().scrollForGuest(rel, line, character)

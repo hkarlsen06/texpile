@@ -9,7 +9,7 @@ import { wordBeingTypedKey } from './wordBeingTyped';
 export type LinesKeptWhileTyping = {
 	/** the paragraphs this update leaves to be broken again, on top of those whose text changed */
 	toBreakAgain(before: EditorState, state: EditorState): PMNode[];
-	/** the breaks to keep the next time this paragraph is broken, handed out once */
+	/** the breaks to keep each time this paragraph is broken while the caret stays in it */
 	take(paragraph: PMNode): KeptBreaks | undefined;
 	forget(): void;
 };
@@ -60,9 +60,9 @@ export function linesKeptWhileTyping(chosenFor: (paragraph: PMNode) => Paragraph
 				pending.set(paragraph, { marks: earlier.marks, unchangedTo: Math.min(earlier.unchangedTo, changedAt + 1, beforeWord) });
 			return again;
 		},
+		// not handed out once only: redrawing a suggestion's struck words breaks the paragraph again before the next key
 		take(paragraph) {
 			const kept = pending.get(paragraph);
-			pending.delete(paragraph);
 			if (kept) unsettled.add(paragraph);
 			else unsettled.delete(paragraph);
 			return kept;

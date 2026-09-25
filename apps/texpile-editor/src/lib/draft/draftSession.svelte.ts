@@ -8,15 +8,14 @@ import { locateParagraph } from './locate/locateParagraph';
 import { bandStartLine } from './locate/bandStart';
 import type { LocateContext, PaperMetrics } from './locate/locate.types';
 import { verifyPatches } from './patch/verifyPatches';
-import { recordsAfterPatch, recordDrift } from './patch/recordsAfterPatch';
-import type { Patch, PatchReq } from './patch/patch.types';
+import { recordsAfterPatch, patchedRecords, withoutInk } from './patch/patchedRecords';
+import { recordDrift } from './patch/recordDrift';
+import type { ParaParams } from './column/paraPrefix';
+import { patchInk, type Patch, type PatchReq } from './patch/patch.types';
 import type { SeamEntry } from './patch/seam.types';
 import { DraftFonts } from './draftFonts';
 import { DraftBitmaps } from './draftBitmaps';
-import { paintRecords, splitPatchRecords, type PaintDeps } from './draftPaint';
-import { flowDyAt } from './patch/glueShift';
-import { columnFills } from './heuristics/columnFills';
-import { columnBox } from './geometry/columnBox';
+import { paintRecords, type PaintDeps } from './draftPaint';
 import { DraftViewport } from './draftViewport.svelte';
 import { DraftPatcher } from './draftPatcher.svelte';
 import { DraftCompiler } from './draftCompiler.svelte';
@@ -50,6 +49,7 @@ export class DraftSession {
 		blSkip: 0,
 		parSkip: 0,
 		topSkip: 0,
+		lsLimit: 0,
 		srcFiles: []
 	});
 	canvasEls = $state<HTMLCanvasElement[]>([]);
@@ -68,6 +68,7 @@ export class DraftSession {
 	private patchedPages = new Set<number>();
 	// per-break pruned runs from the last compile: junction truth for the certified hop
 	private seams: SeamEntry[] = [];
+	private paras = new Map<number, ParaParams>();
 	// a live patch stays on screen after the fast path applies it; keep it so a zoom
 	// re-render (which redraws from the untouched page records) re-applies it instead of
 	// reverting. Cleared on a full compile (fresh records already carry the edit).
@@ -121,13 +122,7 @@ export class DraftSession {
 			bandStart: (file, line, endLine) => bandStartLine(this.locateCtx, file, line, endLine),
 			daemonTypeset: (body) => this.compiler.daemonTypeset(body),
 			pageRecords: (n) => this.pageRecords(n),
-			colBottomOf: (p) => this.colBottomOf(p),
-			contentFloor: (p) => this.contentFloor(p),
 			paper: () => this.paper,
-			// a page is stretched when its glue records show effective != natural width --
-			// the OUTER shipout box always packs exactly (gsn 0 on every class tested), the
-			// stretching happens on the inner output box, and the vg records carry its result
-			pageStretchy: (p) => this.pageRecords(p).some((r: any) => r.t === 'vg' && r.nw !== undefined && Math.abs(r.w - r.nw) > 0.05),
 			missingInk: (records) => this.fonts.missingInk(records),
 			applyPatch: async (n, p) => {
 				this.activePatch.set(n, p);
@@ -138,18 +133,17 @@ export class DraftSession {
 				// stays in patchedPages: the page painted patch ink and must repaint on landing
 				if (this.activePatch.delete(n)) await this.renderPage(n);
 			},
-			adoptPatchedRecords: (n, p, stamp) => this.adoptPatchedRecords(n, p, stamp),
+			adoptPatchedRecords: (n, p) => this.adoptPatchedRecords(n, p),
 			showEditBand: (b, holdMs) => this.vp.showEditBand(b, holdMs),
 			synctex: (b) => nativeBridge()!.synctex(b as any),
 			pdfPath: () => this.opts.root() + '/_draft/draft.pdf',
-			columnFills: (p, c) => columnFills(this.pageRecords(p), c),
-			colBox: (p, colL, colR) => columnBox(this.pageRecords(p), colL, colR),
 			seams: () => this.seams,
+			paraParams: (pi) => this.paras.get(pi),
 			pageIsRtl: (p) => this.rtlPage(p),
-			splitSkeleton: (items, targetPt, capacity) => {
+			splitSkeleton: (items, targetPt, mode) => {
 				const nb = nativeBridge();
 				if (!nb?.draftSkeleton) return Promise.resolve({ ok: false as const, error: 'no-bridge' });
-				return nb.draftSkeleton({ root: this.opts.root(), mainFile: this.opts.mainFile(), items, targetPt, capacity });
+				return nb.draftSkeleton({ root: this.opts.root(), mainFile: this.opts.mainFile(), items, targetPt, ...mode });
 			},
 			followEdit: (page, top, bottom, colL, colR) => this.vp.followEdit(page, top, bottom, colL, colR),
 			emit: (k, d) => this.ev(k, d)
@@ -165,6 +159,7 @@ export class DraftSession {
 			rtlPage: (n) => this.rtlPage(n),
 			synctex: (b) => nativeBridge()!.synctex(b as any),
 			typesetParagraph: ({ text, hsize }) => this.compiler.daemonTypeset({ text, hsize }),
+			paraParams: (pi) => this.paras.get(pi),
 			emit: (k, d) => this.ev(k, d)
 		};
 	}
@@ -182,11 +177,11 @@ export class DraftSession {
 	// The record store, advanced by the patch that just painted rather than by a compile. Only
 	// the parsed map moves: this.pages keeps the compile's raw strings, so the next real pass
 	// still starts from the engine's own text and any drift here cannot outlive it.
-	private adoptPatchedRecords(n: number, p: Patch, stamp: { s?: number; sf?: number }): boolean {
+	private adoptPatchedRecords(n: number, p: Patch): any[] | null {
 		const meta = this.pages[n - 1] as any;
-		if (!meta || meta.spill) return false;
-		const next = recordsAfterPatch(this.pageRecords(n), p, (meta.ht || meta.h || Infinity) + 2, stamp);
-		if (!next) return false;
+		if (!meta || meta.spill) return null;
+		const before = this.pageRecords(n);
+		const next = recordsAfterPatch(before, p);
 		this.parsedPages.set(n, next);
 		this.adoptedPages.add(n);
 		this.ev('records-adopted', { page: n, records: next.length });
@@ -195,10 +190,12 @@ export class DraftSession {
 		// no second (or future third) writer can forget it. Left to callers, it was forgotten:
 		// typing past a wrap reused a cal describing the pre-adoption band, wiped one line too
 		// few, and left each keystroke's last line behind, a staircase marching down the page.
-		// A same-extent adoption (nothing moved) keeps the caches: plain typing must not pay a
-		// relocate on every keystroke.
-		if (p.delta !== 0 || p.flowSteps?.length || p.aboveSteps?.length) this.patcher.geometryChanged();
-		return true;
+		// An adoption where nothing moved and the block kept its lines keeps the caches: plain
+		// typing must not pay a relocate on every keystroke.
+		const lines = (rs: any[]) => rs.filter((r) => r.t === 'pl' || r.t === 'line').length;
+		const dropped = p.splices.flatMap((s) => before.slice(s.from, s.to));
+		if (p.moves.length || lines(dropped) !== lines(patchInk(p) as any[])) this.patcher.geometryChanged();
+		return next;
 	}
 
 	pageRecords(n: number): any[] {
@@ -213,18 +210,6 @@ export class DraftSession {
 	// nothing on it may be painted or spliced from records -- it waits for the exact-PDF raster
 	rtlPage(n: number): boolean {
 		return pageIsRtl(this.pages[n - 1]?.unc);
-	}
-
-	// The body's bottom in record space: the shipout box baseline (ht) IS the footer line's
-	// baseline, \footskip above it is the last body line. Capacity checks measure against
-	// this; everything below it (the footer) is bottom-anchored and no patch may shift,
-	// clip, or move it.
-	colBottomOf(p: number): number {
-		const meta = this.pages[p - 1] as any;
-		return meta?.ht ? meta.ht - this.paper.fs : meta?.h || 1e9;
-	}
-	contentFloor(p: number): number {
-		return this.colBottomOf(p) + 2;
 	}
 
 	private paintDeps(): PaintDeps {
@@ -242,7 +227,7 @@ export class DraftSession {
 		const patches: Patch[] = !patch ? [] : Array.isArray(patch) ? patch : [patch];
 		const records = this.pageRecords(n);
 		await this.fonts.ensureFonts(records);
-		for (const p of patches) await this.fonts.ensureFonts(p.newRecs);
+		for (const p of patches) await this.fonts.ensureFonts(patchInk(p));
 		const S = this.vp.dispScale;
 		const dpr = Math.min(2, window.devicePixelRatio || 1);
 		cv.width = Math.round(this.paper.w * S * dpr);
@@ -278,33 +263,10 @@ export class DraftSession {
 			paintRecords(ctx, records, S, 0, n, this.paintDeps());
 			return;
 		}
-		const meta = this.pages[n - 1] as any;
-		const contentBottom = (meta?.ht || meta?.h || Infinity) + 2;
-		const { unchanged, shifted, raised } = splitPatchRecords(records, patches, contentBottom);
-		paintRecords(ctx, unchanged, S, 0, n, this.paintDeps());
-		patches.forEach((p, i) => {
-			// the engine's respace for the rows OVER the band, from a 0 default so anything
-			// above the column's first galley box (a pinned float, the header) stays put
-			if (raised[i].length) {
-				const lifted = raised[i].map((r: any) => (r.y === undefined ? r : { ...r, y: r.y + flowDyAt(p.aboveSteps, r.y, 0) }));
-				paintRecords(ctx, lifted, S, 0, n, this.paintDeps());
-			}
-			// glue-distributed shift (stretched pages): per-record dy from the flow steps
-			if (p.flowSteps?.length) {
-				const flowed = shifted[i].map((r: any) => (r.y === undefined ? r : { ...r, y: r.y + flowDyAt(p.flowSteps, r.y, p.delta) }));
-				paintRecords(ctx, flowed, S, 0, n, this.paintDeps());
-			} else {
-				paintRecords(ctx, shifted[i], S, p.delta, n, this.paintDeps());
-			}
-			paintRecords(
-				ctx,
-				p.newRecs.map((r) => (r.t === 'font' ? r : { ...r, x: (r.x ?? 0) + p.paraLeft, y: (r.y ?? 0) + p.top })),
-				S,
-				0,
-				n,
-				this.paintDeps()
-			);
-		});
+		// the page's own records with each patch's old block taken out and its moved items in place; the edited
+		// blocks draw separately, each with its own font records, whose ids are the daemon's
+		paintRecords(ctx, patchedRecords(records, patches.map(withoutInk)), S, 0, n, this.paintDeps());
+		for (const p of patches) for (const s of p.splices) if (s.recs.length) paintRecords(ctx, s.recs, S, 0, n, this.paintDeps());
 	}
 
 	private async applyCompiled(r: any): Promise<void> {
@@ -321,6 +283,7 @@ export class DraftSession {
 				blSkip: r.blSkip || 0,
 				parSkip: r.parSkip || 0,
 				topSkip: r.topSkip || 0,
+				lsLimit: r.lsLimit || 0,
 				srcFiles: r.srcFiles ?? []
 			};
 			if (this.vp.fitMode) this.vp.fitToWidth(); // size to the pane now that the paper dims are known
@@ -348,6 +311,7 @@ export class DraftSession {
 		this.adoptedPages.clear();
 		this.parsedPages.clear();
 		this.seams = r.seams ?? [];
+		this.paras = new Map(((r.paras ?? []) as ParaParams[]).map((p) => [p.i, p]));
 		this.patcher.geometryChanged(); // geometry changed; paragraphs re-locate on next patch
 		this.bitmaps.invalidate(); // tier-2 crops come from THIS compile's PDF
 		// pages we patched must repaint even if their records didn't change

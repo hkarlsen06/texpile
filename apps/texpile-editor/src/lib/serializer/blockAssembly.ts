@@ -79,7 +79,8 @@ function neighborKey(sib: Neighbour | null): string {
 	if (sib.node.type.name !== 'list') return sib.node.type.name;
 	// the LaTeX list handler coalesces only within one source construct (see sameSourceList)
 	const o = sib.origin;
-	return `list:${String(sib.node.attrs.kind ?? '')}:${o ? String(o.index - o.member) : ''}`;
+	const edges = o ? `${o.member === 0 ? '<' : ''}${o.member === o.size - 1 ? '>' : ''}` : '';
+	return `list:${String(sib.node.attrs.kind ?? '')}:${o ? String(o.index - o.member) : ''}${edges}`;
 }
 
 export type BlockAssemblyOptions = {
@@ -133,6 +134,12 @@ export type BlockAssemblyOptions = {
 	/** whether `text` ends on something that owns the rest of its line (a LaTeX comment), so
 	 *  what follows it must begin a line of its own */
 	endsLine?: (text: string) => boolean;
+	/** whether the dialect writes `parent`'s child at `index` as more of the construct before it (a
+	 *  LaTeX item joining the itemize above), so neither may be written as bytes that close or open it */
+	continues?: (parent: Node, index: number) => boolean;
+	/** whether the bytes the parse recorded for `parsed` read as that block wherever they are written:
+	 *  not a LaTeX item's labelled first paragraph, whose bytes close the label's bracket */
+	standsAlone?: (parsed: Node) => boolean;
 };
 
 /** how a dialect's own rendering of a container's children is joined */
@@ -169,6 +176,16 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 	 *  the top level in them, all relative to the text and to the first node */
 	type Spliced = { text: string; leaves: Segment[]; inner: Segment[] };
 	const blockCache = new WeakMap<Node, Entry>();
+
+	/** whether the block before `parent`'s children `from` up to `to`, or the one after, is written into the construct they make */
+	function joinedAround(parent: Node, from: number, to: number): boolean {
+		const joins = options.continues;
+		return !!joins && ((from > 0 && joins(parent, from)) || (to < parent.childCount && joins(parent, to)));
+	}
+
+	function ownBytes(origin: BlockOrigin): boolean {
+		return !options.standsAlone || options.standsAlone(origin.node);
+	}
 
 	// a block's placed runs are the same objects call after call while it lands at the same place;
 	// nothing changes them in place, so sharing them is safe. The runs of a construct of several
@@ -209,7 +226,8 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 		// a container that changed inside keeps its frame and its untouched children as their bytes;
 		// a block that changed in its text alone keeps everything but the leaves that changed;
 		// a block to be written whole keeps nothing
-		const was = whole ? null : neighbours[i].was;
+		const replaced = whole || joinedAround(doc, i, i + 1) ? null : neighbours[i].was;
+		const was = replaced && ownBytes(replaced) ? replaced : null;
 		const spliced = was
 			? (frameSplice(node, was, ctxFor(doc, i, n)) ??
 				leafSplice(node, was, ctxFor(doc, i, n)) ??
@@ -374,6 +392,8 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 			// continuation of an item, one paragraph with the one above); a nested list or environment
 			// may follow on the next line, as the file's own gap before one shows
 			const gapFor = (child: Node): string => (child.isTextblock && !BLANK.test(usualGap!) ? blankGap : usualGap!);
+			// bytes that cannot stand alone still fit the slot they were cut from, right after the frame's opening
+			const fits = (ref: BlockOrigin, k: number): boolean => ownBytes(ref) || (k === 0 && ref.index === 0);
 			const { origins, was } = originsOf(node, record);
 			const n = node.childCount;
 			// the children in groups: one construct the parse knew as several blocks (a nested list, one
@@ -400,6 +420,7 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 				slots.push({ k, size: 1, ref: null, kept: false });
 				k++;
 			}
+			if (slots.some((sl) => sl.ref && joinedAround(node, sl.k, sl.k + sl.size))) return null;
 			text += src.slice(cursor - base, parsed[0].srcFrom! - base);
 			let childPm = nodePm + 1;
 			let emitted = 0;
@@ -420,7 +441,7 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 				const gap =
 					emitted > 0 ? (ref && ref.index > 0 && prevRef === parsed[ref.index - 1] ? gapBefore(ref.index) : gapFor(group[0])) : '';
 				prevRef = ref ? parsed[ref.index + slot.size - 1] : null;
-				if (ref && slot.kept) {
+				if (ref && slot.kept && fits(ref, slot.k)) {
 					text += gap;
 					const at = text.length;
 					text += ref.text!;
@@ -439,13 +460,14 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 					const guide = ref ?? parsed[Math.min(parsed.length - 1, Math.max(0, lastIndexBefore(slots, slot) + 1))];
 					const head = headOf(guide.index);
 					const prefix = options.continuation ? (options.continuation(node, guide.text!, head) ?? '') : '';
-					const nested = ref
-						? slot.size === 1
-							? (frameSplice(child, ref, childCtx, head) ??
-								leafSplice(child, ref, childCtx, prefix) ??
-								segmentSplice(child, ref, childCtx, prefix))
-							: spliceMembers(group, parsed.slice(ref.index, ref.index + slot.size), childCtx, head)
-						: null;
+					const nested =
+						ref && fits(ref, slot.k)
+							? slot.size === 1
+								? (frameSplice(child, ref, childCtx, head) ??
+									leafSplice(child, ref, childCtx, prefix) ??
+									segmentSplice(child, ref, childCtx, prefix))
+								: spliceMembers(group, parsed.slice(ref.index, ref.index + slot.size), childCtx, head)
+							: null;
 					if (!nested && slot.size > 1) return null;
 					let part = nested ? nested.text : serializeNode(child, childCtx);
 					const lead = nested ? 0 : WS.exec(part)![0].length;
@@ -1110,6 +1132,7 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 		if (!w || w.size < 2 || i + w.size > neighbours.length) return null;
 		const inConstruct = (o: BlockOrigin | null) => !!o && o.parse === w.parse && o.index >= w.index && o.index < w.index + w.size;
 		if (i > 0 && inConstruct(neighbours[i - 1].origin ?? neighbours[i - 1].was)) return null;
+		if (joinedAround(doc, i, i + w.size)) return null;
 		const nodes: Node[] = [];
 		const slots: BlockOrigin[] = [];
 		const owns: BlockOrigin[] = [];
@@ -1146,7 +1169,7 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 	function verbatimRun(origins: (BlockOrigin | null)[], i: number): number {
 		const o = origins[i];
 		if (!o || !o.parse.verbatim || o.text === undefined) return 0;
-		if (o.size === 1) return 1;
+		if (o.size === 1) return ownBytes(o) ? 1 : 0;
 		if (o.member !== 0 || i + o.size > origins.length) return 0;
 		for (let k = 1; k < o.size; k++) {
 			const m = origins[i + k];
@@ -1174,11 +1197,12 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 		let prev: BlockOrigin | null = null;
 		let i = 0;
 		while (i < n) {
-			const run = opts.keep?.(i) ? 0 : verbatimRun(origins, i);
+			const found = opts.keep?.(i) ? 0 : verbatimRun(origins, i);
+			const run = found > 0 && joinedAround(parent, i, i + found) ? 0 : found;
 			if (run === 0) {
 				// a changed container child keeps its frame the same way
 				const spliced =
-					!opts.keep?.(i) && was[i]
+					!opts.keep?.(i) && was[i] && !joinedAround(parent, i, i + 1) && ownBytes(was[i]!)
 						? (frameSplice(parent.child(i), was[i]!, cellCtx(i)) ??
 							leafSplice(parent.child(i), was[i]!, cellCtx(i)) ??
 							segmentSplice(parent.child(i), was[i]!, cellCtx(i)))
@@ -1364,7 +1388,8 @@ export function createBlockAssembly(serializeNode: (node: Node, ctx: Ctx) => str
 			return rest;
 		}
 		while (i < n) {
-			const run = verbatimRun(origins, i);
+			const found = verbatimRun(origins, i);
+			const run = found > 0 && joinedAround(doc, i, i + found) ? 0 : found;
 			if (run > 0) {
 				const next = neighbours[i];
 				const origin = origins[i]!;

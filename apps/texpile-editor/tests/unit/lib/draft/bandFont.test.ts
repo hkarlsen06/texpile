@@ -26,8 +26,9 @@ describe('bandFontPrefix', () => {
 		expect(pre).toContain('{12.0000pt}');
 	});
 
-	it('falls back to a proportional leading when one line has none to measure', () => {
-		expect(bandFontPrefix(asRecs(page(9)), [line(500)])).toContain('{10.8000pt}');
+	// a leading of 1.2 times the size was sent to the engine as though it were the band's
+	it('offers no variant when one line has no leading to measure', () => {
+		expect(bandFontPrefix(asRecs(page(9)), [line(500)])).toBe('');
 	});
 
 	it('ignores a neighbouring column sharing the band’s baselines', () => {

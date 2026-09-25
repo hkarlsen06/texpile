@@ -9,14 +9,67 @@ export const PRESET_AGENTS: PresetAgent[] = ['claude', 'codex', 'agy'];
 
 /** where an agent that writes its answer to a file (rather than stdout) is told to put it */
 export const ANSWER_FILE = '{answer}';
+/** a file holding the rules of the task, for an agent that takes them in place of its own instructions. Written into the
+ * run's folder, which the agent runs in, so the name alone reaches it and no path needs quoting */
+export const SYSTEM_FILE = '{system}';
+
+const CODEX_TOOL_FEATURES = [
+	'shell_tool',
+	'unified_exec',
+	'view_image',
+	'multi_agent',
+	'image_generation',
+	'browser_use',
+	'computer_use',
+	'plugins',
+	'apps',
+	'skill_search',
+	'tool_suggest',
+	'sleep_tool',
+	'goals'
+];
+
+// Codex's instructions are replaced by the rules (experimental_instructions_file is the older name), its notes on the
+// sandbox and folder go, and so do the features that hand it tools: a rewrite calls none, and describing them was most
+// of every request. Settings with -c, which a version lacking one passes over
+const CODEX_SETTINGS = [
+	`model_instructions_file='${SYSTEM_FILE}'`,
+	`experimental_instructions_file='${SYSTEM_FILE}'`,
+	'include_environment_context=false',
+	'include_permissions_instructions=false',
+	'include_apps_instructions=false',
+	...CODEX_TOOL_FEATURES.map((feature) => `features.${feature}=false`)
+];
 
 const PRESETS: Record<PresetAgent, string[]> = {
-	// no tools and none of the reader's MCP servers: a rewrite needs neither, and each slows the start.
-	// Not --bare, which never reads the reader's sign-in
-	claude: ['claude', '-p', '--tools', '', '--strict-mcp-config', '--no-session-persistence', '--output-format', 'text'],
+	// no tools and none of the reader's MCP servers: a rewrite needs neither, and each slows the start. Its own system
+	// prompt is a coding agent's, three times the size of a request. Not --bare, which never reads the sign-in
+	claude: [
+		'claude',
+		'-p',
+		'--tools',
+		'',
+		'--strict-mcp-config',
+		'--no-session-persistence',
+		'--output-format',
+		'text',
+		'--system-prompt-file',
+		SYSTEM_FILE
+	],
 	// "-" reads the prompt from stdin; the last message goes to a file. The sandbox is named because exec otherwise takes
 	// the reader's config, and --ephemeral keeps these runs out of their saved sessions
-	codex: ['codex', 'exec', '--skip-git-repo-check', '--ephemeral', '--sandbox', 'read-only', '--output-last-message', ANSWER_FILE, '-'],
+	codex: [
+		'codex',
+		'exec',
+		'--skip-git-repo-check',
+		'--ephemeral',
+		'--sandbox',
+		'read-only',
+		'--output-last-message',
+		ANSWER_FILE,
+		...CODEX_SETTINGS.flatMap((setting) => ['-c', setting]),
+		'-'
+	],
 	// one JSON message per turn on stdin (agentStdio.ts): Antigravity drops a prompt given on its command line. Slash
 	// commands are off, or a passage whose line begins with one would be read as a command of its own
 	agy: ['agy', '--input-format', 'stream-json', '--output-format', 'stream-json', '--disable-slash-commands']

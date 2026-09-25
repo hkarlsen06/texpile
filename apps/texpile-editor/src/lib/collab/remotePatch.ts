@@ -7,7 +7,7 @@ import type { Node as PMNode } from 'prosemirror-model';
 import { adoptParse, type ParseOrigins, type SourceMap } from '$lib/editor/visual/sourceSpans';
 import { offsetAtPm, pmAtOffset } from '$lib/editor/visual/sourceMap';
 import { computeBlockPatch, protectCaretBlock, syncParseAttrs } from '$lib/editor/visual/blockPatch';
-import { spliceDiff } from './materialize';
+import { carriedOffset, patchAroundCaret } from './caretPatch';
 
 // same walk as EditorView's doc-swap helper: the pane that actually scrolls the editor
 function scrollParent(el: HTMLElement | null): HTMLElement | null {
@@ -31,24 +31,28 @@ export function applyRemotePatch(
 	oldSource: string,
 	newSource: string
 ): void {
-	// the block being typed in must not lose its in-progress tail to the re-parse: trailing
-	// whitespace and still-empty paragraphs don't survive serialize->parse in any dialect
-	const newDoc = protectCaretBlock(v.state.doc, parsedDoc, v.state.selection.head);
-	const patch = computeBlockPatch(v.state.doc, newDoc);
-	// caret inside the replaced range: carry it through the file (outside it, PM maps it)
-	let srcOffset: number | null = null;
-	const head = v.state.selection.head;
-	if (patch && head > patch.from && head < patch.to) {
-		srcOffset = offsetAtPm(oldMap, head);
-		const d = srcOffset != null ? spliceDiff(oldSource, newSource) : null;
-		if (d && srcOffset != null && srcOffset > d.index) {
-			// across the remote edit itself, so the offset means the same place in the new text
-			srcOffset = srcOffset >= d.index + d.remove ? srcOffset + d.insert.length - d.remove : d.index + d.insert.length;
-		}
-	}
 	const tr = v.state.tr;
-	if (patch) tr.replaceWith(patch.from, patch.to, patch.nodes);
-	syncParseAttrs(tr, newDoc);
+	const head = v.state.selection.head;
+	let srcOffset: number | null = null;
+	if (patchAroundCaret(tr, parsedDoc, head, oldMap, newMap, oldSource, newSource)) {
+		syncParseAttrs(tr, parsedDoc);
+		// words typed where the caret is go after it: the caret stays with what this side typed
+		const sel = v.state.selection;
+		if (sel instanceof TextSelection)
+			tr.setSelection(TextSelection.create(tr.doc, tr.mapping.map(sel.anchor, -1), tr.mapping.map(sel.head, -1)));
+	} else {
+		// the block being typed in must not lose its in-progress tail to the re-parse: trailing
+		// whitespace and still-empty paragraphs don't survive serialize->parse in any dialect
+		const newDoc = protectCaretBlock(v.state.doc, parsedDoc, head);
+		const patch = computeBlockPatch(v.state.doc, newDoc);
+		// caret inside the replaced range: carry it through the file (outside it, PM maps it)
+		if (patch && head > patch.from && head < patch.to) {
+			const offset = offsetAtPm(oldMap, head);
+			srcOffset = offset == null ? null : carriedOffset(v.state.doc, head, offset, oldMap, oldSource, newSource);
+		}
+		if (patch) tr.replaceWith(patch.from, patch.to, patch.nodes);
+		syncParseAttrs(tr, newDoc);
+	}
 	if (!tr.steps.length) {
 		// the same content, perhaps from other bytes: the document is the parse's all the same
 		adoptParse(v.state.doc, origins);

@@ -1111,6 +1111,21 @@ a & b \\\\
 	});
 });
 
+describe('a character written as a word owns the space TeX drops after it', () => {
+	const FILE17 = `${PREAMBLE}
+Typing \\texttt{\\textbackslash ref\\{} or \\textbackslash input, then 50\\% off.
+\\end{document}
+`;
+
+	it('reads as the page does, and a rewrite keeps it that way', () => {
+		const parsed = parseLatexFile(FILE17);
+		expect(parsed.doc.textContent).toBe('Typing \\ref{ or \\input, then 50% off.');
+		expect(reserialize(FILE17)).toBe(FILE17);
+		const out = serializeLatexFile(parsed, withoutOrigins(parsed.doc));
+		expect(parseLatexFile(out).doc.textContent).toBe('Typing \\ref{ or \\input, then 50% off.');
+	});
+});
+
 describe('a file ending in a comment', () => {
 	it('is written back without a line end it never had', () => {
 		for (const src of ['\\section{A}\n\n\\foo{bar}%', '\\section{A}\n\n\\foo{%\nbar\n}%']) {
@@ -1257,6 +1272,42 @@ and more.
 			const from = posOf(parsed.doc, 'inclusions');
 			const doc = new Transform(parsed.doc).addMark(from, from + 10, schema.marks.strong.create()).doc;
 			expect(serializeLatexFile(parsed, doc)).toContain(`the \\textbf{inclusions} are continuous in the sense that${kept}\\begin{align*}`);
+		}
+	});
+});
+
+describe('a display inside a brace group in a paragraph', () => {
+	const src = `${PREAMBLE}
+Before the group.
+{
+Inside the group then
+$$x_c = 1$$ and after it.
+}
+
+Next paragraph.
+\\end{document}
+`;
+
+	it('opens as the display it is once the braces go, the file kept as it was', () => {
+		const parsed = parseLatexFile(src);
+		expect([...Array(parsed.doc.childCount).keys()].map((i) => parsed.doc.child(i).type.name)).toEqual([
+			'paragraph',
+			'block_math',
+			'paragraph',
+			'paragraph'
+		]);
+		expect(parsed.doc.child(1).textContent).toBe('x_c = 1');
+		expect(serializeLatexFile(parsed, parsed.doc)).toBe(src);
+	});
+
+	it('never writes one brace without the other, whichever side of the display is edited', () => {
+		for (const word of ['Before', 'after']) {
+			const parsed = parseLatexFile(src);
+			const from = posOf(parsed.doc, word);
+			const doc = new Transform(parsed.doc).addMark(from, from + word.length, schema.marks.strong.create()).doc;
+			const out = serializeLatexFile(parsed, doc);
+			expect(out).not.toMatch(/^[{}]$/m);
+			expect(parseLatexFile(out).doc.eq(doc)).toBe(true);
 		}
 	});
 });

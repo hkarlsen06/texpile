@@ -26,17 +26,20 @@ export function fileFormat(path: string): FileFormat & { extension: string } {
 /** `path` only lends its extension; the file's name and folders stay here */
 export type RefineRequest = { ask: string; path: string; passage: string; before: string; after: string };
 
-export function refinePrompt(r: RefineRequest): string {
+/** `system` is what an agent takes in place of its own instructions, where it has a place for them */
+export function refinePrompt(r: RefineRequest): { system: string; request: string } {
 	const format = fileFormat(r.path);
 	const file = format.extension ? `a ${format.name} file (.${format.extension})` : `a ${format.name} file`;
-	return [
-		`You are editing a passage of ${file}. ${r.ask}`,
-		'',
+	const system = [
+		`You are editing a passage of ${file}. The request names the task, then gives the passage with the text around it.`,
 		`Reply with the new passage only, written in ${format.name}: no explanation, no quotation marks, no code fence.`,
 		'Keep every command, formula, citation, cross-reference and label exactly as written unless the task needs otherwise.',
 		'Never add a citation, a number or a claim the passage does not already have.',
 		"Keep the author's voice and the spelling conventions the document uses.",
-		`A list is ${format.list}.`,
+		`A list is ${format.list}.`
+	].join('\n');
+	const request = [
+		r.ask,
 		'',
 		'Text before the passage, for context only:',
 		'<<<',
@@ -53,6 +56,7 @@ export function refinePrompt(r: RefineRequest): string {
 		r.after,
 		'>>>'
 	].join('\n');
+	return { system, request };
 }
 
 /** the answer as text to put in place of `passage`: a code fence dropped, the passage's own outer whitespace kept */

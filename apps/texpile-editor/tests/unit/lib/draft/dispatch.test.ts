@@ -67,8 +67,8 @@ describe('decideEdit compound alignment', () => {
 		const d = decideEdit(doc, src);
 		expect(d.kind).toBe('patch');
 		if (d.kind !== 'patch') return;
-		expect(d.orig).toBe('\\begin{itemize}\\item Second point.\\end{itemize}');
-		expect(d.text).toBe('\\begin{itemize}\\item Second point.\n\\item Third point typed now.\\end{itemize}');
+		expect(d.orig).toBe('\\par\\begin{itemize}\\item Second point.\\end{itemize}');
+		expect(d.text).toBe('\\par\\begin{itemize}\\item Second point.\n\\item Third point typed now.\\end{itemize}');
 		expect(d.listItem).toBe(true);
 	});
 
@@ -78,8 +78,8 @@ describe('decideEdit compound alignment', () => {
 		const d = decideEdit(doc, src);
 		expect(d.kind).toBe('patch');
 		if (d.kind !== 'patch') return;
-		expect(d.orig).toBe('\\begin{itemize}\\item First point.\n\\item Second point.\\end{itemize}');
-		expect(d.text).toBe('\\begin{itemize}\\item First point.\\end{itemize}');
+		expect(d.orig).toBe('\\par\\begin{itemize}\\item First point.\n\\item Second point.\\end{itemize}');
+		expect(d.text).toBe('\\par\\begin{itemize}\\item First point.\\end{itemize}');
 	});
 
 	it('keeps a first-item insert (no sibling item above) on the full pass', () => {
@@ -149,6 +149,7 @@ describe('decideEdit compound alignment', () => {
 		expect(d.kind).toBe('patch');
 		if (d.kind !== 'patch') return;
 		expect(d.floatInner).toBe(true);
+		expect(d.floatTabular).toBe(true);
 		expect(d.orig).toBe('\\centering\\begin{tabular}{ll}\na & b \\\\\n\\end{tabular}');
 		expect(d.text).toBe('\\centering\\begin{tabular}{ll}\na & bx \\\\\n\\end{tabular}');
 	});
@@ -198,6 +199,7 @@ describe('decideEdit compound alignment', () => {
 		expect(d.kind).toBe('patch');
 		if (d.kind !== 'patch') return;
 		expect(d.floatInner).toBe(true);
+		expect(d.floatTabular).toBe(false);
 		expect(d.text).toContain('\\caption{Scores for {\\tt {\\small BERT}} runsx.}');
 		expect(d.text).not.toContain('tabular');
 	});

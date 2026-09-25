@@ -213,8 +213,15 @@ contextBridge.exposeInMainWorld('texpileNative', {
 	draftTypeset: (body: { root: string; mainFile: string; text: string; hsize?: number; splitTo?: number }) =>
 		invokeFs('draft:typeset', body),
 	/** Draft-mode page-break certificate: re-split a page's dimension skeleton on the engine. */
-	draftSkeleton: (body: { root: string; mainFile: string; items: unknown[]; targetPt: number; capacity?: boolean }) =>
-		invokeFs('draft:skeleton', body),
+	draftSkeleton: (body: {
+		root: string;
+		mainFile: string;
+		items: unknown[];
+		targetPt: number;
+		capacity?: boolean;
+		pack?: boolean;
+		maxDepth?: number;
+	}) => invokeFs('draft:skeleton', body),
 	/** Stop the warm daemon (draft mode off / preview closed) so it stops holding memory. */
 	draftStop: () => invokeFs('draft:stop', {}),
 	/** Steal the warm engine from the window that currently owns it (explicit user action). */
@@ -374,8 +381,8 @@ contextBridge.exposeInMainWorld('texpileAgent', {
 	detect: () => ipcRenderer.invoke('agent:detect') as Promise<Record<string, boolean>>,
 	/** the models a preset agent offers, asked of the agent */
 	models: (agent: 'claude' | 'codex' | 'agy') => ipcRenderer.invoke('agent:models', agent),
-	/** run the agent on a prompt; resolves { ok, text } or { ok: false, error } */
-	run: (id: string, prompt: string) => ipcRenderer.invoke('agent:run', { id, prompt }),
+	/** run the agent on a prompt, `system` holding the task's rules; resolves { ok, text } or { ok: false, error } */
+	run: (id: string, prompt: string, system?: string) => ipcRenderer.invoke('agent:run', { id, prompt, system }),
 	cancel: (id: string) => ipcRenderer.send('agent:cancel', id)
 });
 

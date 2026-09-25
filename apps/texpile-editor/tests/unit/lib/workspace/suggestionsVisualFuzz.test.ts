@@ -341,6 +341,41 @@ describe('suggestions made in the visual editor', () => {
 		}
 	});
 
+	// the last block's words closing as the heading they joined read as a change after the cut, so the cut was
+	// compared to the end of the file and drawn as whole words struck and retyped ("title 1 ... After text" for "tier text")
+	it('draws a cut from inside a heading into a later block as just what it took', async () => {
+		const sources = {
+			tex: '\\documentclass{article}\n\\begin{document}\n\\section{title 1}\n\nNew line text here, a few words long.\n\n\\section{Title 2}\n\nAfter text in the last paragraph.\n\\end{document}\n',
+			md: '## title 1\n\nNew line text here, a few words long.\n\n## Title 2\n\nAfter text in the last paragraph.\n',
+			typ: '= title 1\n\nNew line text here, a few words long.\n\n= Title 2\n\nAfter text in the last paragraph.\n'
+		};
+		const at = (s: EditorState, word: string, off: number) => {
+			let found = -1;
+			s.doc.descendants((n, pos) => {
+				if (found < 0 && n.isText && n.text!.includes(word)) found = pos + n.text!.indexOf(word) + off;
+				return found < 0;
+			});
+			return found;
+		};
+		const cuts: [string, number, string, number, string][] = [
+			['New line', 4, 'Title 2', 2, 'line text here, a few words long.\n\nTi'],
+			['title 1', 2, 'Title 2', 2, '1\nNew line text here, a few words long.\nTitle '],
+			// LaTeX moves the heading's closing brace past the words it took in, which is not a cut alone
+			['title 1', 2, 'After text', 3, 'tle 1\nNew line text here, a few words long.\nTitle 2\nAft']
+		];
+		for (const f of FORMATS) {
+			for (const [a, ao, b, bo, old] of f.name === 'tex' ? cuts.slice(0, 2) : cuts) {
+				const { shown, placed } = await suggestTyping(f, sources[f.name], [(s) => s.apply(s.tr.delete(at(s, a, ao), at(s, b, bo)))]);
+				const seen = placed.ranges.filter((r) => r.gone || r.old.length || shown.textBetween(r.from, r.to).trim());
+				expect({ format: f.name, cut: `${a}>${b}`, drawn: seen.map((r) => [!!r.gone, oldWordsOf(r)]) }).toEqual({
+					format: f.name,
+					cut: `${a}>${b}`,
+					drawn: [[true, old]]
+				});
+			}
+		}
+	});
+
 	it('tints the paragraph that was typed in when typing makes it match another', async () => {
 		const alike = '\\documentclass{article}\n\\begin{document}\nThe cat sat again.\n\nThe cat sat.\n\\end{document}\n';
 		const { placed, shown } = await suggestTyping(FORMATS[0], alike, [(s) => s.apply(s.tr.insertText(' again', blockEnd(s, 1) - 1))]);

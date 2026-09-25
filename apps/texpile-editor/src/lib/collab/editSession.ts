@@ -60,9 +60,10 @@ export type EditSession = {
 	/** guest: the host's shared compile products; null for the host (it has the real thing). */
 	readonly compileIntel: SharedCompileIntel | null;
 	collabFor(path: string | null): CollabBinding | null;
-	/** fold the local editor's serialized content into the shared doc as a minimal splice (the
-	 *  visual editor's write path on both sides; a no-op splice when the source editor is Y-bound). */
-	edit(path: string, content: string): void;
+	/** fold the local editor's serialized content into the shared doc (the visual editor's write
+	 *  path on both sides; a no-op when the source editor is Y-bound). `before` is the text the
+	 *  change was made to; without it `content` replaces the shared text whole. */
+	edit(path: string, content: string, before?: string): void;
 	beforeOpen(path: string): Promise<void>;
 	setVisualLock(path: string | null): void;
 	syncTree(): Promise<void>;

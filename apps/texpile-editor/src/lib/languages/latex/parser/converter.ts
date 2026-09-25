@@ -29,10 +29,12 @@ import { scanPreambleText } from './convert/preambleScan';
 import { convertNodeToBlock } from './convert/blockConvert';
 import {
 	applyLigaturesToNodes,
+	endsCharacterWord,
 	groupAfterRawChip,
 	convertNodeToInline,
 	mergeAdjacentInlineLatex,
-	paragraphAsRawLatex
+	paragraphAsRawLatex,
+	plainGroupHoldsBlock
 } from './convert/inlineConvert';
 import { bindTextToChips } from './convert/chipText';
 import { drawnCommand } from '$lib/languages/latex/drawnCommands';
@@ -96,9 +98,47 @@ export function convertNodesToBlocks(nodes: Node[], options: ConversionOptions):
 			return;
 		}
 		const spanOk = ext != null && Number.isFinite(ext.min) && ext.min >= cap.prevEnd && ext.max <= cap.source.length && ext.min < ext.max;
-		if (spanOk) result.push(noteBlockSpan(blocks[0], { srcFrom: ext!.min, srcTo: ext!.max, size: blocks.length }), ...blocks.slice(1));
-		else result.push(...blocks);
+		if (construct) {
+			result.push(...blocks);
+			if (ext && Number.isFinite(ext.max)) construct.max = Math.max(construct.max, ext.max);
+		} else if (spanOk) {
+			result.push(noteBlockSpan(blocks[0], { srcFrom: ext!.min, srcTo: ext!.max, size: blocks.length }), ...blocks.slice(1));
+		} else {
+			result.push(...blocks);
+		}
 		if (advanceExt && Number.isFinite(advanceExt.max)) cap.prevEnd = Math.max(cap.prevEnd, advanceExt.max);
+	}
+
+	// a plain group holding a block (a display) is read as the file reads once its braces go: the
+	// block stands on its own. the paragraph it sits in is then one construct, so an edit anywhere in
+	// it writes the whole of it and one brace never goes without the other
+	let seq = nodes;
+	let ni = 0;
+	let construct: { from: number; min: number; max: number; prevEnd: number; until: number } | null = null;
+	function openConstruct(group: Node, length: number) {
+		if (!cap) return;
+		const ext = extentOf(group, cap.prevEnd);
+		if (construct) {
+			construct.max = Math.max(construct.max, ext.max);
+			construct.until = ni < construct.until ? construct.until + length - 1 : ni + length;
+			return;
+		}
+		construct = {
+			from: result.length,
+			min: Math.min(paraExt?.min ?? Infinity, ext.min),
+			max: ext.max,
+			prevEnd: cap.prevEnd,
+			until: ni + length
+		};
+	}
+	function closeConstruct() {
+		const c = construct!;
+		construct = null;
+		if (!cap) return;
+		const after = cap.prevEnd;
+		cap.prevEnd = c.prevEnd;
+		pushBlocks(result.splice(c.from), { min: c.min, max: c.max });
+		cap.prevEnd = Math.max(after, cap.prevEnd);
 	}
 	// deferred inter-word whitespace: held and only emitted (as one space) once real content
 	// follows, so boundary whitespace (leading/trailing, e.g. the newline after \section{...})
@@ -128,6 +168,7 @@ export function convertNodesToBlocks(nodes: Node[], options: ConversionOptions):
 		paraExt = null;
 		pendingIndent = 'auto';
 		currentParagraphContent = [];
+		if (construct && ni >= construct.until) closeConstruct();
 	}
 
 	// emit the held inter-word space now that real content follows it
@@ -146,8 +187,8 @@ export function convertNodesToBlocks(nodes: Node[], options: ConversionOptions):
 	// the literally-previous AST node, for groupAfterRawChip: a whitespace node in between lands
 	// here too and correctly disqualifies adjacency.
 	let prevNode: Node | null = null;
-	for (let ni = 0; ni < nodes.length; ni++) {
-		const node = nodes[ni];
+	for (ni = 0; ni < seq.length; ni++) {
+		const node = seq[ni];
 		if (isBlockNode(node, currentParagraphContent.length > 0)) {
 			// a display with prose buffered before it and no blank line sits inside that paragraph;
 			// whether the paragraph goes on after it is decided by what follows before a blank line
@@ -155,8 +196,8 @@ export function convertNodesToBlocks(nodes: Node[], options: ConversionOptions):
 			const inParagraph = display && currentParagraphContent.length > 0;
 			let continuesAfter = false;
 			if (display) {
-				for (let k = ni + 1; k < nodes.length; k++) {
-					const nx = nodes[k];
+				for (let k = ni + 1; k < seq.length; k++) {
+					const nx = seq[k];
 					if (nx.type === 'whitespace' || nx.type === 'comment') continue;
 					continuesAfter = nx.type !== 'parbreak' && !isBlockNode(nx, true);
 					break;
@@ -192,8 +233,9 @@ export function convertNodesToBlocks(nodes: Node[], options: ConversionOptions):
 			if (node.type === 'macro' && currentParagraphContent.length > 0) extendPara(node);
 			flushParagraph();
 		} else if (node.type === 'whitespace') {
+			if (endsCharacterWord(node, prevNode, currentParagraphContent[currentParagraphContent.length - 1])) extendPara(node);
 			// hold the space; leading (nothing buffered) drops outright, trailing is discarded at flush
-			if (currentParagraphContent.length > 0) pendingWhitespace = node;
+			else if (currentParagraphContent.length > 0) pendingWhitespace = node;
 		} else if (node.type === 'comment' && currentParagraphContent.length === 0) {
 			// a standalone comment at a block boundary becomes its own raw block. with prose
 			// already buffered it falls through (TeX's % doesn't break a paragraph, so block-
@@ -214,11 +256,18 @@ export function convertNodesToBlocks(nodes: Node[], options: ConversionOptions):
 			extendPara(node);
 			pendingIndent = (node as Macro).content === 'indent' ? 'indent' : 'noindent';
 		} else {
+			// a group directly adjacent to a raw macro chip keeps its braces (groupAfterRawChip)
+			const chip = groupAfterRawChip(node, prevNode, currentParagraphContent[currentParagraphContent.length - 1]);
+			if (!chip && plainGroupHoldsBlock(node)) {
+				const content = node.content as Node[];
+				openConstruct(node, content.length);
+				seq = [...seq.slice(0, ni), ...content, ...seq.slice(ni + 1)];
+				ni--;
+				continue;
+			}
 			// extend the span over every node reaching inline conversion, even ones converting to
 			// nothing: re-parsing the slice drops them identically, the original bytes survive.
 			extendPara(node);
-			// a group directly adjacent to a raw macro chip keeps its braces (groupAfterRawChip)
-			const chip = groupAfterRawChip(node, prevNode, currentParagraphContent[currentParagraphContent.length - 1]);
 			if (chip) {
 				currentParagraphContent.push(chip);
 			} else {

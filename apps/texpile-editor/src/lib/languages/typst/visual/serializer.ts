@@ -116,7 +116,8 @@ type NodeHandler = (node: Node, ctx: Ctx) => string;
 const NODES: Record<string, NodeHandler> = {
 	paragraph(node) {
 		if (isEmptyParagraph(node)) return ''; // blank lines are semantic no-ops, as in both siblings
-		return renderInline(node, true) + '\n\n';
+		// a space opening the line indents it, and after a list an indented line is more of the item
+		return renderInline(node, true).replace(/^[ \t]+/, '') + '\n\n';
 	},
 
 	heading(node) {
@@ -346,7 +347,9 @@ function atLineStart(head: string, bytes: string, tail: string): string | null {
 	// a marker the file kept mid-line now begins a line: with fresh bytes ending the line above
 	// it, or with the bytes before it taken out
 	const opens = /^(?:[-+/=]|\d+\.)\s/.test(tail) || /^[-+/=]$/.test(tail);
-	if (opens && (/\n[ \t]*$/.test(out) || (bytes === '' && /(^|\n)[ \t]*$/.test(head)))) return null;
+	const startsLine = /\n[ \t]*$/.test(out) || (bytes === '' && /(^|\n)[ \t]*$/.test(head));
+	// so does a space the kept bytes begin with: it indents the line, and after a list that is more of the item
+	if ((opens || /^[ \t]/.test(tail)) && startsLine) return null;
 	return out;
 }
 

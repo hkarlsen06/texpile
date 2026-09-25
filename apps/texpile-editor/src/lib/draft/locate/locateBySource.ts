@@ -1,7 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { COL_GUTTER, GLUE_GAP_TOL, LINE_GAP_FALLBACK, ROW_BREAK, SPREAD_TOL } from '../heuristics/tolerances';
+import { COL_GUTTER, ENGINE_EPS, GLUE_GAP_TOL, LINE_GAP_FALLBACK, ROW_BREAK, SPREAD_TOL } from '../heuristics/tolerances';
 import { INDENT_PREFIX } from '../daemonIndent';
 import { bandFontPrefix } from './bandFont';
+import { paraPrefix } from '../column/paraPrefix';
 import { bandWindow } from '../geometry/bandWindow';
 import { columnWindows } from '../heuristics/columnWindows';
 import { glyphRows } from '../geometry/glyphRows';
@@ -61,6 +62,16 @@ export async function locateBySource(
 	// that one; the other is the fallback, and costs nothing when it is already the answer.
 	const probeRows = glyphRows(bandGlyphs(paper.blSkip || LINE_GAP_FALLBACK), paper.blSkip || LINE_GAP_FALLBACK);
 	const indented = probeRows.length > 1 && probeRows[0].left > Math.min(...probeRows.slice(1).map((r) => r.left)) + 2;
+	// one line has no second row to show its indent against: where its first glyph sits in its own
+	// box does, and the page's line record and the daemon's both say where the box starts
+	const firstInBox = probeRows.length ? probeRows[0].left - lines[0].x : null;
+	const sameIndent = (records: any[], boxX: number): boolean => {
+		const row = glyphRows(
+			records.filter((x: any) => x.t === 'g' || x.t === 'glyph'),
+			paper.blSkip || LINE_GAP_FALLBACK
+		)[0];
+		return firstInBox !== null && !!row && Math.abs(row.left - boxX - firstInBox) <= ENGINE_EPS;
+	};
 	// and the same question about the FONT, asked only when it has to be. A footnote, an
 	// abstract or a quote runs at its own size and leading, and the daemon's body-size box
 	// breaks it to a different number of lines -- but body text is almost every band, so the
@@ -70,7 +81,9 @@ export async function locateBySource(
 	let indent = false;
 	let pre = '';
 	for (let wave = 0; wave < 2 && !cal; wave++) {
-		const p = wave === 0 ? '' : bandFontPrefix(recs, lines);
+		// the paragraph's own recorded font, leading and spacing, else its measured font and leading
+		const params = lines[0].pi === undefined ? undefined : ctx.paraParams(lines[0].pi);
+		const p = wave === 0 ? '' : params ? paraPrefix(params) : bandFontPrefix(recs, lines);
 		if (wave === 1 && !p) break;
 		for (const ind of indented ? [true, false] : [false, true]) {
 			const c = await ctx.typesetParagraph({ text: p + (ind ? INDENT_PREFIX : '') + orig, hsize: W });
@@ -81,6 +94,7 @@ export async function locateBySource(
 			// the daemon breaking to a different number of lines than the page did means the splice
 			// would not reproduce this band; the search tiers own that case
 			if (cl.length !== lines.length) continue;
+			if (lines.length === 1 && !sameIndent(c.records, (cl[0] as any).x ?? 0)) continue;
 			cal = c;
 			indent = ind;
 			pre = p;

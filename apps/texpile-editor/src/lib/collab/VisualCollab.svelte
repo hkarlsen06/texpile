@@ -14,6 +14,7 @@
 	import type { SourceMap } from '$lib/editor/visual/sourceSpans';
 	import type { ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
 	import { EDIT_ORIGIN, SEED_ORIGIN } from '$lib/collab/materialize';
+	import { lagOf, toLocal, toShared } from '$lib/collab/lagOffsets';
 	import { editorViewStore } from '$lib/stores/editorStore';
 	import type { EditSession } from '$lib/collab/editSession';
 
@@ -74,7 +75,7 @@
 		deferredRestamp = false;
 	}
 
-	function scheduleRemotePatch(delay = Math.max(150, remoteParseMs * 2)) {
+	function scheduleRemotePatch(delay = Math.max(60, remoteParseMs * 2)) {
 		if (remotePatchTimer) return;
 		remotePatchTimer = setTimeout(() => {
 			remotePatchTimer = null;
@@ -124,8 +125,8 @@
 		api.adopt(parsed, v.state.doc);
 		origStale = false;
 		deferredRestamp = false;
-		scheduleRemoteCursorRender(); // fresh stamps: re-map peers' carets onto the patched doc
-		if (snapshot !== oldSource) api.commit(p, snapshot);
+		renderRemoteCursors(); // the patch dropped the carets inside what it replaced
+		if (snapshot !== oldSource) api.commit(p, api.texSource);
 	}
 
 	// watch the open file's Y.Text; our own edits carry EDIT_ORIGIN (and seeds SEED_ORIGIN),
@@ -201,10 +202,13 @@
 			}
 			// the map describes texSource as it is now, local edits included
 			const sel = v.state.selection;
-			const a = offsetAtPm(api.sourceMap, sel.anchor);
-			const h = sel.head === sel.anchor ? a : offsetAtPm(api.sourceMap, sel.head);
-			if (a == null || h == null) return;
 			const ytext = binding.ytext;
+			const lag = lagOf(api.texSource, ytext.toString());
+			const al = offsetAtPm(api.sourceMap, sel.anchor);
+			const hl = sel.head === sel.anchor ? al : offsetAtPm(api.sourceMap, sel.head);
+			if (al == null || hl == null) return;
+			const a = toShared(lag, al);
+			const h = toShared(lag, hl);
 			function clamp(n: number) {
 				return Math.min(Math.max(0, n), ytext.length);
 			}
@@ -216,7 +220,7 @@
 				anchor: Y.createRelativePositionFromTypeIndex(binding.ytext, clamp(a)),
 				head: Y.createRelativePositionFromTypeIndex(binding.ytext, clamp(h))
 			});
-		}, 120);
+		}, 50);
 	}
 
 	let remoteCursorTimer: ReturnType<typeof setTimeout> | null = null;
@@ -225,7 +229,7 @@
 		remoteCursorTimer = setTimeout(() => {
 			remoteCursorTimer = null;
 			renderRemoteCursors();
-		}, 100);
+		}, 50);
 	}
 
 	// map every collaborator's awareness cursor into the visual editor and hand the set to the
@@ -240,6 +244,7 @@
 		}
 		const map = api.sourceMap;
 		const boundText = binding.ytext;
+		const lag = lagOf(api.texSource, boundText.toString());
 		const peers: RemotePeerSel[] = [];
 		const drops: string[] = [];
 		binding.awareness.getStates().forEach((state, clientId) => {
@@ -264,8 +269,8 @@
 				drops.push(`${clientId}: relpos resolves off-file`);
 				return;
 			}
-			const anchorPm = pmAtOffset(map, ai);
-			const headPm = ai === hi ? anchorPm : pmAtOffset(map, hi);
+			const anchorPm = pmAtOffset(map, toLocal(lag, ai));
+			const headPm = ai === hi ? anchorPm : pmAtOffset(map, toLocal(lag, hi));
 			if (anchorPm == null || headPm == null) {
 				drops.push(`${clientId}: offset ${ai} maps to no block (preamble?)`);
 				return;

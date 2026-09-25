@@ -8,6 +8,7 @@ import type * as Y from 'yjs';
 import { LATEX_SIDECAR_RE } from '$lib/workspace/buildArtifacts';
 import { carryGestures, type TextSpan } from '$lib/comments/editGestures';
 import { manifestOf, locksOf, textOf, type ManifestEntry } from './session';
+import { LocalFork } from './localFork';
 
 export type MaterializeFs = {
 	/** raw bytes: both the text/binary classification and the seeded body come from one read */
@@ -88,22 +89,6 @@ function manifestSignature(manifest: Y.Map<ManifestEntry>): string {
 	return parts.sort().join('|');
 }
 
-/** minimal single-splice diff (common prefix/suffix trim); enough for editor-shaped changes. */
-export function spliceDiff(oldStr: string, newStr: string): { index: number; remove: number; insert: string } | null {
-	if (oldStr === newStr) return null;
-	let start = 0;
-	const maxStart = Math.min(oldStr.length, newStr.length);
-	while (start < maxStart && oldStr[start] === newStr[start]) start++;
-	let endOld = oldStr.length;
-	let endNew = newStr.length;
-	// suffix must not overlap the prefix (classic "abab" pitfall)
-	while (endOld > start && endNew > start && oldStr[endOld - 1] === newStr[endNew - 1]) {
-		endOld--;
-		endNew--;
-	}
-	return { index: start, remove: endOld - start, insert: newStr.slice(start, endNew) };
-}
-
 /** where a Y.Text change landed, as spans of the text after it; a deletion is an empty span */
 export function changedSpans(delta: Y.YTextEvent['delta'], before: string, after: string): TextSpan[] {
 	const spans = deltaSpans(delta);
@@ -143,6 +128,7 @@ export class HostMaterializer {
 	private readonly lastWritten = new Map<string, string>(); // rel -> LF content last synced with disk
 	private readonly running = new Map<string, string>(); // rel -> LF content as of the last transaction
 	private readonly observers = new Map<string, () => void>();
+	private readonly fork: LocalFork;
 	private destroyed = false;
 
 	constructor(
@@ -151,7 +137,9 @@ export class HostMaterializer {
 		private readonly fs: MaterializeFs,
 		private readonly joinPath: (root: string, rel: string) => string,
 		private readonly onError?: (rel: string, err: unknown) => void
-	) {}
+	) {
+		this.fork = new LocalFork(doc);
+	}
 
 	/** scan + read every shared text file into the doc, in one transaction. Returns the text files
 	 *  too large to co-edit (shared view-only instead), so the host can warn about them. */
@@ -274,18 +262,12 @@ export class HostMaterializer {
 		for (const rel of pending) await this.writeNow(rel);
 	}
 
-	/** fold a host editor save into the doc as a minimal splice. content is LF, already on disk. */
-	hostEdit(rel: string, lfContent: string): void {
+	/** fold a host editor save into the doc; content is LF, already on disk, and `lfBefore` is the text it was made to */
+	hostEdit(rel: string, lfContent: string, lfBefore?: string): void {
 		const entry = manifestOf(this.doc).get(rel);
 		if (!entry || entry.kind !== 'text') return;
-		const t = textOf(this.doc, rel);
-		const diff = spliceDiff(t.toString(), lfContent);
 		this.lastWritten.set(rel, lfContent); // the editor's own save already wrote the disk
-		if (!diff) return;
-		this.doc.transact(() => {
-			if (diff.remove > 0) t.delete(diff.index, diff.remove);
-			if (diff.insert) t.insert(diff.index, diff.insert);
-		}, EDIT_ORIGIN);
+		this.fork.fold(textOf(this.doc, rel), lfContent, lfBefore, EDIT_ORIGIN);
 	}
 
 	/** re-sync the manifest after host-side file ops (create/delete/rename/import). Returns whether
@@ -361,5 +343,6 @@ export class HostMaterializer {
 		this.writeTimers.clear();
 		for (const un of this.observers.values()) un();
 		this.observers.clear();
+		this.fork.destroy();
 	}
 }

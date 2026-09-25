@@ -4,7 +4,7 @@
 import type DraftView from './DraftView.svelte';
 import { DraftDispatcher } from './draftDispatcher';
 import { workspaceRoot, mainFile } from '$lib/workspace/workspaceStore';
-import { compileConfig } from '$lib/workspace/projectConfigSync.svelte';
+import { latexLiveMode } from '$lib/workspace/projectConfigSync.svelte';
 import { compileBaseDir } from '$lib/workspace/compileCommand';
 import { relFromRoot } from '$lib/workspace/compilePipeline.svelte';
 import { nativeBridge } from '$lib/workspace/fileSystem';
@@ -55,7 +55,7 @@ export class DraftController {
 		this.dispatcher = new DraftDispatcher({
 			getSource: () => deps.getSource(),
 			getLoadedPath: () => deps.getLoadedPath(),
-			isActive: () => compileConfig.current.latex.liveMode && deps.pdfPaneOpen() && !!deps.getLoadedPath() && !this.paused,
+			isActive: () => latexLiveMode() && deps.pdfPaneOpen() && !!deps.getLoadedPath() && !this.paused,
 			flushSaves: () => deps.flushSaves(),
 			triggerFullCompile: () => this.trigger++,
 			triggerQuietCompile: () => this.quietTrigger++,
@@ -68,7 +68,7 @@ export class DraftController {
 		let daemonActive = false;
 		let daemonRoot: string | null = null;
 		$effect(() => {
-			const active = compileConfig.current.latex.liveMode && deps.pdfPaneOpen() && !this.paused;
+			const active = latexLiveMode() && deps.pdfPaneOpen() && !this.paused;
 			// the DRAFT root, not the workspace root: under -cd it is the main file's folder,
 			// so re-pointing the main at another folder must reap the old warm daemon too
 			const root = this.root;

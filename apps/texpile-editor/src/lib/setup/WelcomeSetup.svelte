@@ -31,6 +31,7 @@
 		agent: m.setup_title_agent
 	};
 	const SUBTITLE: Partial<Record<SetupStepId, () => string>> = {
+		formats: m.setup_sub_formats,
 		toolchain: m.setup_sub_toolchain,
 		profile: m.setup_sub_profile,
 		agent: m.setup_sub_agent
@@ -67,7 +68,7 @@
 	     is the tallest step's height and the shorter ones carry the slack -->
 	<div
 		bind:this={card}
-		class="card bg-surface-50-950 border-surface-300-700 relative flex h-[min(40rem,90vh)] w-full max-w-[52rem] flex-col border shadow-2xl"
+		class="card bg-surface-50-950 border-surface-300-700 relative flex h-[40rem] max-h-full w-full max-w-[52rem] flex-col border shadow-2xl"
 		role="dialog"
 		aria-modal="true"
 		aria-label={m.setup_welcome()}
@@ -116,7 +117,7 @@
 		</div>
 
 		<div class="border-surface-200-800 flex items-center justify-between gap-3 border-t px-7 py-4">
-			<span class="text-muted text-xs">{last ? m.setup_footer_note() : ''}</span>
+			<span class="text-muted text-xs">{m.setup_footer_note()}</span>
 			<span class="flex gap-2">
 				<button type="button" class="btn btn-sm" onclick={() => (at = Math.max(0, here - 1))} disabled={here === 0}>
 					{m.setup_back()}

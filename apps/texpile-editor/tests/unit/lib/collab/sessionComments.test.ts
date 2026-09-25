@@ -7,7 +7,7 @@ import { deriveSessionKeys } from '$lib/collab/e2e/keys';
 import { generateShareCode } from '$lib/collab/e2e/shareCode';
 import { CollabSession, textOf, type SessionEvents } from '$lib/collab/session';
 import { HostMaterializer, EDIT_ORIGIN, changedSpans } from '$lib/collab/materialize';
-import { isSafeCommentEvent } from '$lib/collab/protocol';
+import { commentLogOf, shareComments } from '$lib/collab/sharedComments';
 import type { RelayNotice } from '$lib/collab/protocol';
 import type { Transport, TransportStatus } from '$lib/collab/transport';
 import { buildAnchor } from '$lib/comments/anchor';
@@ -95,16 +95,7 @@ async function connect(log: CommentEvent[], hostOpens: string | null = '/w/main.
 	};
 
 	let hostText = TEXT;
-	const host = party('host', 'louis', {
-		onControl: (payload) => {
-			if (payload.kind !== 'comment-event' || !isSafeCommentEvent(payload.event)) return;
-			void hostCtl.ingest(payload.event);
-			host.session.sendControl({ kind: 'comment-event', event: payload.event });
-		},
-		onBlobRequest: (name, from) => {
-			if (name === 'comments') host.session.sendBlob('comments', 0, new TextEncoder().encode(hostCtl.store.serialize()), from);
-		}
-	});
+	const host = party('host', 'louis', {});
 	host.session.setSuggesting(false);
 	// the host's editor saves its own edits, then folds them into the doc
 	const hostEdit = (next: string) => {
@@ -119,7 +110,6 @@ async function connect(log: CommentEvent[], hostOpens: string | null = '/w/main.
 		openFileAt: () => {},
 		activeText: () => hostText,
 		mode: () => 'editing',
-		publish: (event) => host.session.sendControl({ kind: 'comment-event', event }),
 		applyEdit: async (e) => {
 			if (!hostOpens) return false;
 			hostEdit(hostText.slice(0, e.from) + e.insert + hostText.slice(e.to));
@@ -148,6 +138,7 @@ async function connect(log: CommentEvent[], hostOpens: string | null = '/w/main.
 		hostCtl.remoteEdit(rel, before, after, { ...host.session.authorOf(from), gestures });
 	await mat.seed();
 	await hostCtl.load('/w');
+	shareComments(hostCtl, commentLogOf(host.doc), 'host');
 	if (hostOpens) {
 		textOf(host.doc, 'main.tex').observe(() => {
 			hostText = textOf(host.doc, 'main.tex').toString();
@@ -160,14 +151,7 @@ async function connect(log: CommentEvent[], hostOpens: string | null = '/w/main.
 	async function joinGuest(name: string) {
 		let text = '';
 		let mode: 'editing' | 'suggesting' = 'editing';
-		const guest = party('guest', name, {
-			onControl: (payload) => {
-				if (payload.kind === 'comment-event') void ctl.ingest(payload.event);
-			},
-			onBlob: (blob, _rev, bytes) => {
-				if (blob === 'comments') ctl.adopt(new TextDecoder().decode(bytes), 'session/main.tex', text);
-			}
-		});
+		const guest = party('guest', name, {});
 		const t = textOf(guest.doc, 'main.tex');
 		const edit = (from: number, to: number, insert: string) => {
 			guest.doc.transact(() => {
@@ -182,7 +166,6 @@ async function connect(log: CommentEvent[], hostOpens: string | null = '/w/main.
 			activeText: () => text,
 			mode: () => mode,
 			compares: () => false,
-			publish: (event) => guest.session.sendControl({ kind: 'comment-event', event }),
 			applyEdit: async (e) => {
 				edit(e.from, e.to, e.insert);
 				return true;
@@ -201,7 +184,7 @@ async function connect(log: CommentEvent[], hostOpens: string | null = '/w/main.
 		await ctl.load(null);
 		await until(() => text === hostText);
 		ctl.reanchor('session/main.tex', text);
-		guest.session.requestBlob('comments');
+		shareComments(ctl, commentLogOf(guest.doc), 'guest');
 		await until(() => ctl.threads.length === hostCtl.threads.length);
 		return {
 			ctl,

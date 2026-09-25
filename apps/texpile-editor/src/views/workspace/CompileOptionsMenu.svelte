@@ -25,7 +25,15 @@
 		onClose();
 		action();
 	}
+	// the focus stays on the chevron that opened the menu, so the key is heard on the window
+	function closeOnEscape(e: KeyboardEvent) {
+		if (!open || e.key !== 'Escape') return;
+		e.preventDefault();
+		onClose();
+	}
 </script>
+
+<svelte:window onkeydown={closeOnEscape} />
 
 {#if open}
 	<!-- click-away layer -->

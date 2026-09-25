@@ -15,7 +15,7 @@ export type BreakMarkKind = 'break' | 'hyphen' | 'anywhere';
  * the characters a break at some item is drawn on, as offsets from the paragraph's own position. A break inside a
  * suggestion's struck words sits at the words' position and names the characters inside them
  */
-export type BreakMark = { from: number; to: number; kind: BreakMarkKind; inside?: { id: string; from: number; to: number } };
+export type BreakMark = { from: number; to: number; kind: BreakMarkKind; inside?: { key: string; from: number; to: number } };
 export type ParagraphItems = { items: LineItem[]; marks: Map<number, BreakMark> };
 
 export type ParagraphMeasures = {
@@ -51,7 +51,7 @@ export const UNPLACEABLE_VIEW = 'data-unplaceable';
 // a piece of the paragraph's text as one string: the offsets it covers in the paragraph, and its width or style.
 // Struck words cover no offsets (`size` 0) and name their place inside their widget
 type Run = { from: number; to: number; at: number; size: number } & (
-	{ style: TextRunStyle; inside?: { id: string; start: number } } | { width: number }
+	{ style: TextRunStyle; inside?: { key: string; start: number } } | { width: number }
 );
 
 function patternCuts(token: string, hyphenator: Hyphenator): number[] {
@@ -96,6 +96,11 @@ export function paragraphItems(
 	let nextStruck = 0;
 
 	function addStruck(words: StruckWords): void {
+		if (words.lineEnd) {
+			runs.push({ from: text.length, to: text.length + 1, at: words.at, size: 0, width: 0 });
+			text += '\n';
+			return;
+		}
 		for (const run of words.runs) {
 			const span = words.element.querySelector(`[data-i="${run.from}"]`) ?? words.element;
 			runs.push({
@@ -104,7 +109,7 @@ export function paragraphItems(
 				at: words.at,
 				size: 0,
 				style: styleOf.ofElement(span),
-				inside: { id: words.id, start: run.from }
+				inside: { key: words.key, start: run.from }
 			});
 			text += words.text.slice(run.from, run.to);
 		}
@@ -177,7 +182,7 @@ export function paragraphItems(
 				from: r.at,
 				to: r.at,
 				kind,
-				inside: { id: r.inside.id, from: r.inside.start + from - r.from, to: r.inside.start + to - r.from }
+				inside: { key: r.inside.key, from: r.inside.start + from - r.from, to: r.inside.start + to - r.from }
 			};
 		return { from: offsetAt(from), to: offsetAfter(to - 1), kind };
 	}

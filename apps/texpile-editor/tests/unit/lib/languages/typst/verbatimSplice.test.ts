@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { Fragment, type Node } from 'prosemirror-model';
 import { Transform } from 'prosemirror-transform';
+import { EditorState, TextSelection } from 'prosemirror-state';
 import { parseTypstFile, serializeTypstFile, serializeTypstFileDetailed } from '$lib/languages/typst/visual/roundtrip';
 import { pmToSource } from '$lib/editor/visual/sourceSpans';
 
@@ -488,6 +489,16 @@ describe('typst: what is typed beside a call or a marker', () => {
 		const out = serializeTypstFile(parsed, doc);
 		expect(out).toContain('\n\n\\- .\n');
 		expect(parseTypstFile(out).doc.child(1).toString()).toBe(doc.child(1).toString());
+	});
+
+	it('a deletion from a list item into the paragraph after it leaves no space indenting that paragraph into the list', () => {
+		const parsed = parseTypstFile('- first point\n- second point\n\nA closing paragraph and ends the section.\n');
+		const state = EditorState.create({ doc: parsed.doc });
+		const selected = TextSelection.create(parsed.doc, posOf(parsed.doc, 'second point'), posOf(parsed.doc, ' and ends'));
+		const doc = state.apply(state.tr.setSelection(selected).deleteSelection()).doc;
+		expect(doc.lastChild!.toString()).toBe('paragraph(" and ends the section.")');
+		const out = serializeTypstFile(parsed, doc);
+		expect(parseTypstFile(out).doc.lastChild!.toString()).toBe('paragraph("and ends the section.")');
 	});
 
 	it('an at sign ending an emphasis is escaped, or the delimiter would be read as a reference', () => {

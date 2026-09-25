@@ -185,7 +185,7 @@ export function makeMainActions(d: ActionSurfaceDeps) {
 		jumpToDefinition: (name: string) => d.nav.jumpToDefinition(name),
 		refreshDiff: () => void toastAfter(m.wsview_toast_diff_refreshed(), () => void d.wsdoc.diff.snapshot()),
 		onPdfDoubleClick: (page: number, x: number, y: number, selectText?: string) => d.nav.onPdfDoubleClick(page, x, y, selectText),
-		onInverseSync: (file: string, line: number, selectText?: string) => d.nav.openFileAtLine(normSyncPath(file), line, selectText),
+		onInverseSync: (file: string, line: number, selectText?: string) => d.nav.syncJumpToFileLine(normSyncPath(file), line, selectText),
 		onPreviewSettled: d.draftCtl.runDecision,
 		// Live mode's compile has its own log, and the normal pipeline never sees it -- that one
 		// polls the .log of the user's compile command, which does not run in live mode. quiet: a

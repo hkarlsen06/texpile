@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { PageRecord } from '../geometry/geometry.types';
+import type { ParaParams } from '../column/paraPrefix';
 
 // colSep/blSkip/parSkip: engine registers from the manifest (0 = older bridge; consumers
 // fall back to the LaTeX-default guesses they replaced)
@@ -15,6 +16,7 @@ export type PaperMetrics = {
 	blSkip: number;
 	parSkip: number;
 	topSkip: number;
+	lsLimit: number;
 	// files whose paragraphs the compile stamped, in id order; a line record's `sf` indexes
 	// this 1-based. Empty when the compile recorded no source lines (older bridge).
 	srcFiles: string[];
@@ -43,6 +45,8 @@ export type Cal = {
 	// \noindent): re-typesets of this paragraph must carry the \parindent prefix to reproduce
 	// the same breaks
 	indent?: boolean;
+	// which of the patcher's ways of opening this block (see draftPatcher) the band proof found the page used
+	opening?: number;
 	// the winning variant's font prefix (\fontsize measured from the page's own records: a
 	// narrowed environment like an abstract runs under another size/leading): re-typesets
 	// must carry it to reproduce the band's metrics
@@ -72,5 +76,7 @@ export type LocateContext = {
 	rtlPage(n: number): boolean;
 	synctex(body: Record<string, unknown>): Promise<any>;
 	typesetParagraph(body: { text: string; hsize?: number }): Promise<any>;
+	/** a paragraph's parameters as the compile recorded them at its line break */
+	paraParams(pi: number): ParaParams | undefined;
 	emit(kind: string, detail?: unknown): void;
 };

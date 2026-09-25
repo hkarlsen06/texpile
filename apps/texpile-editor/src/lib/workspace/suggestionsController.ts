@@ -37,13 +37,11 @@ type Deps = {
 	mode: () => EditMode;
 	author: () => Promise<string>;
 	commit: (...events: CommentEvent[]) => Promise<void>;
-	publish: (event: CommentEvent) => void;
 	applyEdit: (edit: SourceEdit) => Promise<boolean>;
 	saveNow: () => void;
 	compares: () => boolean;
 	rewraps: () => boolean;
 	onLost?: (file: string, lost: Set<string>) => void;
-	dropped?: () => void;
 	/** puts the Accept numbered `seq` into the open editor's undo history; see comments/decisionHistory.ts */
 	markDecision?: (seq: number) => void;
 };
@@ -69,6 +67,10 @@ export class SuggestionsController {
 	private chain: Promise<void> = Promise.resolve();
 	private timer: ReturnType<typeof setTimeout> | null = null;
 	private me: string | null = null;
+	// a reader who does not record just had an event from the recorder
+	private caughtUp = false;
+	// the suggestions such a reader drew from its own typing, which the recorder answers under its own ids
+	private drawnHere = new Set<string>();
 	private rejects: UndoableReject[] = [];
 	private accepts = new Map<number, UndoableAccept>();
 	private acceptSeq = 0;
@@ -97,7 +99,10 @@ export class SuggestionsController {
 		const placed: PlacedSuggestion[] = [];
 		const order = new Map<string, number>();
 		const lost = new Set<string>();
+		const known = new Set<string>();
+		const waiting: string[] = [];
 		for (const t of this.deps.store.forFile(file).filter(isOpenSuggestion)) {
+			known.add(t.id);
 			const base = { id: t.id, restore: t.restore ?? '', author: suggestionAuthor(t) };
 			// a reader who does not record takes the recorder's word for where a suggestion stands, and
 			// only falls back on its own reckoning while that anchor has not caught up with the text
@@ -105,17 +110,37 @@ export class SuggestionsController {
 			const hit = s && this.deps.compares() ? null : resolveExactly(against, t.anchor);
 			if (hit) placed.push({ ...base, from: hit.from, to: hit.to });
 			else if (s) placed.push({ ...base, from: s.from, to: s.to });
-			else lost.add(t.id);
+			else waiting.push(t.id);
 			order.set(t.id, s && !hit ? s.i : carried.size + (t.anchor.rank ?? 0));
 		}
+		// and draws its own edits until the recorder's record of them lands on the same words, or an event
+		// from the recorder finds every record in place: a record that cannot be placed yet is of text that
+		// has moved on since, which its own suggestions show. Not by author: two people's edits to one word
+		// can come back as the other's
+		const caughtUp = this.caughtUp && waiting.length === 0;
+		this.caughtUp = false;
+		const own = caughtUp
+			? []
+			: [...carried.values()].filter((s) => this.drawnHere.has(s.id) && !placed.some((p) => s.from <= p.to && s.to >= p.from));
+		this.drawnHere = new Set(own.map((s) => s.id));
+		for (const s of own) {
+			placed.push({ id: s.id, from: s.from, to: s.to, restore: s.restore, author: s.author });
+			order.set(s.id, s.i);
+		}
+		if (own.length === 0) for (const id of waiting) lost.add(id);
 		placed.sort((a, b) => a.from - b.from || a.to - b.to || order.get(a.id)! - order.get(b.id)!);
 		const kept: PlacedSuggestion[] = [];
 		for (const s of placed) {
 			const prev = kept[kept.length - 1];
-			if (prev && s.from < prev.to) lost.add(s.id);
-			else kept.push(s);
+			if (!prev || s.from >= prev.to) kept.push(s);
+			else if (known.has(s.id)) lost.add(s.id);
 		}
 		return { kept, lost };
+	}
+
+	/** an event from the recorder arrived */
+	answered(): void {
+		if (!this.deps.compares()) this.caughtUp = true;
 	}
 
 	clear(): void {
@@ -210,7 +235,7 @@ export class SuggestionsController {
 	}
 
 	discardUnsaved(file: string): void {
-		if (this.deps.store.discardStaged(file)) this.deps.dropped?.();
+		this.deps.store.discardStaged(file);
 		this.states.delete(file);
 		if (this.seen?.file === file) this.gestures = [];
 	}
@@ -259,14 +284,16 @@ export class SuggestionsController {
 		const s = state?.text === text ? state.placed.find((x) => x.id === t.id) : undefined;
 		if (!state || !s) return false;
 		const decided = await this.decision(t, 'rejected');
-		this.deps.publish(decided);
+		// in a session's log before the words come back, so nobody takes them for a new change
+		const recorded = this.deps.commit(decided);
 		if (!(await this.deps.applyEdit({ from: s.from, to: s.to, insert: s.restore }))) {
-			this.deps.publish(await this.decision(t, undefined));
+			await recorded;
+			await this.deps.commit(await this.decision(t, undefined));
 			return false;
 		}
 		const { text: next, placed: rest } = withoutRejected(state, s);
 		this.states.set(file, { text: next, placed: rest });
-		await this.deps.store.append(decided);
+		await recorded;
 		await this.run(file, this.deps.activeText(), 'editing');
 		const rejected = this.states.get(file);
 		if (rejected) this.rejects = [...this.rejects.slice(1 - REJECTS_KEPT), { file, thread: t, open: state, rejected }];
@@ -349,12 +376,14 @@ export class SuggestionsController {
 			author,
 			gestures,
 			sides,
-			whitespace,
+			// markdown and typst read a list item's depth off the spaces before its marker
+			whitespace: whitespace === 'paragraphs' && /\.(md|markdown|typ)$/i.test(file) ? 'lists' : whitespace,
 			newId: () => crypto.randomUUID()
 		});
 		this.states.set(file, { text: after, placed: r.placed });
 		// a reader who does not record draws suggested typing at once; the recorder's events replace it
 		if (!this.deps.compares()) {
+			for (const c of r.changes) if (c.t === 'open') this.drawnHere.add(c.id);
 			if (mode === 'editing') return this.refit(file);
 			if (file === this.deps.activeFile()) this.show(after, r.placed);
 			return;
@@ -426,9 +455,7 @@ export class SuggestionsController {
 	}
 
 	private stage(events: CommentEvent[]): void {
-		if (events.length === 0) return;
-		this.deps.store.stage(...events);
-		for (const e of events) this.deps.publish(e);
+		if (events.length) this.deps.store.stage(...events);
 	}
 
 	private async decide(t: CommentThread, decision: SuggestionDecision): Promise<void> {

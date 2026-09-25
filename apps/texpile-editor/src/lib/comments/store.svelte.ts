@@ -33,6 +33,14 @@ function threadOf(e: CommentEvent): string {
 	return e.t === 'open' ? e.id : 'thread' in e ? e.thread : '';
 }
 
+/** a session's copy of the log, which every side reads in the same order */
+export type CommentLogShare = {
+	lines(): string[];
+	/** each change swaps the last copy of a line for its replacement where it stands (null drops it), then `add`
+	 *  goes at the end, all as one change */
+	edit(changes: [string, string | null][], add: string[]): void;
+};
+
 export class CommentStore {
 	/** every thread in the workspace, in the order they were opened */
 	threads = $state<CommentThread[]>([]);
@@ -44,6 +52,11 @@ export class CommentStore {
 	/** the log verbatim, so appending never has to re-serialize anything it did not parse */
 	private lines: string[] = [];
 	private staged: CommentEvent[] = [];
+	private share: CommentLogShare | null = null;
+	/** while shared: this side's staged events, already in the shared log but not on disk */
+	private unsaved: string[] = [];
+	private parsed = new Map<string, CommentEvent | null>();
+	private writing: Promise<void> = Promise.resolve();
 
 	/** stale-load guard: reloads fire on every save (the fs watcher reports our own writes) and
 	 *  an older read landing after a newer one would publish stale threads */
@@ -99,35 +112,48 @@ export class CommentStore {
 	 * machines are already handled - that is what the log format is for.
 	 */
 	async append(...events: CommentEvent[]): Promise<void> {
+		if (this.share) {
+			if (events.length === 0 && this.unsaved.length === 0) return;
+			this.save(events);
+			return this.write();
+		}
 		if (events.length === 0 && this.staged.length === 0) return;
 		const written = [...collapseStaged(this.staged), ...events];
 		this.staged = [];
 		this.events = [...this.events, ...written];
 		this.lines = [...this.lines, ...written.map((e) => JSON.stringify(e))];
 		this.threads = foldLog(this.events);
-		const path = this.root ? this.path(this.root) : null;
-		if (!path) return;
-		await this.ensureIgnore();
-		await writeTextFile(path, this.serialize());
+		return this.write();
 	}
 
 	stage(...events: CommentEvent[]): void {
 		if (events.length === 0) return;
+		if (this.share) return this.stageShared(events);
 		this.staged = [...this.staged, ...events];
 		this.threads = foldLog([...this.events, ...this.staged]);
 	}
 
 	get hasStaged(): boolean {
-		return this.staged.length > 0;
+		return this.share ? this.unsaved.length > 0 : this.staged.length > 0;
 	}
 
 	hasStagedFor(file: string): boolean {
 		const ids = this.idsOn(file);
-		return this.staged.some((e) => ids.has(threadOf(e)));
+		return this.pending().some((e) => ids.has(threadOf(e)));
 	}
 
 	discardStaged(file: string): boolean {
 		const ids = this.idsOn(file);
+		if (this.share) {
+			const gone = this.unsaved.filter((line) => ids.has(threadOf(this.parse(line)!)));
+			if (gone.length === 0) return false;
+			this.share.edit(
+				gone.map((line) => [line, null]),
+				[]
+			);
+			this.follow();
+			return true;
+		}
 		const kept = this.staged.filter((e) => !ids.has(threadOf(e)));
 		if (kept.length === this.staged.length) return false;
 		this.staged = kept;
@@ -135,9 +161,13 @@ export class CommentStore {
 		return true;
 	}
 
+	private pending(): CommentEvent[] {
+		return this.share ? this.unsaved.map((line) => this.parse(line)!) : this.staged;
+	}
+
 	private idsOn(file: string): Set<string> {
 		const ids = new Set(this.threads.filter((t) => t.file === file).map((t) => t.id));
-		for (const e of this.staged) if (e.t === 'open' && e.file === file) ids.add(e.id);
+		for (const e of this.pending()) if (e.t === 'open' && e.file === file) ids.add(e.id);
 		return ids;
 	}
 
@@ -146,9 +176,27 @@ export class CommentStore {
 		if (this.root) await ensureTexpileIgnore(this.root);
 	}
 
-	/** a log served over the wire, a guest's catch-up on join. Lines appended here while it was in flight stay: the
-	 *  host cut the log before it had them, and their echo may already have come and gone */
+	/** one write at a time, each of the log as it is by then, so a slow write never lands over a newer one */
+	private write(): Promise<void> {
+		const path = this.root ? this.path(this.root) : null;
+		if (!path) return Promise.resolve();
+		const done = this.writing.then(async () => {
+			await this.ensureIgnore();
+			await writeTextFile(path, this.serialize());
+		});
+		this.writing = done.catch(() => undefined);
+		return done;
+	}
+
+	/** a log read from disk; while shared, lines someone added there (a pull, another window) join the session */
 	adoptLog(text: string): void {
+		if (this.share) {
+			const present = new Set(this.share.lines());
+			const added = keptLines(text).filter((line) => !present.has(line));
+			if (added.length) this.share.edit([], added);
+			this.follow();
+			return;
+		}
 		const served = keptLines(text);
 		const known = new Set(served);
 		this.lines = [...served, ...this.lines.filter((line) => !known.has(line))];
@@ -156,9 +204,120 @@ export class CommentStore {
 		this.threads = foldLog([...this.events, ...this.staged]);
 	}
 
-	/** the log as this side sees it, staged events included, for the host to serve to a joining guest */
+	/** what goes to disk: while shared, the session's log less this side's unsaved lines */
 	serialize(): string {
+		if (this.share) return withoutLast(this.lines, this.unsaved).join('\n') + '\n';
 		return [...this.lines, ...collapseStaged(this.staged).map((e) => JSON.stringify(e))].join('\n') + '\n';
+	}
+
+	/**
+	 * Follow a session's log instead of keeping one's own. A host puts its log and staged events in
+	 * first; a guest takes what is there.
+	 */
+	startSharing(share: CommentLogShare, seed: boolean): void {
+		this.share = share;
+		if (seed) {
+			const present = new Set(share.lines());
+			const staged = collapseStaged(this.staged).map((e) => JSON.stringify(e));
+			share.edit([], [...this.lines.filter((line) => !present.has(line)), ...staged]);
+			this.unsaved = staged;
+			this.staged = [];
+		}
+		this.follow();
+	}
+
+	/** back to a log of its own: what the session had, with this side's unsaved lines staged again */
+	stopSharing(): void {
+		if (!this.share) return;
+		this.staged = this.pending();
+		this.lines = withoutLast(this.lines, this.unsaved);
+		this.events = this.lines.flatMap((line) => this.parse(line) ?? []);
+		this.share = null;
+		this.unsaved = [];
+		this.parsed.clear();
+		this.threads = foldLog([...this.events, ...this.staged]);
+	}
+
+	/** re-read the session's log after a change to it */
+	follow(): void {
+		if (!this.share) return;
+		this.lines = this.share.lines();
+		const parsed = new Map<string, CommentEvent | null>();
+		for (const line of this.lines) parsed.set(line, this.parse(line));
+		this.parsed = parsed;
+		this.unsaved = this.unsaved.filter((line) => parsed.has(line));
+		this.events = this.lines.flatMap((line) => parsed.get(line) ?? []);
+		this.threads = foldLog(this.events);
+	}
+
+	/** write what someone else added to the session's log, if this side keeps the file */
+	flush(): Promise<void> {
+		return this.share ? this.write() : Promise.resolve();
+	}
+
+	private parse(line: string): CommentEvent | null {
+		const known = this.parsed.get(line);
+		if (known !== undefined) return known;
+		const event = parseLog(line)[0] ?? null;
+		this.parsed.set(line, event);
+		return event;
+	}
+
+	// a newer anchor of a thread replaces the one still unsaved, as collapseStaged would on disk:
+	// otherwise the session keeps every keystroke of a suggestion being typed
+	private stageShared(events: CommentEvent[]): void {
+		const unsaved = [...this.unsaved];
+		const added: string[] = [];
+		const gone: string[] = [];
+		for (let e of events) {
+			if (e.t === 'anchor') {
+				const thread = e.thread;
+				const at = unsaved.findLastIndex((line) => {
+					const p = this.parse(line);
+					return p?.t === 'anchor' && p.thread === thread;
+				});
+				const prior = at >= 0 ? this.parse(unsaved[at]) : null;
+				if (prior?.t === 'anchor') {
+					e = { ...e, restore: e.restore ?? prior.restore, file: e.file ?? prior.file };
+					const [old] = unsaved.splice(at, 1);
+					const fresh = added.lastIndexOf(old);
+					if (fresh >= 0) added.splice(fresh, 1);
+					else gone.push(old);
+				}
+			}
+			const line = JSON.stringify(e);
+			this.parsed.set(line, e);
+			unsaved.push(line);
+			added.push(line);
+		}
+		this.share!.edit(
+			gone.map((line) => [line, null]),
+			added
+		);
+		this.unsaved = unsaved;
+		this.follow();
+	}
+
+	// the unsaved lines collapsed where they stand, as a solo save collapses the staged ones, then `events`
+	private save(events: CommentEvent[]): void {
+		const kept = new Set(collapseStaged(this.pending()).map((e) => JSON.stringify(e)));
+		const merged = new Map<string, string>();
+		for (const line of kept) {
+			const e = this.parse(line);
+			if (e?.t === 'open') merged.set(e.id, line);
+		}
+		const changes: [string, string | null][] = [];
+		for (const line of this.unsaved) {
+			if (kept.has(line)) continue;
+			const e = this.parse(line);
+			changes.push([line, e?.t === 'open' ? (merged.get(e.id) ?? null) : null]);
+		}
+		this.unsaved = [];
+		this.share!.edit(
+			changes,
+			events.map((e) => JSON.stringify(e))
+		);
+		this.follow();
 	}
 
 	/** false when this workspace has nowhere to keep a log - a guest session, or no folder open */
@@ -170,6 +329,19 @@ export class CommentStore {
 	forFile(file: string): CommentThread[] {
 		return this.threads.filter((t) => t.file === file);
 	}
+}
+
+/** `lines` less the last copy of each line in `drop`, once per copy */
+function withoutLast(lines: string[], drop: string[]): string[] {
+	const left = new Map<string, number>();
+	for (const line of drop) left.set(line, (left.get(line) ?? 0) + 1);
+	const out: string[] = [];
+	for (let i = lines.length - 1; i >= 0; i--) {
+		const n = left.get(lines[i]) ?? 0;
+		if (n > 0) left.set(lines[i], n - 1);
+		else out.push(lines[i]);
+	}
+	return out.reverse();
 }
 
 /** workspace-relative, posix separators: the log travels between machines and OSes */
