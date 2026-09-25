@@ -96,6 +96,8 @@ export type NoteEndRecord = { t: 'noteend' };
 export type RuleRecord = { t: 'rule'; col?: string } & Box;
 export type ImageRecord = { t: 'image'; col?: string } & Box;
 export type VBoxRecord = { t: 'vbox' } & Box;
+/** closes a vbox: every record between the two is its content */
+export type VBoxEndRecord = { t: 'vboxend' };
 /** a pdf literal: drawn material the walker can flag but not interpret */
 export type LitRecord = { t: 'lit' } & Box;
 
@@ -118,6 +120,7 @@ export type PageRecord =
 	| RuleRecord
 	| ImageRecord
 	| VBoxRecord
+	| VBoxEndRecord
 	| LitRecord;
 
 /** anything the DAEMON emits for one typeset block */

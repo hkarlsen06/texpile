@@ -3,7 +3,7 @@ import { glyphRows } from '../geometry/glyphRows';
 import { VERIFY_DRIFT } from '../heuristics/tolerances';
 import { sameCodepointsDigitTolerant } from '../geometry/rowEquality';
 import type { PageRecord } from '../geometry/geometry.types';
-import type { Patch } from './patch.types';
+import { patchInk, type Patch } from './patch.types';
 
 export type VerifyContext = {
 	pageRecords(n: number): PageRecord[];
@@ -22,14 +22,15 @@ export function verifyPatches(ctx: VerifyContext, activePatches: Map<number, Pat
 			// rows built per COLUMN: on a grid-aligned twocolumn page whole-page rows merge
 			// the two columns' baselines into one sequence and nothing single-column matches
 			const fresh = glyphRows(
-				freshG.filter((x: any) => x.x >= p.colL - 2 && x.x <= p.colR),
+				freshG.filter((x: any) => x.x >= p.band.colL - 2 && x.x <= p.band.colR + 2),
 				12
 			);
 			const pred = glyphRows(
-				p.newRecs.filter((x: any) => x.t === 'g').map((x: any) => ({ ...x, x: x.x + p.paraLeft, y: x.y + p.top })),
+				patchInk(p).filter((x: any) => x.t === 'g'),
 				12
 			);
-			if (!pred.length) continue;
+			// a patch that brings no glyphs of its own (the receiver of a moved break) still claims where its rows go
+			if (!pred.length && !p.flowPred?.length) continue;
 			let found = 0;
 			let drift = 0;
 			let xdrift = 0;
@@ -48,11 +49,12 @@ export function verifyPatches(ctx: VerifyContext, activePatches: Map<number, Pat
 			}
 			// signed first-row delta separates "painted too high" from "too low"
 			let dy0: number | null = null;
-			for (const fr of fresh)
-				if (sameCodepointsDigitTolerant(fr.cs, pred[0].cs)) {
-					const dy = fr.y - pred[0].y;
-					if (dy0 === null || Math.abs(dy) < Math.abs(dy0)) dy0 = dy;
-				}
+			if (pred.length)
+				for (const fr of fresh)
+					if (sameCodepointsDigitTolerant(fr.cs, pred[0].cs)) {
+						const dy = fr.y - pred[0].y;
+						if (dy0 === null || Math.abs(dy) < Math.abs(dy0)) dy0 = dy;
+					}
 			// verdicts: 'wrong' = found content painted at the wrong place (the real bug
 			// signal; x counts -- a missed \parindent is a placement error too); 'stale' =
 			// the compile contained newer text than the patch (normal mid-typing grading
@@ -64,7 +66,7 @@ export function verifyPatches(ctx: VerifyContext, activePatches: Map<number, Pat
 				verdict === 'ok'
 					? undefined
 					: fresh
-							.filter((fr) => Math.abs(fr.y - pred[0].y) < 45)
+							.filter((fr) => pred.length && Math.abs(fr.y - pred[0].y) < 45)
 							.map(
 								(fr) =>
 									`${fr.y.toFixed(1)}:${fr.cs

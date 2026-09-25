@@ -16,11 +16,14 @@ export const BAND_EXTEND = 1.18;
 export const SPREAD_TOL = 0.7;
 /** band line gap vs cal line gap agreement (pt); larger = glue-stretched vertical justification */
 export const GLUE_GAP_TOL = 0.5;
+/** two engine positions written to four decimals and subtracted: equal within this (pt) */
+export const ENGINE_EPS = 0.05;
 /** line gap fallback (pt) when the engine baselineskip is unknown and the cal is single-line */
 export const LINE_GAP_FALLBACK = 12;
 /** contiguous-flow walk: a gap beyond this many line gaps ends the text flow under a band */
 export const FLOW_GAP = 2.5;
 /** a shrink beyond this fraction of a line marks underflow (the reflow below is approximate) */
 export const UNDERFLOW_FRACTION = 0.7;
-/** patch grading: painted rows drifting more than this many pt count as wrongly placed */
-export const VERIFY_DRIFT = 3;
+/** patch grading: painted rows off by more than this many pt count as wrongly placed. Rows cluster on
+ *  baselines rounded to 0.1pt, so this is the rounding and nothing more */
+export const VERIFY_DRIFT = 0.15;

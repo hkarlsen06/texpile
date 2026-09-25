@@ -4,7 +4,7 @@
 // Kept out of WorkspaceView the way the other pipelines are - the view is already long, and none of
 // this needs anything from it but the workspace root and a way to open a file.
 import { untrack } from 'svelte';
-import { CommentStore, relativeTo } from '$lib/comments/store.svelte';
+import { CommentStore, relativeTo, type CommentLogShare } from '$lib/comments/store.svelte';
 import { buildAnchor, resolveAnchor, type CommentAnchor } from '$lib/comments/anchor';
 import { MIN_QUOTE, POINT_WEAK, searchContext, searchQuote } from '$lib/comments/anchorSearch';
 import {
@@ -17,7 +17,7 @@ import {
 	placeEvent,
 	replyEvent,
 	resolveEvent,
-	isCommentEvent,
+	parseLog,
 	type CommentEvent,
 	type CommentMessage,
 	type CommentThread
@@ -51,20 +51,12 @@ type Deps = {
 	 */
 	revealInVisual?: (id: string) => boolean;
 	liveAnchors?: (text: string) => Map<string, CommentAnchor> | null;
-	/**
-	 * Hand a locally-made event to the session, if there is one.
-	 *
-	 * Called for everything this side originates and nothing it receives, so an event cannot loop:
-	 * ingest() never publishes.
-	 */
-	publish?: (event: CommentEvent) => void;
 	mode?: () => EditMode;
 	applyEdit?: (edit: SourceEdit) => Promise<boolean>;
 	markDecision?: (seq: number) => void;
 	saveNow?: () => void;
 	compares?: () => boolean;
 	rewraps?: () => boolean;
-	resync?: () => void;
 };
 
 export class CommentsController {
@@ -138,14 +130,12 @@ export class CommentsController {
 			mode: () => deps.mode?.() ?? 'editing',
 			author: () => this.author(),
 			commit: (...events) => this.commit(...events),
-			publish: (event) => deps.publish?.(event),
 			applyEdit: (edit) => deps.applyEdit?.(edit) ?? Promise.resolve(false),
 			markDecision: (seq) => deps.markDecision?.(seq),
 			saveNow: () => deps.saveNow?.(),
 			compares: () => deps.compares?.() ?? true,
 			rewraps: () => deps.rewraps?.() ?? false,
-			onLost: (file, lost) => this.suggestionsLost(file, lost),
-			dropped: () => deps.resync?.()
+			onLost: (file, lost) => this.suggestionsLost(file, lost)
 		});
 	}
 
@@ -226,8 +216,7 @@ export class CommentsController {
 	 * the panel jump away because a colleague's comment arrived would be its own bug.
 	 */
 	async refresh(): Promise<void> {
-		// A guest holds the session's log in memory against a sentinel root - re-reading would find
-		// no file and clear it. Their updates arrive as events over the wire; disk is the host's.
+		// a guest has no file to re-read: its log is the session's, and disk is the host's
 		if (!this.store.writable) return;
 		await this.store.reload();
 		this.resolve();
@@ -613,40 +602,44 @@ export class CommentsController {
 		this.deps.openFileAt(`${root}/${thread.file}`, 1);
 	}
 
-	/** everything this side originates: state, disk if there is any, then the session */
+	/** everything this side originates: state, then disk if there is any; a session's log shares it on the way */
 	private async commit(...events: CommentEvent[]): Promise<void> {
 		await this.store.append(...events);
-		for (const e of events) this.deps.publish?.(e);
+	}
+
+	/** follow a session's log: `seed` puts this side's own log in first, the host's part */
+	startSharing(share: CommentLogShare, seed: boolean): void {
+		this.store.startSharing(share, seed);
+		this.suggestions.answered();
+		this.resolve();
+	}
+
+	stopSharing(): void {
+		this.store.stopSharing();
 	}
 
 	/**
-	 * An event from someone else in the session.
+	 * Someone else changed the session's log: `added` in the order it stands, `dropped` when lines went.
 	 *
-	 * Never publishes - that is what stops a rebroadcast bouncing forever - and never re-anchors the
-	 * whole file. A full reanchor would re-search against `text`, which is only refreshed when a file
-	 * opens, so anything typed since would push every OTHER thread onto stale offsets and throw away
-	 * the exact mapping CodeMirror has been keeping. Only the range this event is about is touched.
+	 * A plain comment only moves its own range. Re-resolving the whole file would re-search threads
+	 * the open editor has been mapping exactly, and could snap one onto another copy of its quote.
 	 */
-	async ingest(event: CommentEvent): Promise<void> {
-		if (!isCommentEvent(event)) return;
-		// The host echoes a guest's own event back (it broadcasts to everyone, the sender
-		// included). A thread we already hold is that echo: appending is harmless (foldLog
-		// dedupes by id) but re-resolving is NOT - a miss here badged the author's own fresh
-		// comment as detached on their own screen.
-		if (event.t === 'open' && this.store.threads.some((t) => t.id === event.id)) return;
+	received(added: string[], dropped: boolean): void {
+		const events = parseLog(added.join('\n'));
+		const before = this.store.threads;
 		// before the refit below forgets where it stood: its words come back as the rejecter's edit
-		if (event.t === 'resolve' && event.decision === 'rejected') this.suggestions.expectReject(event.thread);
-		const appended = this.store.append(event);
-		this.applyIngested(event);
-		await appended;
+		for (const e of events) if (e.t === 'resolve' && e.decision === 'rejected') this.suggestions.expectReject(e.thread);
+		this.store.follow();
+		void this.store.flush();
+		if (dropped || events.some((e) => touchesSuggestions(e, before, events))) {
+			this.suggestions.answered();
+			this.resolve();
+			return;
+		}
+		for (const e of events) this.applyIngested(e);
 	}
 
 	private applyIngested(event: CommentEvent): void {
-		const about = this.store.threads.find((t) => t.id === (event.t === 'open' ? event.id : 'thread' in event ? event.thread : ''));
-		if (about && isSuggestion(about)) {
-			if (about.file === this.file) this.resolve();
-			return;
-		}
 		if (event.t === 'open' && event.file === this.file) {
 			this.placeOne(event.id, event.anchor, false);
 		} else if (event.t === 'resolve') {
@@ -692,12 +685,6 @@ export class CommentsController {
 		if (this.store.writable) await this.suggestions.beforeWrite(file, content);
 	}
 
-	/** a guest's catch-up: the host's whole log, served over the blob channel on join */
-	adopt(text: string, absPath: string | null, docText: string): void {
-		this.store.adoptLog(text);
-		this.reanchor(absPath, docText);
-	}
-
 	private scrollTo(id: string): void {
 		// The visual editor first, when that is where the reader is: it has already placed this thread
 		// on the exact characters it covers, whereas the line jump below has to push a source line back
@@ -728,6 +715,14 @@ export class CommentsController {
  */
 function asFlag(v: boolean | undefined): boolean {
 	return v === true;
+}
+
+/** an event whose effect on the open file is more than one comment's range */
+function touchesSuggestions(e: CommentEvent, before: CommentThread[], events: CommentEvent[]): boolean {
+	if (e.t === 'move' || e.t === 'delete-message') return true;
+	if (e.t === 'edit') return false;
+	const id = e.t === 'open' ? e.id : e.thread;
+	return before.some((t) => t.id === id && isSuggestion(t)) || events.some((x) => x.t === 'open' && x.id === id && x.restore !== undefined);
 }
 
 function sameAnchor(a: CommentAnchor, b: CommentAnchor): boolean {

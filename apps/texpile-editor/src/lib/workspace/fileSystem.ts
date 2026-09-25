@@ -63,12 +63,15 @@ export type DraftResult =
 			parSkip?: number;
 			// \topskip: where a column's first baseline lands (chain-planner landing rule)
 			topSkip?: number;
+			// \lineskiplimit: where TeX switches the interline glue from \baselineskip to \lineskip
+			lsLimit?: number;
 			// the line \begin{document} executed at (main file), from the hook itself
 			bodyLine?: number;
 			// per-line counter snapshots; the daemon pins typesets to these TRUE values
 			counters?: { l: number; f?: string; s: Record<string, number> }[];
 			// per-break pruned runs: what TeX discarded at each column/page break
 			seams?: { page: number; col: number; pen: number; run: Record<string, number>[] }[];
+			paras?: Record<string, unknown>[];
 			marginX: number;
 			marginY: number;
 			pages: DraftPage[];
@@ -90,12 +93,36 @@ export type ParagraphResult =
 	  }
 	| { ok: false; error: string };
 
-// one page-skeleton item: a line as a bare box, glue at natural size, or a penalty
+// one page-skeleton item: a line as a bare box, glue at natural size, a kern, a penalty, a whatsit or
+// mark (x), or the \topskip glue over the next box (t), which the engine sets from its own \topskip
 export type SkeletonItem =
-	{ t: 'b'; h: number; d: number } | { t: 'g'; w: number; st: number; sto: number; sh: number; sho: number } | { t: 'p'; p: number };
+	| { t: 'b'; h: number; d: number }
+	| { t: 'g'; w: number; st: number; sto: number; sh: number; sho: number }
+	| { t: 'k'; w: number }
+	| { t: 'p'; p: number }
+	| { t: 'x' }
+	| { t: 't' };
 
+// how the engine answers for a skeleton: break it (capacity charges depth past maxDepth like the page
+// builder), or pack it to the target height
+export type SkeletonMode = { capacity?: boolean; pack?: boolean; maxDepth?: number };
+
+// nA: nodes in the packed box; iy: where each of them starts; end: the box's height plus depth
 export type SkeletonResult =
-	{ ok: true; kA: number; kB: number; gs: number; gsn: number; go: number; ys: number[]; nys?: number[] } | { ok: false; error: string };
+	| {
+			ok: true;
+			kA: number;
+			kB: number;
+			nA: number;
+			gs: number;
+			gsn: number;
+			go: number;
+			ys: number[];
+			nys?: number[];
+			iy: number[];
+			end: number;
+	  }
+	| { ok: false; error: string };
 
 /** a held main thread or a timed spawn, epoch ms; see electron/src/startupStats.ts */
 export type MainSpan = { label: string; at: number; ms: number };
@@ -162,13 +189,14 @@ type TexpileNative = {
 	synctex: (body: Record<string, unknown>) => Promise<Record<string, unknown>>;
 	draftCompile: (body: { root: string; mainFile: string }) => Promise<DraftResult>;
 	draftTypeset: (body: { root: string; mainFile: string; text: string; hsize?: number; splitTo?: number }) => Promise<ParagraphResult>;
-	draftSkeleton?: (body: {
-		root: string;
-		mainFile: string;
-		items: SkeletonItem[];
-		targetPt: number;
-		capacity?: boolean;
-	}) => Promise<SkeletonResult>;
+	draftSkeleton?: (
+		body: {
+			root: string;
+			mainFile: string;
+			items: SkeletonItem[];
+			targetPt: number;
+		} & SkeletonMode
+	) => Promise<SkeletonResult>;
 	draftStop: () => Promise<{ ok: boolean }>;
 	draftTakeover?: (body: { root: string }) => Promise<{ ok: boolean }>;
 	onDraftPreempted?: (cb: (notice: { root: string }) => void) => () => void;

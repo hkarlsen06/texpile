@@ -42,6 +42,9 @@ export type PatchAction = {
 	orig: string;
 	transient: boolean;
 	floatInner: boolean;
+	// the floated part is the tabular alone, its caption untouched: a caption's words also go to the list of
+	// tables, a cell's go nowhere else
+	floatTabular: boolean;
 	listItem: boolean;
 	// the edit added/removed a TeX command (vs pure prose/argument typing). Commands can
 	// carry semantics no glyph-geometry predicate sees (\noindent, \color, \setlength,
@@ -177,6 +180,7 @@ function buildPatch(baseLines: string[], oP: Para, nP: Para, file?: string): Edi
 	let dispatchText = wrapHead(wrapItem(sendText, nP.wrap, oP.startLine, file), nP.head, oP.startLine, file);
 	let dispatchOrig = paraTex(oP, file);
 	let floatInner = false;
+	let floatTabular = false;
 	if (nP.env && isFloatEnv(nP.env)) {
 		const TAB = /\\begin\{(tabular\*?|tabularx|array)\}[\s\S]*?\\end\{\1\}/;
 		const oSub = dispatchOrig.match(TAB)?.[0] ?? null;
@@ -190,6 +194,7 @@ function buildPatch(baseLines: string[], oP: Para, nP: Para, file?: string): Edi
 			dispatchText = align + nSub;
 			dispatchOrig = align + oSub;
 			floatInner = true;
+			floatTabular = true;
 		}
 		// a \caption edit: typeset JUST the caption (float material cal-empties). \@captype is
 		// what \caption reads to know its float type; the counter pin makes the daemon's number
@@ -230,6 +235,7 @@ function buildPatch(baseLines: string[], oP: Para, nP: Para, file?: string): Edi
 		orig: dispatchOrig,
 		transient,
 		floatInner,
+		floatTabular,
 		// env blocks and headings ride the listItem pathway: paraLeft = column left (their
 		// records carry their own centering/indent) and no \parindent calibration variant
 		listItem: !!nP.wrap || !!nP.env || !!nP.head,

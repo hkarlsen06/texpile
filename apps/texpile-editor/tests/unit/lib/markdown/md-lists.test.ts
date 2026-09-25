@@ -52,6 +52,14 @@ describe('markdown lists', () => {
 		}
 	});
 
+	// indenting a list's first item wraps it in an item of its own kind with nothing to tick
+	it('write no task box on an item that opens with a nested list', () => {
+		const nested = mdSchema.nodes.list.create({ kind: 'task', checked: false }, item({ kind: 'task', checked: false }, 'a'));
+		const out = serializeToMarkdown(docOf(nested));
+		expect(out).toBe('- - [ ] a');
+		expect(gen(out)).toBe(out);
+	});
+
 	it('coalesce editor-made items with the list around them', () => {
 		expect(serializeToMarkdown(docOf(item({ kind: 'bullet' }, 'a'), item({ kind: 'bullet' }, 'b')))).toBe('- a\n- b');
 		expect(serializeToMarkdown(docOf(item({ kind: 'ordered', order: 4 }, 'a'), item({ kind: 'ordered' }, 'b')))).toBe('4. a\n5. b');

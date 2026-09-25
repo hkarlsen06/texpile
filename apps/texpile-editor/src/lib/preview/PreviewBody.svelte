@@ -10,13 +10,13 @@
 	import type { DraftController } from '$lib/draft/draftController.svelte';
 	import type TypstPreview from '$lib/languages/typst/preview/TypstPreview.svelte';
 	import type TypstPreviewRemote from '$lib/languages/typst/preview/TypstPreviewRemote.svelte';
-	import { compileConfig } from '$lib/workspace/projectConfigSync.svelte';
+	import { latexLiveMode } from '$lib/workspace/projectConfigSync.svelte';
 	import { m } from '$lib/paraglide/messages';
 
 	// DraftView drags in opentype.js; draft mode is opt-in, so it loads only when first shown
 	let DraftViewComp = $state<typeof DraftView | null>(null);
 	$effect(() => {
-		if (!guest && compileConfig.current.latex.liveMode && !DraftViewComp) {
+		if (!guest && latexLiveMode() && !DraftViewComp) {
 			import('$lib/draft/DraftView.svelte').then(
 				(mod) => (DraftViewComp = mod.default),
 				(e) => console.error('Failed to load draft view chunk:', e)
@@ -119,14 +119,12 @@
 				? 'no-main'
 				: typstPreviewWanted
 					? 'typst'
-					: compileConfig.current.latex.liveMode
+					: latexLiveMode()
 						? 'draft'
 						: 'pdf'
 	);
 	/** what the bar calls this pane; live mode is a different thing from a compiled PDF */
-	const previewLabel = $derived(
-		!guest && compileConfig.current.latex.liveMode ? m.wsview_live_preview_label() : m.wsview_pdf_preview_label()
-	);
+	const previewLabel = $derived(!guest && latexLiveMode() ? m.wsview_live_preview_label() : m.wsview_pdf_preview_label());
 	/** the PDF bar carries the label and the popout itself; Typst brings its own */
 	const ownsItsBar = $derived(body === 'pdf' || body === 'typst' || body === 'typst-remote' || body === 'draft');
 

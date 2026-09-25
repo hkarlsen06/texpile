@@ -3,7 +3,7 @@
 // a document as the editor holds it and for the one its saved file parses to again. The two
 // laws a save must keep (see blockAssembly.ts) are checked on this, since a file's bytes may
 // legitimately differ from what the editor would write for them
-import type { Node as PMNode } from 'prosemirror-model';
+import { Fragment, type Node as PMNode } from 'prosemirror-model';
 import { formatImage } from '$lib/languages/markdown/visual/inlineSyntax';
 
 export type VisualFormat = 'tex' | 'md' | 'typ';
@@ -24,6 +24,10 @@ export function visibleLines(doc: PMNode, format: VisualFormat): string[] {
 				}
 			} else if (child.type.name === 'hard_break') {
 				cells.push({ ch: plain ? ' ' : '⏎', marks: [] });
+			} else if (format === 'md' && child.type.name === 'inline_latex') {
+				// markdown shows a snippet as its characters: one whose syntax lost its meaning (a footnote whose
+				// definition went) reads back as those characters, and the reader sees the same
+				for (const ch of child.textContent) cells.push({ ch: /\s/.test(ch) ? ' ' : ch, marks: [] });
 			} else {
 				cells.push({
 					ch: `‹${child.type.name}:${child.textContent.replace(/\s+/g, ' ').trim() || JSON.stringify(child.attrs)}›`,
@@ -135,7 +139,10 @@ export function visibleLines(doc: PMNode, format: VisualFormat): string[] {
 				});
 				push(`${path}${name}>`, 'paragraph', render(cells));
 			} else if (child.isTextblock) {
-				push(path, `${name}${child.attrs.level ?? ''}`, render(cellsOf(child)));
+				// a label is one only at the head of an item: one Shift+Tab took out of its list reads as its bold
+				const cells = cellsOf(child);
+				const shown = node.type.name === 'list' ? cells : cells.map((c) => ({ ...c, marks: c.marks.filter((m) => m !== 'item_label') }));
+				push(path, `${name}${child.attrs.level ?? ''}`, render(shown));
 			} else if (child.isLeaf || child.isAtom) {
 				lines.push(`${path}${name}`);
 			} else {
@@ -174,6 +181,15 @@ export function wordsOfLine(line: string): string {
  * written from: null when the reader sees the same words, structure and marks. The first difference
  * is named in a line or two.
  */
+/** the top-level blocks of `doc` that read otherwise in `again`, when the two have as many; none when they do not */
+export function differingBlocks(doc: PMNode, again: PMNode, format: VisualFormat): number[] {
+	if (doc.childCount !== again.childCount) return [];
+	const out: number[] = [];
+	for (let i = 0; i < doc.childCount; i++)
+		if (reopenDifference(doc.copy(Fragment.from(doc.child(i))), again.copy(Fragment.from(again.child(i))), format)) out.push(i);
+	return out;
+}
+
 export function reopenDifference(doc: PMNode, again: PMNode, format: VisualFormat): string | null {
 	const want = visibleLines(doc, format).map((l) => printedLine(l, format));
 	const got = visibleLines(again, format).map((l) => printedLine(l, format));

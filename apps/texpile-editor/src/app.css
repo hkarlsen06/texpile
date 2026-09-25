@@ -697,6 +697,12 @@ select.input {
 .app-window-controls-start {
 	width: env(titlebar-area-x, 0px);
 }
+/* the window buttons are drawn over the page too, so a dialog reaching the top of a short window sat
+   under them: a scrim keeps what it centers below the bar. --scrim-top is a dialog that sits higher up;
+   macOS has no overlay to measure, and windowOverlay.ts gives the traffic lights' row as --mac-titlebar */
+.app-scrim {
+	padding-top: max(var(--scrim-top, 1rem), calc(env(titlebar-area-y, 0px) + env(titlebar-area-height, var(--mac-titlebar, 0px)) + 0.5rem));
+}
 /* thin always-present scrollbar on the toolbar: the macOS overlay scrollbar hides until you
    scroll, which made off-screen toolbar icons look simply missing */
 /* Chrome bars scroll by wheel and trackpad, but never show a bar. A horizontal scrollbar inside a
@@ -759,6 +765,12 @@ select.input {
 	text-decoration: line-through;
 	user-select: none;
 }
+/* the same under a collaborator's selection, in their color; our own selection is laid over it */
+.TexpileEditor .pm-suggest-old.pm-peer-selected {
+	background-color: transparent;
+	background-image: linear-gradient(var(--peer-tint), var(--peer-tint)), linear-gradient(var(--range-tint), var(--range-tint));
+	background-clip: border-box, content-box;
+}
 /* selected old words: their own tint stays text high under the selection color, as it does where the
    browser paints over new words, and the selection color alone fills the rest of the band */
 .TexpileEditor .pm-suggest-old.pm-range-selected {
@@ -788,6 +800,24 @@ select.input {
 	display: block;
 	margin: 0 0 0.3em;
 }
+/* a display formula sits centered, as the one that replaced it does, with the rule through the formula alone */
+.TexpileEditor div.pm-suggest-was:has(> div.math-static-placeholder) {
+	background-image: none;
+}
+.TexpileEditor div.pm-suggest-was > div.math-static-placeholder {
+	display: flex;
+	justify-content: center;
+}
+.TexpileEditor div.pm-suggest-was > div.math-static-placeholder > .ML__latex {
+	width: fit-content;
+	background-image: linear-gradient(
+		to bottom,
+		transparent calc(50% - 0.5px),
+		currentColor calc(50% - 0.5px),
+		currentColor calc(50% + 0.5px),
+		transparent calc(50% + 0.5px)
+	);
+}
 /* Blocks a suggestion took out. They are gone from the document, so there is nothing left in it to
    strike and no block that could be tinted without saying a paragraph changed that did not. Same
    shape as the diff view's removed block, for the same reason: a whole block took a whole block's
@@ -797,8 +827,90 @@ select.input {
 	display: block;
 	margin: 0.35em 0;
 	padding: 0.15em 0.3em;
-	white-space: pre-wrap;
+	white-space: break-spaces;
 	border-radius: calc(var(--radius-base) * 0.5);
+	/* drawn inside the heading a cut joined, its paragraphs came out in the heading's weight */
+	font-size: calc(1rem * var(--text-scaling));
+	font-weight: normal;
+	line-height: var(--leading-relaxed, 1.625);
+}
+/* nothing is dropped on it (goneBlocksRefuseDrop.ts), so no drop cursor shows over it either */
+html.pm-drop-refused .pm-drop-cursor {
+	display: none;
+}
+/* the file no longer has them, so they take no number and move nobody else's */
+.ProseMirror[data-show-section-numbers] .pm-suggest-gone :is(h1, h2, h3, h4, h5, h6) {
+	counter-increment: none;
+	counter-reset: none;
+}
+.ProseMirror[data-show-section-numbers] .pm-suggest-gone :is(h1, h2, h3, h4, h5, h6)::before {
+	content: none;
+}
+/* the same for an item taken out of a numbered list: the item after it goes on from the one before */
+.ProseMirror .prosemirror-flat-list[data-list-kind='ordered'] + .pm-suggest-gone .prosemirror-flat-list[data-list-kind='ordered'] {
+	counter-increment: none;
+	counter-reset: none;
+	counter-set: none;
+}
+.ProseMirror .prosemirror-flat-list[data-list-kind='ordered'] + .pm-suggest-gone .prosemirror-flat-list[data-list-kind='ordered']::before {
+	content: none;
+}
+.ProseMirror .prosemirror-flat-list[data-list-kind='ordered'] + .pm-suggest-gone + .prosemirror-flat-list[data-list-kind='ordered'] {
+	counter-reset: none;
+	counter-set: none;
+}
+/* the tint shows through what would paint its own ground over it */
+.TexpileEditor .pm-suggest-gone :is(.table-wrapper, th) {
+	background: transparent;
+}
+.TexpileEditor .pm-suggest-gone .table-wrapper[data-show-notes='false'] > .table-notes {
+	display: none;
+}
+/* tailwind's table-caption utility shares the class name; the view's flex column is what undoes it there */
+.TexpileEditor .pm-suggest-gone .table-caption {
+	display: block;
+}
+.TexpileEditor .pm-suggest-gone code {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+.TexpileEditor .pm-suggest-gone div.math-static-placeholder {
+	display: flex;
+	justify-content: center;
+	opacity: 0.75;
+}
+/* an aligned environment's box would otherwise take the whole line, and sit at its left */
+.TexpileEditor .pm-suggest-gone div.math-static-placeholder > .ML__latex {
+	width: fit-content;
+}
+/* struck the way a replaced formula is, a painted rule, since a decoration stops at mathlive's boxes;
+   in a line only, where the words beside it are struck */
+.TexpileEditor .pm-suggest-gone span.math-static-placeholder .ML__latex {
+	opacity: 0.75;
+	background-image: linear-gradient(
+		to bottom,
+		transparent calc(50% - 0.5px),
+		currentColor calc(50% - 0.5px),
+		currentColor calc(50% + 0.5px),
+		transparent calc(50% + 0.5px)
+	);
+}
+/* the view's header names the environment; drawn without one, the name goes on top */
+.TexpileEditor .pm-suggest-gone .tex-environment::before {
+	content: attr(data-env);
+	display: block;
+	font-size: 0.7em;
+	color: var(--muted-text);
+}
+.TexpileEditor .pm-gone-figure {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	margin: 0.5em 0;
+}
+.TexpileEditor .pm-gone-figure img {
+	max-width: 100%;
+	opacity: 0.6;
 }
 /* Where a paragraph break is being put in or taken out. A bar, the way a diff marks one, rather
    than a pilcrow or a ↵: those are characters the document does not contain and nobody explains. */

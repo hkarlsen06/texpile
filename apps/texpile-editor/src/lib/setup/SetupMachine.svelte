@@ -26,7 +26,9 @@
 		<div class="flex items-center justify-between gap-4 px-4 py-3">
 			<div class="min-w-0">
 				<div class="text-sm font-medium">{e.kind}</div>
-				<div class="text-muted truncate text-xs">{e.detail || (e.found ? m.setup_found() : m.setup_typesetter_absent())}</div>
+				{#if e.detail}
+					<div class="text-muted truncate text-xs">{e.detail}</div>
+				{/if}
 			</div>
 			{#if toolchainProbe.probing && !e.found}
 				<LoaderCircle class="text-muted size-4 shrink-0 animate-spin" />

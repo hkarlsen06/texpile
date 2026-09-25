@@ -14,6 +14,7 @@
 	import PreviewToolbar from '$lib/preview/PreviewToolbar.svelte';
 	import { DraftSession } from './draftSession.svelte';
 	import type { PatchReq } from './patch/patch.types';
+	import { openToolchainPrefs } from '$lib/stores/dialogStore';
 	import { m } from '$lib/paraglide/messages';
 
 	type Props = {
@@ -231,7 +232,12 @@
 			>
 		</div>
 	{/if}
-	{#if compiler.error}
+	{#if compiler.missingTool}
+		<div class="text-error-ink bg-surface-50-950 m-3 flex shrink-0 items-center gap-3 rounded-container p-3 text-xs">
+			<span class="min-w-0 flex-1">{compiler.error}</span>
+			<button class="btn btn-sm preset-tonal shrink-0" onclick={openToolchainPrefs}>{m.compile_tool_missing_action()}</button>
+		</div>
+	{:else if compiler.error}
 		<!-- Now a single line in the normal case (the log tail moved to Problems), but the cap stays
 		     as a backstop: `error` can also be a thrown exception's message, and overflow-auto cannot
 		     scroll a box that is free to grow. Without a height constraint this took its full content

@@ -186,7 +186,8 @@ const NODES: Record<string, NodeHandler> = {
 	list(node, ctx) {
 		const marker = listMarker(node);
 		const head = listFamily(node) === 'ordered' ? `${itemNumber(node, ctx)}${marker} ` : `${marker} `;
-		const box = node.attrs.kind === 'task' ? `[${node.attrs.checked ? 'x' : ' '}] ` : '';
+		// a task box is read off the item's first words: one opening with a nested list has none to tick
+		const box = node.attrs.kind === 'task' && node.firstChild?.isTextblock ? `[${node.attrs.checked ? 'x' : ' '}] ` : '';
 		// continuation lines align under the content, after the marker
 		const body = indentAfterFirstLine(renderItemBody(node), ' '.repeat(head.length));
 		const next = nextSibling(ctx);

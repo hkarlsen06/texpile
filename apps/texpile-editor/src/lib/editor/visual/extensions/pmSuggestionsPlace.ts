@@ -1,6 +1,6 @@
 // where a suggestion sits in the rendered document: the file around it parsed with and without it,
 // the two compared, and each change carried into the editor's document through the source map
-import type { Fragment, Mark, Node as PMNode } from 'prosemirror-model';
+import type { Fragment, Mark, Node as PMNode, ResolvedPos } from 'prosemirror-model';
 import type { SuggestionMark } from '$lib/comments/activeSuggestions.svelte';
 import { chipLetters } from '$lib/editor/spellcheck/blockSpellText';
 import {
@@ -16,12 +16,16 @@ import {
 import { blockAtPm, blockAtSource } from '../sourceMap';
 import { isSelfRendered } from '../diff/selfRendered';
 import { diffDocs, textOf, type DocChange } from './pmSuggestionDiff';
+import { liftPosition } from './liftPosition';
 
 /** a run of the words a change took out: text with its marks, or a node standing as one character */
 export type OldRun = { text: string; marks: readonly Mark[]; node?: PMNode };
 
-/** content taken out across block edges: the end of the block it started in, whole blocks, the start of the one it ended in */
-export type GoneContent = { head: OldRun[]; blocks: PMNode[]; tail: OldRun[] };
+/**
+ * content taken out across block edges: the end of the block it started in, whole blocks, the start of
+ * the one it ended in. `depth` is the level the blocks were taken from
+ */
+export type GoneContent = { head: OldRun[]; blocks: PMNode[]; tail: OldRun[]; depth: number };
 
 export type PmSuggestionRange = {
 	id: string;
@@ -88,13 +92,27 @@ function plainText(doc: PMNode, from: number, to: number): string {
 	return doc.textBetween(from, to, '\n', '￼').replace(/\s+/g, ' ').trim();
 }
 
+/** the top-level nodes some blocks cover, as ranges, and the index of the first */
+type TopNodes = { first: number; spans: Span[] };
+
+// by node and not by block: a map written back and a stretch parsed afresh group them differently (an
+// itemize is one block parsed, one an item once written), and the nodes are what the reader sees
+function topNodes(doc: PMNode, lo: number, hi: number): TopNodes {
+	const out: TopNodes = { first: -1, spans: [] };
+	doc.forEach((node, offset, i) => {
+		if (offset < lo || offset + node.nodeSize > hi) return;
+		if (out.first < 0) out.first = i;
+		out.spans.push({ from: offset, to: offset + node.nodeSize });
+	});
+	return out;
+}
+
 // a stretch parsed on its own reads as the file does only when its blocks come out the same; a brace
 // whose partner is outside the stretch, say, makes a document that is not the one on screen
-function readsAsShown(doc: PMNode, map: SourceMap, region: Span, after: RegionParse): boolean {
-	const shown = bySource(map.blocks).filter((b) => b.srcFrom >= region.from && b.srcTo <= region.to);
-	const parsed = after.map.blocks;
-	if (shown.length !== parsed.length) return false;
-	return shown.every((b, i) => plainText(doc, b.pmFrom, b.pmTo) === plainText(after.doc, parsed[i].pmFrom, parsed[i].pmTo));
+function readsAsShown(doc: PMNode, shown: TopNodes, after: RegionParse): boolean {
+	const parsed = topNodes(after.doc, 0, after.doc.content.size).spans;
+	if (shown.spans.length !== parsed.length) return false;
+	return shown.spans.every((s, i) => plainText(doc, s.from, s.to) === plainText(after.doc, parsed[i].from, parsed[i].to));
 }
 
 // the block a position of a region's document is in; at a boundary two blocks share, the side names it
@@ -197,24 +215,53 @@ function openEnd(fragment: Fragment, depth: number, last: boolean): PMNode | nul
 
 type OldContent = { runs: OldRun[]; gone: GoneContent | null };
 
+// a textblock the change takes from its very start, or to its very end, went whole, and so did every
+// block around it that it opens or closes: the depth of the outermost, or null when it went in part
+function wholeAt($pos: ResolvedPos, shared: number, atEnd: boolean): number | null {
+	if ($pos.parentOffset !== (atEnd ? $pos.parent.content.size : 0)) return null;
+	let depth = $pos.depth;
+	while (depth - 1 > shared && $pos.index(depth - 1) === (atEnd ? $pos.node(depth - 1).childCount - 1 : 0)) depth--;
+	return depth;
+}
+
 function oldContent(doc: PMNode, from: number, to: number): OldContent {
 	if (to <= from) return { runs: [], gone: null };
 	const $from = doc.resolve(from);
 	const $to = doc.resolve(to);
 	if ($from.sameParent($to) && $from.parent.isTextblock) return { runs: runsOf(doc.slice(from, to).content), gone: null };
 	const slice = doc.slice(from, to);
+	const shared = $from.sharedDepth(to);
 	const first = slice.openStart ? openEnd(slice.content, slice.openStart, false) : null;
 	const last = slice.openEnd ? openEnd(slice.content, slice.openEnd, true) : null;
 	const head = first?.isTextblock ? first : null;
 	const tail = last?.isTextblock && last !== first ? last : null;
+	// drawn as the blocks they were rather than as words run on at the join
+	const headWhole = head ? wholeAt($from, shared, false) : null;
+	const tailWhole = tail ? wholeAt($to, shared, true) : null;
 	const blocks: PMNode[] = [];
-	const collect = (node: PMNode) => {
-		if (node === head || node === tail) return;
-		if (node.isTextblock || node.isLeaf || node.isAtom) blocks.push(node);
-		else node.forEach(collect);
+	let depthOf = Infinity;
+	// a block taken out whole is drawn whole (a table as a table); only the ones the change cuts
+	// through are opened up, and a row or a cell does not stand alone
+	function collect(node: PMNode, depth: number, first: boolean, last: boolean) {
+		const at = shared + depth;
+		const whole = first && at === headWhole ? $from.node(at) : last && at === tailWhole ? $to.node(at) : null;
+		if (!whole && (node === head || node === tail)) return;
+		const cut = (first && depth <= slice.openStart) || (last && depth <= slice.openEnd);
+		if (whole || node.isTextblock || node.isLeaf || node.isAtom || (!cut && node.type.isInGroup('block'))) {
+			blocks.push(whole ?? node);
+			depthOf = Math.min(depthOf, at - 1);
+		} else node.forEach((child, _, i) => collect(child, depth + 1, first && i === 0, last && i === node.childCount - 1));
+	}
+	slice.content.forEach((node, _, i) => collect(node, 1, i === 0, i === slice.content.childCount - 1));
+	return {
+		runs: [],
+		gone: {
+			head: head && headWhole === null ? runsOf(head.content) : [],
+			blocks,
+			tail: tail && tailWhole === null ? runsOf(tail.content) : [],
+			depth: blocks.length ? depthOf : shared
+		}
 	};
-	slice.content.forEach(collect);
-	return { runs: [], gone: { head: head ? runsOf(head.content) : [], blocks, tail: tail ? runsOf(tail.content) : [] } };
 }
 
 // the node a change sits inside that draws its own content, at or above `pos`
@@ -225,6 +272,51 @@ function selfRenderedAround(doc: PMNode, pos: number, to = pos): Span | null {
 		return to <= $pos.after(d) ? { from: $pos.before(d), to: $pos.after(d) } : null;
 	}
 	return null;
+}
+
+function textblocksOpening(doc: PMNode, from: number, to: number): number {
+	let n = 0;
+	doc.nodesBetween(from, to, (node, pos) => {
+		if (!node.isTextblock) return true;
+		if (pos >= from && pos < to) n++;
+		return false;
+	});
+	return n;
+}
+
+// the textblock starting at or after `pos` (dir 1), or ending at or before it (dir -1)
+function textblockBeside(doc: PMNode, pos: number, dir: Side): number | null {
+	let found: number | null = null;
+	const [lo, hi] = dir > 0 ? [pos, doc.content.size] : [0, pos];
+	doc.nodesBetween(lo, hi, (node, p) => {
+		if (dir > 0 && found !== null) return false;
+		if (!node.isTextblock) return true;
+		if (dir > 0 ? p >= pos : p + node.nodeSize <= pos) found = p;
+		return false;
+	});
+	return found;
+}
+
+// a change of nesting alone: the item beside it whose block sits at another depth than it did
+function movedItem(doc: PMNode, from: number, to: number, a: PMNode, A: Span, b: PMNode, B: Span): Span | null {
+	for (const dir of [1, -1] as Side[]) {
+		const was = textblockBeside(a, dir > 0 ? A.to : A.from, dir);
+		const now = textblockBeside(b, dir > 0 ? B.to : B.from, dir);
+		if (was === null || now === null || a.resolve(was).depth === b.resolve(now).depth) continue;
+		const at = textblockBeside(doc, dir > 0 ? to : from, dir);
+		if (at === null) continue;
+		const $at = doc.resolve(at);
+		return $at.depth > 0 ? { from: $at.before(), to: $at.after() } : { from: at, to: at + doc.nodeAt(at)!.nodeSize };
+	}
+	return null;
+}
+
+// a block that became another kind: the top-level block the change is in, or the one after it
+function kindChanged(doc: PMNode, from: number, to: number): Span {
+	const $from = doc.resolve(from);
+	const at = $from.depth > 0 ? $from.before(1) : from;
+	const node = doc.nodeAt(at);
+	return node ? { from: at, to: at + node.nodeSize } : { from, to };
 }
 
 function blocksSpanning(map: SourceMap, from: number, to: number): Span | null {
@@ -239,8 +331,8 @@ type Placement = { ranges: PmSuggestionRange[]; partial: boolean } | null;
 /** one mark's share of a change: a range of the document before and the one after */
 type Piece = { A: Span; B: Span };
 
-/** the stretch as the editor shows it: its document, where its bytes are, and its top-level blocks in order */
-type Shown = { doc: PMNode; map: SourceMap; at: number; blocks: Segment[] };
+/** the stretch as the editor shows it: its document, where its bytes are, and the index of its first top-level node */
+type Shown = { doc: PMNode; map: SourceMap; at: number; first: number };
 
 // where the stretch's document has `pos`, the editor's document has it too: found by the bytes of the
 // run there, else of the nearest run in the same textblock, else by its place in the block, which the
@@ -277,16 +369,12 @@ function landIn(shown: Shown, region: RegionParse, pos: number, assoc: Side): La
 			if (l && !l.block) return l;
 		}
 	}
-	const j = blocks.indexOf(blockOnSide(blocks, pos, assoc)!);
-	const own = shown.blocks[j];
-	if (j < 0 || !own) return null;
-	// the same path down from the top-level block, the same offset in the innermost node
-	const top = shown.doc.resolve(own.pmFrom).index(0) + ($pos.index(0) - region.doc.resolve(blocks[j].pmFrom).index(0));
-	if ($pos.depth === 0)
-		return top < 0 || top > shown.doc.childCount
-			? { pos: own.pmFrom, block: own }
-			: { pos: shown.doc.resolve(0).posAtIndex(top), block: null };
-	if (top < 0 || top >= shown.doc.childCount) return { pos: own.pmFrom, block: own };
+	if (!blockOnSide(blocks, pos, assoc)) return null;
+	// the stretch's top-level nodes are the shown ones from `first` on, so the same path down, the same
+	// offset in the innermost node
+	const top = shown.first + $pos.index(0);
+	if ($pos.depth === 0) return top > shown.doc.childCount ? null : { pos: shown.doc.resolve(0).posAtIndex(top), block: null };
+	if (top >= shown.doc.childCount) return null;
 	let node = shown.doc.child(top);
 	let start = shown.doc.resolve(0).posAtIndex(top);
 	for (let d = 1; d < $pos.depth; d++) {
@@ -354,12 +442,14 @@ function placeChange(doc: PMNode, s: SuggestionMark, { A, B }: Piece, before: Re
 	const boundsA = lenA - oldText.length;
 	const boundsB = lenB - newText.length;
 	if (newText.trim() === '' && oldText.trim() === '' && (boundsA !== boundsB || lenA + lenB === boundsA + boundsB)) {
+		// a break is one textblock more or fewer; the same count in other wrappers is an item moved a level
+		const blocksA = textblocksOpening(before.doc, A.from, A.to);
+		const blocksB = textblocksOpening(after.doc, B.from, B.to);
 		// the space a break replaced is struck beside the mark, and one that replaced a break is tinted
-		if (boundsB > boundsA)
+		if (blocksB > blocksA)
 			return { ranges: [{ ...base, from, to: from, brk: 'added', old: oldContent(before.doc, A.from, A.to).runs }], partial: false };
-		if (boundsA > boundsB) return { ranges: [{ ...base, from, to, brk: 'removed' }], partial: false };
-		const $from = doc.resolve(from);
-		const block = $from.depth > 0 ? { from: $from.before(1), to: $from.after(1) } : { from, to };
+		if (blocksA > blocksB) return { ranges: [{ ...base, from, to, brk: 'removed' }], partial: false };
+		const block = movedItem(doc, from, to, before.doc, A, after.doc, B) ?? kindChanged(doc, from, to);
 		return { ranges: [{ ...base, ...block, node: true, format: true }], partial: false };
 	}
 	const old = oldContent(before.doc, A.from, A.to);
@@ -521,7 +611,13 @@ function joinAcrossNodes(changes: Stretch[], before: RegionParse, after: RegionP
 
 function shareOut(c: Stretch, before: RegionParse, after: RegionParse, marks: MarkBytes[]): { mark: SuggestionMark; piece: Piece }[] {
 	const A = slide(before.doc, c.fromA, c.toA);
-	const B = slide(after.doc, c.fromB, c.toB);
+	let B = slide(after.doc, c.fromB, c.toB);
+	// the place a slid change took its blocks from, lifted to the level they were taken from, so a list
+	// item taken out stands between items and not in the one after it
+	if (B.to === B.from && A.to > A.from) {
+		const at = liftPosition(after.doc, B.from, before.doc.resolve(A.from).depth);
+		B = { from: at, to: at };
+	}
 	const aBytes = bytesOf(before, A);
 	const bBytes = bytesOf(after, B);
 	let involved = marks.filter((m) => touches(m.a, aBytes) || touches(m.b, bBytes));
@@ -580,17 +676,14 @@ export function placePmSuggestions(doc: PMNode, marks: SuggestionMark[], source:
 	}
 	for (const { region, marks: group } of clustersOf(live, map, body)) {
 		const after = parse(text.slice(region.from, region.to));
+		const inRegion = bySource(map.blocks).filter((b) => b.srcFrom >= region.from && b.srcTo <= region.to);
+		const tops = topNodes(doc, Math.min(...inRegion.map((b) => b.pmFrom)), Math.max(...inRegion.map((b) => b.pmTo)));
 		// a parser that says where no run of the stretch came from leaves the blocks as all that can be said
-		if (after.map.leaves.length === 0 || !readsAsShown(doc, map, region, after)) {
+		if (after.map.leaves.length === 0 || !readsAsShown(doc, tops, after)) {
 			group.forEach(asBlocks);
 			continue;
 		}
-		const shown: Shown = {
-			doc,
-			map,
-			at: region.from,
-			blocks: bySource(map.blocks).filter((b) => b.srcFrom >= region.from && b.srcTo <= region.to)
-		};
+		const shown: Shown = { doc, map, at: region.from, first: tops.first };
 		let beforeSrc = text.slice(region.from, region.to);
 		for (const s of [...group].reverse())
 			beforeSrc = beforeSrc.slice(0, s.from - region.from) + s.restore + beforeSrc.slice(s.to - region.from);

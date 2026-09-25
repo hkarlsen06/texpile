@@ -107,11 +107,12 @@ it('hands an edit undone back to the saved text to the shared session', () => {
 	const saved = buffer.texSource;
 	buffer.diskBaseline = saved;
 	buffer.onVisualChange(parsedWith('edited').doc);
-	expect(scheduleSave).toHaveBeenLastCalledWith('C:/ws/main.tex', buffer.texSource);
+	const edited = buffer.texSource;
+	expect(scheduleSave).toHaveBeenLastCalledWith('C:/ws/main.tex', edited, saved);
 	scheduleSave.mockClear();
 	buffer.onVisualChange(parsedWith('as saved').doc);
 	expect(scheduleSave).not.toHaveBeenCalled();
-	expect(shareEdit).toHaveBeenLastCalledWith('C:/ws/main.tex', saved);
+	expect(shareEdit).toHaveBeenLastCalledWith('C:/ws/main.tex', saved, edited);
 });
 
 describe('DocumentBuffer.verifyForWrite', () => {

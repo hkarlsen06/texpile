@@ -88,3 +88,33 @@ describe('editing a description label', () => {
 		expect(out).toContain('\\item[,Term]');
 	});
 });
+
+// the labelled paragraph's bytes run from the label to the body, the bracket's `]` between them:
+// they read as that paragraph only right after the item's `\item[`
+describe('a labelled paragraph away from the head of its item', () => {
+	const ITEM = '\\begin{description}\n\\item[Term] its definition.\n\\end{description}';
+
+	it('written on its own, as the paragraph Shift+Tab leaves, keeps its label as bold and no bracket', () => {
+		const parsed = parse(ITEM);
+		const out = serializeLatexFile(parsed, parsed.doc.copy(Fragment.from(parsed.doc.child(0).child(0))));
+		expect(out).toContain('\n\\textbf{Term} its definition.\n');
+	});
+
+	it('after a paragraph put in front of it in its item, writes no stray bracket', () => {
+		const parsed = parse(ITEM);
+		const list = parsed.doc.child(0);
+		const lead = list.type.schema.node('paragraph', null, [list.type.schema.text('Lead.')]);
+		const next = list.type.create(list.attrs, Fragment.fromArray([lead, list.child(0)]));
+		const out = serializeLatexFile(parsed, parsed.doc.copy(Fragment.from(next)));
+		expect(out).not.toContain('Term]');
+		expect(out).toContain('Term');
+	});
+});
+
+describe('a bullet item with a label of its own', () => {
+	// the label is its math alone: no text for the mark to ride on
+	it('keeps a label that is all math as the bracket', () => {
+		const out = regenerate('\\begin{itemize}\n  \\item plain\n  \\item[$\\star$] starred\n\\end{itemize}');
+		expect(out).toContain('\\item[$\\star$] starred');
+	});
+});

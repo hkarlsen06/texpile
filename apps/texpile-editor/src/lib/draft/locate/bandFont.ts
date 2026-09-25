@@ -32,5 +32,7 @@ export function bandFontPrefix(recs: PageRecord[], lines: SourceLine[]): string 
 		const d = ys[i] - ys[i - 1];
 		if (d > 1 && d < size * 2.5) deltas.push(d);
 	}
-	return fontSizePrefix(size, median(deltas) || size * 1.2);
+	// one line shows no leading, and a guessed one is not the band's: no variant
+	const lead = median(deltas);
+	return lead ? fontSizePrefix(size, lead) : '';
 }

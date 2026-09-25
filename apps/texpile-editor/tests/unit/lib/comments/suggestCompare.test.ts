@@ -311,6 +311,20 @@ describe('an edit meeting a suggestion', () => {
 		expect(suggest('two words', 'two  words', 'exact')).toEqual([[' ', '']]);
 	});
 
+	// in markdown and typst the spaces before a list marker are how deep the item sits
+	it('suggests an item moved in or out a level, over the whole item', () => {
+		const suggest = (before: string, after: string, whitespace: 'lists' | 'paragraphs' = 'lists') =>
+			compareSuggestions({ before, after, pending: [], mode: 'suggesting', author: 'me', newId: () => 'n', whitespace }).placed.map((s) => [
+				after.slice(s.from, s.to),
+				s.restore
+			]);
+		expect(suggest('- one\n- two words\n', '- one\n  - two words\n')).toEqual([['  - two words', '- two words']]);
+		expect(suggest('+ one\n  + two\n', '+ one\n+ two\n')).toEqual([['+ two', '  + two']]);
+		expect(suggest('- a line\n  wrapped\n', '- a line wrapped\n')).toEqual([]);
+		// latex has no such rule: an item's indent there is layout
+		expect(suggest('- one\n- two\n', '- one\n  - two\n', 'paragraphs')).toEqual([]);
+	});
+
 	it('keeps a paragraph break that is half a suggestion’s new words afterwards', () => {
 		const before = 'Aa.\n\n\\x{b t}\n\\x{he c}\n\nr.';
 		const after = '\\\n\nr';
@@ -429,5 +443,13 @@ describe('an edit meeting a suggestion', () => {
 		const r = run('我们证明了这个方法是可靠的', '我们证明了这个方法是稳定的', [], 'suggesting');
 		expect(r.placed).toHaveLength(1);
 		expect(r.placed[0].restore.length).toBeLessThan(6);
+	});
+
+	// grown to whole words, what was left of the two cut words read as typed: "Title" replaced by "tle"
+	it('takes out exactly what a cut across lines took, however it ends in a word', () => {
+		const before = '## title 1\n\nNew line text here.\n\n## Title 2\n\nAfter text.\n';
+		const after = '## title 1\n\nNew tle 2\n\nAfter text.\n';
+		const r = run(before, after, [], 'suggesting');
+		expect(r.placed.map((s) => [after.slice(s.from, s.to), s.restore])).toEqual([['', 'line text here.\n\n## Ti']]);
 	});
 });

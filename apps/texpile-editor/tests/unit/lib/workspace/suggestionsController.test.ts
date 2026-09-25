@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as Y from 'yjs';
 import { buildAnchor } from '$lib/comments/anchor';
 import { openEvent, parseLog, serializeLog } from '$lib/comments/log';
 import { activeSuggestions } from '$lib/comments/activeSuggestions.svelte';
@@ -32,6 +33,16 @@ vi.mock('$lib/comments/author', () => ({
 }));
 
 const { CommentsController } = await import('$lib/workspace/commentsController.svelte');
+const { commentLogOf, shareComments } = await import('$lib/collab/sharedComments');
+
+/** two copies of a shared doc that pass every change straight to each other, as a session does */
+function linkedDocs(): [Y.Doc, Y.Doc] {
+	const a = new Y.Doc();
+	const b = new Y.Doc();
+	a.on('update', (u: Uint8Array, origin: unknown) => origin !== b && Y.applyUpdate(b, u, a));
+	b.on('update', (u: Uint8Array, origin: unknown) => origin !== a && Y.applyUpdate(a, u, b));
+	return [a, b];
+}
 
 const ROOT = '/w';
 const FILE = `${ROOT}/main.tex`;
@@ -323,8 +334,8 @@ describe('a suggestion in the file', () => {
 		expect(reopened.text()).toBe(TEXT);
 	});
 
-	it('hands peers the whole log again when staged events they saw are thrown away', async () => {
-		let resyncs = 0;
+	it('takes staged events peers saw back out of the session when they are thrown away', async () => {
+		const [hostDoc, guestDoc] = linkedDocs();
 		let text = TEXT;
 		const ctl = new CommentsController({
 			root: () => ROOT,
@@ -333,20 +344,28 @@ describe('a suggestion in the file', () => {
 			activeText: () => text,
 			mode: () => 'suggesting',
 			applyEdit: async () => false,
-			saveNow: () => {},
-			resync: () => resyncs++
+			saveNow: () => {}
+		});
+		const peer = new CommentsController({
+			root: () => 'session',
+			preferredAuthor: () => 'mei',
+			openFileAt: () => {},
+			compares: () => false
 		});
 		await ctl.load(ROOT);
+		await peer.load(null);
+		shareComments(ctl, commentLogOf(hostDoc), 'host');
+		shareComments(peer, commentLogOf(guestDoc), 'guest');
 		ctl.reanchor(FILE, text);
 		ctl.suggestions.textChanged(FILE, text);
 		text = TEXT.replace('sharp', 'tight');
 		ctl.suggestions.textChanged(FILE, text);
 		await ctl.suggestions.settle();
-		expect(ctl.store.serialize()).toContain('"restore":"sharp"');
-		ctl.suggestions.discardUnsaved('main.tex');
-		ctl.suggestions.discardUnsaved('main.tex');
-		expect(resyncs).toBe(1);
+		expect(peer.threads.map((t) => t.restore)).toEqual(['sharp']);
 		expect(ctl.store.serialize()).toBe('\n');
+		ctl.suggestions.discardUnsaved('main.tex');
+		expect(peer.threads).toEqual([]);
+		expect(commentLogOf(hostDoc).length).toBe(0);
 	});
 
 	it('records an agent’s rewrite as one suggestion of its own while the reader is editing, and keeps the reader’s typing theirs', async () => {

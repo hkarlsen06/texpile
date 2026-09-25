@@ -15,7 +15,7 @@ export type KeptBreaks = { marks: BreakMark[]; unchangedTo: number };
 function sameMark(a: BreakMark, b: BreakMark): boolean {
 	if (a.from !== b.from || a.to !== b.to || a.kind !== b.kind) return false;
 	if (!a.inside || !b.inside) return a.inside === b.inside;
-	return a.inside.id === b.inside.id && a.inside.from === b.inside.from && a.inside.to === b.inside.to;
+	return a.inside.key === b.inside.key && a.inside.from === b.inside.from && a.inside.to === b.inside.to;
 }
 
 export function sameBreaks(a: ParagraphBreaks, b: ParagraphBreaks): boolean {

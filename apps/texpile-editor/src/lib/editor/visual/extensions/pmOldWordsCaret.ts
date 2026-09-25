@@ -10,9 +10,13 @@ function setCaret(view: EditorView, caret: CaretSide, tr: Transaction = view.sta
 	view.dispatch(tr.setMeta(pmSuggestionsKey, { type: 'caret', caret } satisfies PmSuggestionsMeta));
 }
 
+// the words, without the block standing for whole blocks taken out: that one is out of the line at a
+// line's end, and a click beside it says nothing about which side of the words it meant
 function oldWordsElements(view: EditorView, at: number): HTMLElement[] {
 	const ids = new Set(struckAt(view.state, at).map((r) => r.id));
-	return [...view.dom.querySelectorAll<HTMLElement>('.pm-suggest-old')].filter((el) => ids.has(el.dataset.comment ?? ''));
+	return [...view.dom.querySelectorAll<HTMLElement>('.pm-suggest-old:not(.pm-suggest-gone)')].filter((el) =>
+		ids.has(el.dataset.comment ?? '')
+	);
 }
 
 function stepAtOldWords(view: EditorView, forward: boolean): boolean {
@@ -76,7 +80,29 @@ export function oldWordsKeyDown(view: EditorView, event: KeyboardEvent): boolean
 	return false;
 }
 
+// the block standing for blocks taken out whole is no place for a caret, and left to the browser a click on it
+// put one somewhere else in the document: it goes to the join, on the side of the words the block stands by
+function clickOnGoneBlocks(view: EditorView, event: MouseEvent): boolean {
+	const box = event.target instanceof Element ? event.target.closest<HTMLElement>('.pm-suggest-gone') : null;
+	if (!box || !view.dom.contains(box)) return false;
+	const range = pmSuggestionsKey.getState(view.state)?.ranges.find((r) => r.gone && r.id === box.dataset.comment);
+	if (!range) return false;
+	const sel = TextSelection.near(view.state.doc.resolve(range.from));
+	const words = oldWordsElements(view, sel.head);
+	const tr = view.state.tr.setSelection(sel);
+	if (words.length === 0) view.dispatch(tr);
+	else
+		setCaret(
+			view,
+			{ at: sel.head, side: box.compareDocumentPosition(words[0]) & Node.DOCUMENT_POSITION_PRECEDING ? 'after' : 'before' },
+			tr
+		);
+	view.focus();
+	return true;
+}
+
 export function oldWordsClick(view: EditorView, pos: number, event: MouseEvent): boolean {
+	if (clickOnGoneBlocks(view, event)) return true;
 	const words = oldWordsElements(view, pos);
 	if (words.length === 0) return false;
 	const side = clickedSide(words, event.clientX, event.clientY);

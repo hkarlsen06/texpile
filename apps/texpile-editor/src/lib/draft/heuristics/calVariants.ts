@@ -65,7 +65,10 @@ export function extraCalVariants(paper: { colW: number; textW: number }, recs: P
 				const d = ys[i] - ys[i - 1];
 				if (d > 1 && d < size * 2.5) deltas.push(d);
 			}
-			pre = fontSizePrefix(size, median(deltas) || size * 1.2);
+			const lead = median(deltas);
+			// no leading to read off the lines, and a guessed one is not the environment's
+			if (!lead) continue;
+			pre = fontSizePrefix(size, lead);
 		}
 		out.push({ W, pre, count: c.length });
 	}

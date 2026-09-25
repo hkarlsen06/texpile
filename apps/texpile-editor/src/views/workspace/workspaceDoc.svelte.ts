@@ -47,10 +47,10 @@ export class WorkspaceDoc {
 	constructor(private d: DocDeps) {
 		// the open file's buffers and edit handlers live in lib/workspace/documentBuffer.svelte.ts
 		this.doc = new DocumentBuffer({
-			scheduleSave: (path, content) => d.saver().schedule(path, content),
+			scheduleSave: (path, content, before) => d.saver().schedule(path, content, before),
 			discardQueuedSave: () => d.saver().discard(),
-			shareEdit: (path, content) => {
-				if (path) d.session().edit(path, content);
+			shareEdit: (path, content, before) => {
+				if (path) d.session().edit(path, content, before);
 			},
 			writeNow: (path, content, force) => void d.saver().enqueue(path, content, true, force),
 			rebuildVisual: () => this.rebuildVisualFromSource(),

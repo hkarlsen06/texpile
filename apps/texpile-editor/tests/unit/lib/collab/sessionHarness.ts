@@ -11,8 +11,10 @@ import { yCollab } from 'y-codemirror.next';
 import { deriveSessionKeys } from '$lib/collab/e2e/keys';
 import { generateShareCode } from '$lib/collab/e2e/shareCode';
 import { CollabSession, textOf, type SessionEvents } from '$lib/collab/session';
-import { EDIT_ORIGIN, HostMaterializer, changedSpans, spliceDiff } from '$lib/collab/materialize';
-import { isSafeCommentEvent, type RelayNotice } from '$lib/collab/protocol';
+import { EDIT_ORIGIN, HostMaterializer, changedSpans } from '$lib/collab/materialize';
+import { spliceDiff } from '$lib/collab/spliceDiff';
+import type { RelayNotice } from '$lib/collab/protocol';
+import { commentLogOf, shareComments } from '$lib/collab/sharedComments';
 import type { Transport, TransportStatus } from '$lib/collab/transport';
 import { parseLog, serializeLog, type CommentEvent, type CommentThread } from '$lib/comments/log';
 import type { EditMode, PlacedSuggestion } from '$lib/comments/suggestCompare';
@@ -261,16 +263,7 @@ export async function startSession(o: SessionOptions) {
 	};
 
 	// host
-	const host = party('host', 'louis', {
-		onControl: (payload) => {
-			if (payload.kind !== 'comment-event' || !isSafeCommentEvent(payload.event)) return;
-			void hostCtl.ingest(payload.event);
-			host.session.sendControl({ kind: 'comment-event', event: payload.event });
-		},
-		onBlobRequest: (name, from) => {
-			if (name === 'comments') host.session.sendBlob('comments', 0, new TextEncoder().encode(hostCtl.store.serialize()), from);
-		}
-	});
+	const host = party('host', 'louis', {});
 	let hostMode: EditMode = 'editing';
 	if (o.hostAdvertises !== false) host.session.setSuggesting(false);
 	let hostEditor: Editor | null = null;
@@ -281,7 +274,6 @@ export async function startSession(o: SessionOptions) {
 		openFileAt: () => {},
 		activeText: () => (hostEditor ? hostEditor.text() : hostText),
 		mode: () => hostMode,
-		publish: (event) => host.session.sendControl({ kind: 'comment-event', event }),
 		applyEdit: async (e) => {
 			if (!hostEditor) return false;
 			hostEditor.change(e.from, e.to, e.insert);
@@ -312,6 +304,8 @@ export async function startSession(o: SessionOptions) {
 	cleanups.push(() => mat.destroy());
 	await mat.seed();
 	await hostCtl.load('/w');
+	// as workspaceComments shares it
+	cleanups.push(shareComments(hostCtl, commentLogOf(host.doc), 'host'));
 
 	function openOnHost(): void {
 		const ytext = textOf(host.doc, FILE);
@@ -379,14 +373,7 @@ export async function startSession(o: SessionOptions) {
 
 	async function connectGuest(name: string, o: { author?: string }) {
 		let mode: EditMode = 'editing';
-		const g = party('guest', name, {
-			onControl: (payload) => {
-				if (payload.kind === 'comment-event') void ctl.ingest(payload.event);
-			},
-			onBlob: (blob, _rev, bytes) => {
-				if (blob === 'comments') ctl.adopt(new TextDecoder().decode(bytes), 'session/' + FILE, editor.text());
-			}
-		});
+		const g = party('guest', name, {});
 		// as workspaceComments advertises it
 		g.session.setAuthor(o.author ?? name);
 		const ytext = textOf(g.doc, FILE);
@@ -398,7 +385,6 @@ export async function startSession(o: SessionOptions) {
 			activeText: () => editor.text(),
 			mode: () => mode,
 			compares: () => false,
-			publish: (event) => g.session.sendControl({ kind: 'comment-event', event }),
 			applyEdit: async (e) => {
 				editor.change(e.from, e.to, e.insert);
 				return true;
@@ -420,7 +406,7 @@ export async function startSession(o: SessionOptions) {
 		});
 		await ctl.load(null);
 		ctl.reanchor('session/' + FILE, editor.text());
-		g.session.requestBlob('comments');
+		cleanups.push(shareComments(ctl, commentLogOf(g.doc), 'guest'));
 		await until(() => ctl.threads.length === hostCtl.threads.length, 10000, `${name} getting the log`);
 		const side = {
 			name,

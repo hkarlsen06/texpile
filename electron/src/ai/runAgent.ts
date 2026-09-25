@@ -5,18 +5,21 @@ import * as path from 'node:path';
 import { shellEnvReady } from '../shell/shellEnv';
 import { findProgram } from '../shell/findProgram';
 import { killTree } from '../shell/killTree';
-import { ANSWER_FILE } from './agentCommand';
+import { ANSWER_FILE, SYSTEM_FILE } from './agentCommand';
 import { lastLine, makeRunFolder, removeRunFolder, startAgentProcess } from './agentProcess';
 import { agentStdio, type AgentStdio } from './agentStdio';
 
 export type AgentResult = { ok: true; text: string } | { ok: false; error: string; cancelled?: true };
+
+/** the rules of the task apart from the request itself; an agent with no place for rules gets both as one message */
+export type AgentPrompt = { system: string; request: string };
 
 const TIMEOUT_MS = 180_000;
 const MOST_OUTPUT = 1 << 20;
 
 export async function runAgent(
 	argv: string[],
-	prompt: string,
+	prompt: AgentPrompt,
 	signal: AbortSignal,
 	stdio: AgentStdio = agentStdio('')
 ): Promise<AgentResult> {
@@ -25,10 +28,13 @@ export async function runAgent(
 	if (!program) return { ok: false, error: `${argv[0]} was not found on PATH` };
 	const dir = makeRunFolder();
 	const answerFile = argv.includes(ANSWER_FILE) ? path.join(dir, 'answer.txt') : null;
-	const args = argv.slice(1).map((a) => (a === ANSWER_FILE && answerFile ? answerFile : a));
+	const takesRules = argv.some((a) => a.includes(SYSTEM_FILE));
+	const args = argv.slice(1).map((a) => (a === ANSWER_FILE && answerFile ? answerFile : a.replaceAll(SYSTEM_FILE, 'system.txt')));
+	const message = takesRules || !prompt.system ? prompt.request : `${prompt.system}\n\n${prompt.request}`;
 	return new Promise((resolve) => {
 		let child: ChildProcess;
 		try {
+			if (takesRules) fs.writeFileSync(path.join(dir, 'system.txt'), prompt.system, 'utf8');
 			child = startAgentProcess(program, args, dir);
 		} catch (e) {
 			removeRunFolder(dir);
@@ -60,7 +66,7 @@ export async function runAgent(
 			if (err.length < MOST_OUTPUT) err += d;
 		});
 		child.stdin?.on('error', () => {});
-		child.stdin?.end(stdio.toStdin(prompt), 'utf8');
+		child.stdin?.end(stdio.toStdin(message), 'utf8');
 		function finish(result: AgentResult): void {
 			clearTimeout(timer);
 			signal.removeEventListener('abort', onAbort);

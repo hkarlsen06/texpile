@@ -49,13 +49,16 @@ export function restoreVisualPosition(v: EditorView, path: string, source: strin
 	if (!(selection instanceof TextSelection)) return; // nowhere safe to land; leave the view alone
 
 	try {
-		v.dispatch(v.state.tr.setSelection(selection).scrollIntoView().setMeta('addToHistory', false));
+		v.dispatch(v.state.tr.setSelection(selection).setMeta('addToHistory', false));
 		// Reclaim DOM focus for PM. The restored caret can land inside a CodeMirror-backed node view -
 		// a raw-latex block, a code block - which focuses its own inner editor on mount; PM then never
 		// syncs the DOM caret and its selection reads back as doc start. Documents made mostly of
 		// those (a resume built from \resumeItem macros) hit it on nearly every restore, while a file
 		// of ordinary paragraphs never does. Same reason resolveVisualAnchor calls this.
 		v.focus();
+		// scrolled only once focused: PM skips the scroll while the DOM selection is not its own, and a jump
+		// arrives with the focus elsewhere (the PDF pane, the file tree)
+		v.dispatch(v.state.tr.scrollIntoView().setMeta('addToHistory', false));
 		// a jump's landing gets the amber the SyncTeX and mode-switch flashes use: the reader sees
 		// that the view moved, instead of wondering whether the click did anything
 		if (jumped && selection.$head.depth > 0) flashNodeAt(v, selection.$head.before(1));

@@ -16,6 +16,8 @@ import { undo as historyUndo, redo as historyRedo, history } from 'prosemirror-h
 import { gapCursor } from 'prosemirror-gapcursor';
 import { dropCursor } from 'prosemirror-dropcursor';
 import { tableEditing, goToNextCell } from 'prosemirror-tables';
+import { wholeTableEdits } from '$lib/editor/visual/extensions/table/wholeTableEdits';
+import { crossBlockEdits } from '$lib/editor/visual/extensions/crossBlockEdits';
 import { columnResizing } from '$lib/editor/visual/extensions/table/columnResizing';
 import { snapWidthToFr } from '$lib/editor/visual/extensions/table/snapWidth';
 import { captureColumnWidths } from '$lib/editor/visual/extensions/table/captureColumnWidths';
@@ -152,7 +154,7 @@ export function typstEditorPlugins(setup: TypstEditorSetup): Plugin[] {
 		pasteTypstPlugin,
 		typstCopyPlugin,
 		gapCursor(),
-		dropCursor({ color: 'var(--color-primary-500)', width: 2 }),
+		dropCursor({ color: 'var(--color-primary-500)', width: 2, class: 'pm-drop-cursor' }),
 		// Typst is the one dialect where a drag can be saved: `columns:` takes real lengths and
 		// fr. The drag snaps to that same grid (vendored columnResizing + snapWidthToFr);
 		// captureColumnWidths fills in the columns a drag leaves unsized, which is what
@@ -160,6 +162,8 @@ export function typstEditorPlugins(setup: TypstEditorSetup): Plugin[] {
 		columnResizing({ snap: snapWidthToFr, redistribute: true }),
 		captureColumnWidths,
 		tableEditing(),
+		wholeTableEdits,
+		crossBlockEdits,
 		...createListPlugins({ schema: typSchema }),
 		history(),
 		// the @ reference/citation popup; its arrow/enter keymap must precede the others.

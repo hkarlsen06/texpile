@@ -18,7 +18,8 @@ function drawn(text: string, ranges: SuggestionRange[]) {
 	const seen = {
 		old: [...view.dom.querySelectorAll('.cm-suggest-old')].map((e) => e.textContent),
 		bars: [...view.dom.querySelectorAll('.cm-suggest-break')].map((e) => (e.className.includes('removed') ? 'removed' : 'added')),
-		lines: view.dom.querySelectorAll('.cm-suggest-break-lines').length
+		lines: view.dom.querySelectorAll('.cm-suggest-break-lines').length,
+		rowBreaks: view.dom.querySelectorAll('.cm-suggest-old br').length
 	};
 	view.destroy();
 	return seen;
@@ -42,10 +43,11 @@ describe('a suggestion that only moves a paragraph break', () => {
 		expect(seen.old).toEqual([]);
 	});
 
-	it('puts a bar where a break sat among struck words, not a character to decode', () => {
+	it('keeps struck words on the lines they held, with a bar only for the blank line between them', () => {
 		const at = TEXT.indexOf('prose.');
 		const seen = drawn(TEXT, [{ id: 'words', from: at, to: at, restore: 'verse.\n\nAnother', mine: true }]);
 		expect(seen.old).toEqual(['verse.Another']);
-		expect(seen.bars).toEqual(['removed', 'removed']);
+		expect(seen.rowBreaks).toBe(2);
+		expect(seen.bars).toEqual(['removed']);
 	});
 });

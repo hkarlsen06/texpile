@@ -54,6 +54,19 @@ Body
 	});
 });
 
+describe('an environment written afresh', () => {
+	// a \par closing the last paragraph put the end-of-proof square on a line of its own
+	it('ends its last paragraph where the environment ends', () => {
+		expect(
+			rt(String.raw`\begin{proof}
+Left to the reader.
+\end{proof}`)
+		).toBe(String.raw`\begin{proof}
+Left to the reader.
+\end{proof}`);
+	});
+});
+
 describe('comments preserved as raw_latex blocks', () => {
 	it('standalone comments survive (were dropped before)', () => {
 		const src = `First paragraph.

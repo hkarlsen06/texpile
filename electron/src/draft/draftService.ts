@@ -15,6 +15,7 @@ import { readImageUses, attachImageFiles } from './draftImages';
 import { jobPrefix, writeHooksFile } from './compileJob';
 import { splitForWarm, takeWarmCompiler, goWarmCompiler, rewarmCompiler, aliasSynctex, WARM_BODY } from './draftWarmCompile';
 import { shellEnvReady } from '../shell/shellEnv';
+import { findProgram } from '../shell/findProgram';
 
 // ht = the shipout box HEIGHT = distance from box top to the box baseline, which is the
 // FOOTER line's baseline -- the renderer uses it to keep bottom-anchored footers out of
@@ -55,6 +56,8 @@ export type DraftResult =
 			parSkip: number;
 			// \topskip: where a column's first baseline lands (chain-planner landing rule)
 			topSkip: number;
+			// \lineskiplimit: where TeX switches the interline glue from \baselineskip to \lineskip
+			lsLimit: number;
 			// the files whose paragraphs were stamped, in id order: a line record's "sf" is a
 			// 1-based index into this. Line numbers are file-local, so the id is what makes
 			// "line 45" mean anything in a multi-file project.
@@ -66,11 +69,14 @@ export type DraftResult =
 			// per-break pruned runs (see page-extract.lua seam capture): the material TeX
 			// discarded at each column/page break, keyed by page + 1-based column index
 			seams: { page: number; col: number; fire?: number; pen: number; run: Record<string, number>[] }[];
+			// every paragraph's parameters at its line break, by the serial its lines carry (see page-extract.lua)
+			paras: Record<string, unknown>[];
 			marginX: number;
 			marginY: number;
 			pages: DraftPage[];
 	  }
-	| { ok: false; error: string; ms: number; log?: string; superseded?: true };
+	/** error 'engine-missing' names the program in `tool` */
+	| { ok: false; error: string; ms: number; log?: string; superseded?: true; tool?: string };
 
 type DraftBody = { root: string; mainFile: string; engineDir: string; engine?: string };
 
@@ -102,6 +108,8 @@ export async function compileDraft(body: DraftBody): Promise<DraftResult> {
 	const { root, mainFile } = body;
 	const engineDir = body.engineDir.replace(/\\/g, '/');
 	const engine = body.engine || 'lualatex';
+	// a missing engine says so by name, so the pane can point at the Toolchain folders instead of an empty result
+	if (!findProgram(engine)) return { ok: false, error: 'engine-missing', tool: engine, ms: 0 };
 	const outAbs = path.join(root, OUT);
 	// supersede any in-flight compile of THIS root: kill its lualatex so this fresh run
 	// isn't stuck behind it (other roots' compiles are untouched)
@@ -131,7 +139,7 @@ export async function compileDraft(body: DraftBody): Promise<DraftResult> {
 	}
 	// clear stale page files so a shorter document doesn't keep orphaned pages
 	for (const f of fs.readdirSync(outAbs))
-		if (/^page-\d+\.jsonl$/.test(f) || f === 'pages.json' || f === 'counters.jsonl' || f === 'seams.jsonl') {
+		if (/^page-\d+\.jsonl$/.test(f) || f === 'pages.json' || f === 'counters.jsonl' || f === 'seams.jsonl' || f === 'paras.jsonl') {
 			try {
 				fs.rmSync(path.join(outAbs, f));
 			} catch {
@@ -320,6 +328,17 @@ export async function compileDraft(body: DraftBody): Promise<DraftResult> {
 		/* no seams: junction gaps stay guessed */
 	}
 
+	let paras: Record<string, unknown>[] = [];
+	try {
+		paras = fs
+			.readFileSync(path.join(outAbs, 'paras.jsonl'), 'utf8')
+			.split('\n')
+			.filter(Boolean)
+			.map((ln) => JSON.parse(ln));
+	} catch {
+		/* none recorded: edits typeset in the document's own defaults and the band proof decides */
+	}
+
 	const imageUses = readImageUses(outAbs);
 	const pages: DraftPage[] = [];
 	for (let n = 1; n <= manifest.count; n++) {
@@ -360,10 +379,12 @@ export async function compileDraft(body: DraftBody): Promise<DraftResult> {
 		blSkip: (manifest as { blSkip?: number }).blSkip || 0,
 		parSkip: (manifest as { parSkip?: number }).parSkip || 0,
 		topSkip: (manifest as { topSkip?: number }).topSkip || 0,
+		lsLimit: (manifest as { lsLimit?: number }).lsLimit || 0,
 		srcFiles: (manifest as { srcFiles?: string[] }).srcFiles || [],
 		bodyLine: manifest.bodyLine,
 		counters,
 		seams,
+		paras,
 		// the page's reference point: TeX's 1in default MOVED by the document's own
 		// \hoffset/\voffset, instead of assuming every document leaves them at zero
 		marginX: ONE_INCH_PT + ((manifest as { hOffset?: number }).hOffset || 0),

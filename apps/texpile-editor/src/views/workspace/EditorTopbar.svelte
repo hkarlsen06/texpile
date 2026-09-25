@@ -5,7 +5,7 @@
 	import { tip } from '$lib/components/tooltip.svelte';
 	import { openWorkspaceForFile } from '$lib/workspace/openWorkspace';
 	import { fileMode } from '$lib/workspace/fileMode.svelte';
-	import { compileConfig } from '$lib/workspace/projectConfigSync.svelte';
+	import { latexLiveMode } from '$lib/workspace/projectConfigSync.svelte';
 	import { isDirty } from '$lib/workspace/workspaceStore';
 	import { compileLog } from '$lib/stores/compileLogStore';
 	import WordCount from './WordCount.svelte';
@@ -158,7 +158,7 @@
 		// on close), so this is both indicator and off switch
 		if (typstLive && pdfPaneOpen)
 			return { tone: 'success', dot: true, label: m.wsview_live_label(), title: m.wsview_typst_preview_live_title(), onclick: onTogglePdf };
-		if (compileConfig.current.latex.liveMode && pdfPaneOpen) {
+		if (latexLiveMode() && pdfPaneOpen) {
 			if (draftPaused)
 				return {
 					tone: 'warning',
@@ -175,7 +175,7 @@
 				onclick: onPauseDraft
 			};
 		}
-		const live = typstLive || compileConfig.current.latex.liveMode;
+		const live = typstLive || latexLiveMode();
 		return {
 			tone: 'primary',
 			icon: Play,

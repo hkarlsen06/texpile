@@ -10,12 +10,12 @@ import { GhostDirs } from './guestGhostDirs';
 import { GuestFileCache } from './guestFileCache';
 import { presenceIdentity } from './identity';
 import { GuestSyncRequests } from './guestSyncRequests';
-import { GuestCommentOutbox } from './guestCommentOutbox';
+import { LocalFork } from './localFork';
 import { RelayTransport } from './transport';
 import { forgetJoinCode, rememberJoinCode } from './joinLink.svelte';
+import { commentLogOf } from './sharedComments';
 import type { SharedCompileIntel } from './editSession';
 import type { ControlPayload, PreviewPayload } from './protocol';
-import type { CommentEvent } from '$lib/comments/log';
 import { settings } from '$lib/settings';
 
 export type GuestFile = {
@@ -64,9 +64,6 @@ class GuestCollabController {
 	typstPreviewOffered = $state(false);
 	/** the raw preview page the host shipped (blob 'typst-page'); null until asked for and answered */
 	previewPage = $state<string | null>(null);
-	/** WorkspaceView wires these to its comment controller. */
-	onCommentEvent: ((event: CommentEvent) => void) | null = null;
-	onCommentLog: ((log: string) => void) | null = null;
 	/** the remote preview pane wires this; host-origin preview frames land here */
 	onPreviewFrame: ((p: PreviewPayload) => void) | null = null;
 	/** WorkspaceView wires this: this guest clicked the streamed preview and the host's tinymist
@@ -76,7 +73,6 @@ class GuestCollabController {
 	selfName = $state('');
 	private previewPageAsked = false;
 	private fileCache = new GuestFileCache(() => this.imageRev++);
-	private outbox = new GuestCommentOutbox();
 	/** subscribers to host -> guest LSP traffic; a set because each open .typ editor has a transport */
 	private lspHandlers = new Set<(p: ControlPayload) => void>();
 	// intact master; `pdf` is always a copy, because pdf.js detaches the ArrayBuffer it renders and
@@ -84,6 +80,8 @@ class GuestCollabController {
 	private pdfMaster: Uint8Array | null = null;
 
 	private doc: Y.Doc | null = null;
+	/** where the visual editor's changes are made before they join the shared doc */
+	fork: LocalFork | null = null;
 	private session: CollabSession | null = null;
 	private transport: RelayTransport | null = null;
 	private seenPdfRev = 0;
@@ -122,6 +120,7 @@ class GuestCollabController {
 			const keys = await deriveSessionKeys(code);
 			const relayUrl = settings.current.collabRelayUrl.trim();
 			const doc = new Y.Doc();
+			const fork = new LocalFork(doc);
 			const transport = new RelayTransport(relayUrl, keys.roomId, keys.joinProof);
 			const session = new CollabSession({
 				doc,
@@ -135,9 +134,7 @@ class GuestCollabController {
 						this.noteHost();
 					},
 					onBlob: (blobName, rev, bytes) => {
-						if (blobName === 'comments') {
-							this.onCommentLog?.(new TextDecoder().decode(bytes));
-						} else if (blobName === 'typst-page') {
+						if (blobName === 'typst-page') {
 							this.previewPage = new TextDecoder().decode(bytes);
 						} else if (blobName === 'pdf') {
 							this.seenPdfRev = Math.max(this.seenPdfRev, rev);
@@ -149,10 +146,7 @@ class GuestCollabController {
 					},
 					onPreview: (p) => this.onPreviewFrame?.(p),
 					onControl: (payload) => {
-						if (payload.kind === 'comment-event') {
-							this.outbox.echoed(payload.event);
-							this.onCommentEvent?.(payload.event);
-						} else if (payload.kind === 'synctex-inverse-result' || payload.kind === 'synctex-forward-result') {
+						if (payload.kind === 'synctex-inverse-result' || payload.kind === 'synctex-forward-result') {
 							this.syncRequests.resolve(payload);
 						} else if (payload.kind === 'typst-jump') this.onTypstJump?.(payload);
 						else if (payload.kind === 'lsp-result' || payload.kind === 'lsp-notify') {
@@ -164,14 +158,10 @@ class GuestCollabController {
 							this.clearJoinTimer();
 							this.status = 'online';
 							this.hostOnline = true;
-							this.resendComments();
 						} else if (s === 'disconnected') {
 							if (this.status === 'online') this.status = 'reconnecting';
 						} else if (s === 'host-gone') this.hostOnline = false;
-						else if (s === 'host-back') {
-							this.hostOnline = true;
-							this.resendComments();
-						}
+						else if (s === 'host-back') this.hostOnline = true;
 					},
 					onSessionEnd: (reason, detail) => {
 						this.clearJoinTimer();
@@ -197,6 +187,7 @@ class GuestCollabController {
 			metaOf(doc).observe(() => this.onMeta());
 
 			this.doc = doc;
+			this.fork = fork;
 			this.session = session;
 			this.transport = transport;
 			session.setSuggesting(this.suggesting);
@@ -271,18 +262,9 @@ class GuestCollabController {
 		this.session?.sendControl({ kind: 'file-op', op, from, to });
 	}
 
-	sendComment(event: CommentEvent): void {
-		this.outbox.sent(event);
-		this.session?.sendControl({ kind: 'comment-event', event });
-	}
-
-	private resendComments(): void {
-		for (const event of this.outbox.unanswered()) this.session?.sendControl({ kind: 'comment-event', event });
-	}
-
-	/** ask for the whole log; the host answers on the blob channel. */
-	requestComments(): void {
-		this.session?.requestBlob('comments');
+	/** the session's comment log, which the host keeps on its disk */
+	get sharedComments(): Y.Array<string> | null {
+		return this.doc ? commentLogOf(this.doc) : null;
 	}
 
 	/**
@@ -449,11 +431,12 @@ class GuestCollabController {
 		// next session render a previous host's image for a path that happens to match
 		this.fileCache.clear();
 		this.ghostState.clear();
-		this.outbox.clear();
 		const session = this.session;
 		this.session = null;
 		this.transport = null;
 		this.doc = null;
+		this.fork?.destroy();
+		this.fork = null;
 		this.files = [];
 		this.peers = [];
 		this.pdf = null;

@@ -16,7 +16,7 @@ import { loadHyphenator } from './hyphenationLanguages';
 import { inlineBoxWatch } from './inlineBoxWatch';
 import { linesKeptWhileTyping } from './linesKeptWhileTyping';
 import { paragraphBreaks, sameBreaks, type BreakingContext, type ChosenBreaks, type ParagraphBreaks } from './paragraphBreaks';
-import { struckWordsIn } from './struckWords';
+import { struckWordsIn, type StruckWords } from './struckWords';
 import { runStyleReader } from './textRunStyles';
 import { wordBeingTypedKey, wordBeingTypedPlugin } from './wordBeingTyped';
 import { forgetTextWidths } from './wordWidths';
@@ -53,7 +53,7 @@ function decorationsFor(pos: number, paragraph: PMNode, breaks: ChosenBreaks): D
 		pos,
 		pos + paragraph.nodeSize,
 		{ class: breaks.justified ? 'pm-line-par pm-line-justified' : 'pm-line-par' },
-		{ holdsParagraph: true }
+		{ holdsParagraph: true, justified: breaks.justified }
 	);
 	const ends = breaks.marks
 		.filter((mark) => !mark.inside)
@@ -63,12 +63,30 @@ function decorationsFor(pos: number, paragraph: PMNode, breaks: ChosenBreaks): D
 	return [held, ...ends];
 }
 
+function markKey(mark: Decoration): string {
+	return `${mark.from} ${mark.to} ${mark.spec.kind ?? mark.spec.justified}`;
+}
+
+// a mark carried through the edit stays where the new breaks want one like it: most keys move no line end at all, and
+// ProseMirror redraws every mark swapped for an equal one
+function marksToSwap(mine: Decoration[], wanted: Decoration[]): { stale: Decoration[]; fresh: Decoration[] } {
+	const drawn = new Map<string, Decoration>();
+	const stale: Decoration[] = [];
+	for (const old of mine) {
+		if (drawn.has(markKey(old))) stale.push(old);
+		else drawn.set(markKey(old), old);
+	}
+	const fresh = wanted.filter((mark) => !drawn.delete(markKey(mark)));
+	return { stale: [...stale, ...drawn.values()], fresh };
+}
+
 // a line end inside a suggestion's struck words goes on the widget's own spans, which no decoration reaches; ProseMirror
 // ignores changes inside a widget, and a redrawn widget comes back bare, so this runs again after every redraw
-function markStruckWords(block: HTMLElement, breaks: ChosenBreaks): void {
-	for (const widget of block.querySelectorAll<HTMLElement>('.pm-suggest-old')) {
-		const ends = breaks.marks.flatMap((mark) => (mark.inside && mark.inside.id === widget.dataset.comment ? [mark.inside] : []));
-		for (const span of widget.querySelectorAll<HTMLElement>('[data-i]')) {
+function markStruckWords(struck: StruckWords[], breaks: ChosenBreaks): void {
+	for (const words of struck) {
+		if (words.lineEnd) continue;
+		const ends = breaks.marks.flatMap((mark) => (mark.inside?.key === words.key ? [mark.inside] : []));
+		for (const span of words.element.querySelectorAll<HTMLElement>('[data-i]')) {
 			const i = Number(span.dataset.i);
 			span.classList.toggle(
 				'pm-line-break',
@@ -222,8 +240,8 @@ function lineBreaker(view: EditorView): { update(view: EditorView, before: Edito
 		const shown = fromScratch ? new WeakMap<PMNode, DrawnAs>() : held.shown;
 		const stale: Decoration[] = [];
 		const fresh: Decoration[] = [];
-		const withStruck: [HTMLElement, ChosenBreaks][] = [];
-		const anyStruck = (pmSuggestionsKey.getState(view.state)?.ranges ?? []).some(hasOldWords);
+		const withStruck: [PMNode, number, HTMLElement, ChosenBreaks][] = [];
+		const anyStruck = (pmSuggestionsKey.getState(view.state)?.ranges ?? []).some((r) => hasOldWords(r) || r.gone || r.brk === 'removed');
 		const large = isLargeDocument(doc);
 		if (!large)
 			doc.descendants((node, pos, parent) => {
@@ -240,9 +258,9 @@ function lineBreaker(view: EditorView): { update(view: EditorView, before: Edito
 				if (settled && (typeof known !== 'object' || !anyStruck)) return false;
 				const block = view.nodeDOM(pos);
 				if (!(block instanceof HTMLElement)) return false;
-				const struck = anyStruck ? struckWordsIn(view.state, node, pos, block) : [];
+				const struck = anyStruck ? struckWordsIn(view, node, pos, block) : [];
 				if (settled) {
-					if (typeof known === 'object' && struck?.length) withStruck.push([block, known]);
+					if (typeof known === 'object' && struck?.length) withStruck.push([node, pos, block, known]);
 					return false;
 				}
 				let breaks = known;
@@ -252,7 +270,7 @@ function lineBreaker(view: EditorView): { update(view: EditorView, before: Edito
 					outdated.delete(node);
 					if (typeof breaks === 'object') unchecked.add(block);
 					if (known && sameBreaks(known, breaks) && shown.get(node) === drawnAs(breaks)) {
-						if (typeof breaks === 'object' && struck?.length) withStruck.push([block, breaks]);
+						if (typeof breaks === 'object' && struck?.length) withStruck.push([node, pos, block, breaks]);
 						return false;
 					}
 				}
@@ -260,9 +278,10 @@ function lineBreaker(view: EditorView): { update(view: EditorView, before: Edito
 				const mine = current.find(pos, end).filter((old) => old.from >= pos && old.to <= end);
 				const drawn = drawnAs(breaks);
 				if (drawn === 'held' && typeof breaks === 'object') {
-					stale.push(...mine);
-					fresh.push(...decorationsFor(pos, node, breaks));
-					if (struck?.length) withStruck.push([block, breaks]);
+					const swap = marksToSwap(mine, decorationsFor(pos, node, breaks));
+					stale.push(...swap.stale);
+					fresh.push(...swap.fresh);
+					if (struck?.length) withStruck.push([node, pos, block, breaks]);
 				} else {
 					// only the hold comes off. Taking every mark out at once leaves ProseMirror more stale pieces of text
 					// than it looks past, and it then rebuilds the formulas and citations behind them
@@ -278,7 +297,10 @@ function lineBreaker(view: EditorView): { update(view: EditorView, before: Edito
 		if (decorations !== held.decorations || shown !== held.shown || held.native || held.plain !== plain)
 			publish({ decorations, shown, native: false, plain });
 		// after the publish, so the marks land on the spans as they are drawn now
-		for (const [block, breaks] of withStruck) if (view.dom.contains(block)) markStruckWords(block, breaks);
+		for (const [paragraph, pos, block, breaks] of withStruck) {
+			const struck = view.dom.contains(block) ? struckWordsIn(view, paragraph, pos, block) : null;
+			if (struck) markStruckWords(struck, breaks);
+		}
 		if (unchecked.size > 0 && !checkFrame) checkFrame = requestAnimationFrame(check);
 	}
 

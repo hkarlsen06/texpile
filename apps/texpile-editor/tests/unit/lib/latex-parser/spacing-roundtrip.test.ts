@@ -77,6 +77,7 @@ describe('math', () => {
 
 describe('an ellipsis', () => {
 	it('goes back to \\ldots instead of leaving a non-ASCII byte behind', () => {
-		expect(rt('a\\ldots b')).toBe('a\\ldots{} b');
+		// and the space its name ended on stays gone, as it is from the page
+		expect(rt('a\\ldots b')).toBe('a\\ldots{}b');
 	});
 });

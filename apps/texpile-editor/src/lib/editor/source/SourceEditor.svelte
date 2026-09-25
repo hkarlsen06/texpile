@@ -1,3 +1,8 @@
+<script lang="ts" module>
+	// a jump runs once: every switch into source mode mounts a new editor, which must not replay the last one
+	let lastGotoToken: number | null = null;
+</script>
+
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
 	import { EditorView, type ViewUpdate } from '@codemirror/view';
@@ -22,6 +27,7 @@
 	import { resolveGotoTarget } from './sourceGotoTarget';
 	import { TypstLspBinding } from './typstLspBinding';
 	import { openSourceContextMenu } from '$lib/editor/source/sourceContextMenu';
+	import { samePath } from '$lib/workspace/fileSystem';
 
 	// gotoLine: token makes repeat jumps to the same line re-fire; selectText anchors against line drift.
 	// initialScrollPos: one-shot mode-switch sync applied at mount.
@@ -52,7 +58,7 @@
 		filename?: string;
 		/** absolute path, for remembering this file's caret across tab switches */
 		docPath?: string | null;
-		gotoLine?: { line: number; token: number; selectText?: string };
+		gotoLine?: { line: number; token: number; selectText?: string; column?: number; path?: string };
 		onSyncToPdf?: (line: number) => void;
 		initialScrollPos?: { scroll: number | null; cursor: number | null } | null;
 		onHistoryBoundary?: (dir: 'undo' | 'redo') => boolean;
@@ -272,11 +278,12 @@
 
 	// the token has to be CHECKED, not just carried: the prop arrives inside an inline object
 	// literal, so a save or a compile re-runs this effect and would re-apply the last jump
-	let lastGotoToken: number | null = null;
 	$effect(() => {
 		const req = gotoLine;
 		if (!req || !view) return;
 		if (req.token === lastGotoToken) return;
+		// a jump into another file is for that file's editor, which mounts once it has opened
+		if (req.path && docPath && !samePath(req.path, docPath)) return;
 		lastGotoToken = req.token;
 		const { from, to } = resolveGotoTarget(view.state.doc, req);
 		view.dispatch({ selection: { anchor: from, head: to }, scrollIntoView: true, effects: flashLineEffect.of(from) });

@@ -9,8 +9,8 @@ import { m } from '$lib/paraglide/messages';
 const AUTOSAVE_MS = 1500;
 
 export type SaveDeps = {
-	/** shared session: every edit streams into the shared doc per keystroke. */
-	sessionEdit(path: string, content: string): void;
+	/** shared session: every edit streams into the shared doc per keystroke; `before` is the text it was made to */
+	sessionEdit(path: string, content: string, before?: string): void;
 	/** a guest has no disk: edits live in the CRDT only, pending/writes never engage. */
 	isGuest(): boolean;
 	autosaveActive(): boolean;
@@ -70,9 +70,9 @@ export class SavePipeline {
 
 	/** queue a debounced write; a save already queued for a DIFFERENT file flushes first so
 	 * switching files can never drop the previous file's edit. */
-	schedule(path: string | null, content: string) {
+	schedule(path: string | null, content: string, before?: string) {
 		if (!path) return;
-		this.deps.sessionEdit(path, content);
+		this.deps.sessionEdit(path, content, before);
 		if (this.deps.isGuest()) return;
 		if (this._pending && this._pending.path !== path) this.flush();
 		this._pending = { path, content };

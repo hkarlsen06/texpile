@@ -30,7 +30,10 @@ export const macroHandlers: Record<string, MacroHandler> = {
 	texpileItemLabel: (macro, ctx) => {
 		const content = getMacroFirstArg(macro);
 		const newCtx = { ...ctx, marks: [...ctx.marks, { type: 'strong' }, { type: 'item_label' }] };
-		return convertNodesToInline(content, newCtx);
+		// math has no text for the mark to ride on, so it wears it: a label of math alone (\item[$\star$]) went back as body
+		return convertNodesToInline(content, newCtx).map((n) =>
+			n.type.name === 'inline_math' ? n.mark(n.type.schema.marks.item_label.create().addToSet(n.marks)) : n
+		);
 	},
 
 	textbf: (macro, ctx) => {

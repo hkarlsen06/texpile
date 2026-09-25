@@ -2,7 +2,9 @@
 // source position, include targets, and the PDF pane scroll plumbing.
 import { editorViewStore } from '$lib/stores/editorStore';
 import { openFile } from '$lib/workspace/workspaceStore';
-import { docPositions } from '$lib/workspace/docPositions';
+import { Text } from '@codemirror/state';
+import { docPositions, offsetToRowCol } from '$lib/workspace/docPositions';
+import { resolveGotoTarget } from '$lib/editor/source/sourceGotoTarget';
 import { fileMode } from '$lib/workspace/fileMode.svelte';
 import { projectIntelStore } from '$lib/stores/projectIntel';
 import { updateLayout } from '$lib/storage/layout';
@@ -55,7 +57,7 @@ export class WorkspaceNav {
 	// a SyncTeX-inverse / Find-in-Files jump. the token distinguishes repeat jumps to the same line
 	// so the editor re-fires; selectText is the word double-clicked in the PDF, anchored on to
 	// correct for line drift (see SourceEditor's gotoLine effect)
-	sourceGotoLine = $state<{ line: number; token: number; selectText?: string; path: string } | undefined>(undefined);
+	sourceGotoLine = $state<{ line: number; token: number; selectText?: string; column?: number; path: string } | undefined>(undefined);
 	private gotoToken = 0;
 
 	// forward/inverse SyncTeX resolution lives in lib/workspace/syncTexNav.ts
@@ -100,20 +102,30 @@ export class WorkspaceNav {
 	 * position the visual restore reads back on mount (another file). Source/diff keep the source
 	 * jump. Find-in-Files style jumps keep calling openFileAtLine directly: those want the line.
 	 */
-	syncJumpToFileLine(file: string, line: number, selectText?: string): void {
+	syncJumpToFileLine(file: string, line: number, selectText?: string, column?: number): void {
 		const { doc, modes } = this.d;
 		if (modes.mode === 'visual' && hasVisualMode(this.d.kind())) {
 			const target = sessionRelativeTarget(file, this.d.guest());
-			docPositions.set(target, { row: line - 1, column: 0, firstVisibleLine: line }, { jump: true });
-			if (target === doc.path) {
+			// the Typst preview names a file by its URI: forward slashes, the drive letter in either case
+			const here = doc.path && samePath(target, doc.path) ? doc.path : null;
+			// the clicked word, as the source editor does: SyncTeX's line is off wherever the text moved since
+			// the compile, and at some places (a paragraph's indent) the engine names another line entirely
+			const at =
+				column !== undefined
+					? { row: line - 1, column }
+					: here && selectText
+						? offsetToRowCol(doc.texSource, resolveGotoTarget(Text.of(doc.texSource.split('\n')), { line, selectText }).from)
+						: { row: line - 1, column: 0 };
+			docPositions.set(target, { ...at, firstVisibleLine: at.row + 1 }, { jump: true });
+			if (here) {
 				const v = editorViewStore.current;
-				if (v) restoreVisualPosition(v, target, doc.texSource, doc.sourceMap);
+				if (v) restoreVisualPosition(v, here, doc.texSource, doc.sourceMap);
 			} else if (needsActivate(target)) {
 				openFile(target);
 			}
 			return;
 		}
-		this.openFileAtLine(file, line, selectText);
+		this.openFileAtLine(file, line, selectText, column);
 	}
 
 	/**
@@ -163,11 +175,11 @@ export class WorkspaceNav {
 	}
 
 	/** open a file in source mode and jump to a 1-based line (SyncTeX inverse + Find-in-Files) */
-	openFileAtLine(file: string, line: number, selectText?: string): void {
+	openFileAtLine(file: string, line: number, selectText?: string, column?: number): void {
 		const target = sessionRelativeTarget(file, this.d.guest());
 		this.d.modes.mode = 'source';
 		updateLayout({ viewMode: 'source' });
-		this.sourceGotoLine = { line, token: ++this.gotoToken, selectText, path: target };
+		this.sourceGotoLine = { line, token: ++this.gotoToken, selectText, column, path: target };
 		if (needsActivate(target)) openFile(target);
 	}
 

@@ -13,7 +13,8 @@ import {
 
 export type EditMode = 'editing' | 'suggesting';
 
-export type WhitespaceChanges = 'exact' | 'paragraphs';
+/** `lists` is `paragraphs` where the spaces before a list marker are the item's depth */
+export type WhitespaceChanges = 'exact' | 'paragraphs' | 'lists';
 
 export type TypingSide = 'before' | 'after';
 
@@ -76,6 +77,7 @@ function sameWords(text: string, s: { from: number; to: number; restore: string 
 export function compareSuggestions(o: CompareInput): ComparedSuggestions {
 	const { before, after, mode, author: me } = o;
 	const exact = o.whitespace === 'exact';
+	const lists = o.whitespace === 'lists';
 	const given = o.pending
 		.filter((s) => s.from >= 0 && s.to >= s.from && s.to <= before.length)
 		.sort((a, b) => a.from - b.from || a.to - b.to);
@@ -83,8 +85,8 @@ export function compareSuggestions(o: CompareInput): ComparedSuggestions {
 	const typing = mode === 'suggesting' ? (o.gestures ?? []) : [];
 	let hunks = clearOfSuggestions(textHunks(before, after), before, after, given, typing);
 	if (mode === 'suggesting') {
-		const words = snapToWords(hunks, before, after, given, exact);
-		hunks = joinGestures(words, before, after, typing, exact);
+		const words = snapToWords(hunks, before, after, given, exact, lists);
+		hunks = joinGestures(words, before, after, typing, exact, lists);
 	}
 	if (hunks.length === 0) return { placed: given, changes: [] };
 
@@ -149,7 +151,7 @@ export function compareSuggestions(o: CompareInput): ComparedSuggestions {
 	}
 
 	function neutralHere(h: Hunk, inserted: string, owners: Set<number>, acceptedGone: boolean): boolean {
-		if (exact || !neutral(before, after, h)) return false;
+		if (exact || !neutral(before, after, h, lists)) return false;
 		if (entries.some((e, i) => isPoint(i) && !e.fate && e.from >= h.aFrom && e.from <= h.aTo)) return false;
 		function typedOn(e: Entry, i: number) {
 			if (e.author !== me || e.fate) return false;

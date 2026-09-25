@@ -76,7 +76,7 @@ export function createWorkspacePipelines(d: PipelineDeps) {
 		getVisualCaretSourcePos: (): { line: number; character: number } | null => nav.visualCaretSourcePos(),
 		flushSaves: () => d.editFlow().saver.flushAndWait(),
 		refreshTree: () => d.files().refreshTree(),
-		syncJumpToFileLine: (file: string, line: number) => nav.syncJumpToFileLine(file, line)
+		syncJumpToFileLine: (file: string, line: number, column?: number) => nav.syncJumpToFileLine(file, line, undefined, column)
 	});
 	// compile / terminal / PDF-watch orchestration lives in lib/workspace/compilePipeline.svelte.ts
 	const compiler: CompilePipeline = new CompilePipeline({

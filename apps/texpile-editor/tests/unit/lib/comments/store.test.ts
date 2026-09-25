@@ -1,13 +1,17 @@
-import { it, expect, vi } from 'vitest';
-import { buildAnchor } from '$lib/comments/anchor';
-import { openEvent, replyEvent } from '$lib/comments/log';
+import { describe, it, expect, vi } from 'vitest';
+import * as Y from 'yjs';
+import { buildAnchor, type CommentAnchor } from '$lib/comments/anchor';
+import { anchorEvent, deleteEvent, openEvent, replyEvent, resolveEvent, foldLog, parseLog, type CommentEvent } from '$lib/comments/log';
 
 let disk = '';
+/** per path, for tests that keep more than one log */
+const disks: Record<string, string> = {};
 
 vi.mock('$lib/workspace/fileSystem', () => ({
-	readTextFile: async () => disk,
-	writeTextFile: async (_path: string, text: string) => {
-		disk = text;
+	readTextFile: async (path: string) => (path.startsWith('/w/') ? disk : (disks[path] ?? '')),
+	writeTextFile: async (path: string, text: string) => {
+		if (path.startsWith('/w/')) disk = text;
+		else disks[path] = text;
 	}
 }));
 vi.mock('$lib/workspace/texpileDir', () => ({
@@ -16,6 +20,7 @@ vi.mock('$lib/workspace/texpileDir', () => ({
 }));
 
 const { CommentStore } = await import('$lib/comments/store.svelte');
+const { commentLogOf, shareCommentLog } = await import('$lib/collab/sharedComments');
 
 it('writes back the lines it cannot read, in place, and drops merge leftovers', async () => {
 	const open = JSON.stringify(
@@ -56,8 +61,8 @@ it('serves staged events with the written ones, and says whether a discard dropp
 	expect(store.serialize()).toBe('\n');
 });
 
-// the catch-up log can land after a guest's own new comment, and after the host's echo of it
-it('keeps what this side appended when a log served before it lands', async () => {
+// a read from disk can land after this side's own newer write
+it('keeps what this side appended when an older read of the log lands', async () => {
 	const store = new CommentStore();
 	await store.load(null);
 	const hostOpen = openEvent({ id: 'h1', file: 'main.tex', by: 'louis', body: 'first', anchor: buildAnchor('some text', 0, 4), at: 'now' });
@@ -71,4 +76,169 @@ it('keeps what this side appended when a log served before it lands', async () =
 	store.adoptLog([hostOpen, guestOpen].map((e) => JSON.stringify(e)).join('\n') + '\n');
 	expect(store.threads.map((t) => t.id)).toEqual(['h1', 'g1']);
 	expect(store.serialize().trim().split('\n')).toHaveLength(2);
+});
+
+/** deterministic PRNG (mulberry32) so a failure reproduces byte-for-byte */
+function rng(seed: number): () => number {
+	let a = seed;
+	return () => {
+		a |= 0;
+		a = (a + 0x6d2b79f5) | 0;
+		let t = Math.imul(a ^ (a >>> 15), 1 | a);
+		t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+	};
+}
+
+/** two copies of a shared doc that pass every change straight to each other, as a session does */
+function linkedDocs(): [Y.Doc, Y.Doc] {
+	const a = new Y.Doc();
+	const b = new Y.Doc();
+	a.on('update', (u: Uint8Array, origin: unknown) => origin !== b && Y.applyUpdate(b, u, a));
+	b.on('update', (u: Uint8Array, origin: unknown) => origin !== a && Y.applyUpdate(a, u, b));
+	return [a, b];
+}
+
+/** a host store and a guest store on one session log */
+function session(root: string) {
+	const [hostDoc, guestDoc] = linkedDocs();
+	const host = new CommentStore();
+	const guest = new CommentStore();
+	const share = {
+		host: shareCommentLog(commentLogOf(hostDoc), 'host', () => host.follow()),
+		guest: shareCommentLog(commentLogOf(guestDoc), 'guest', () => guest.follow())
+	};
+	return {
+		host,
+		guest,
+		log: () => commentLogOf(hostDoc).toArray(),
+		disk: () => disks[`${root}/.texpile/comments.jsonl`] ?? '',
+		async start() {
+			await host.load(root);
+			await guest.load(null);
+			host.startSharing(share.host, true);
+			guest.startSharing(share.guest, false);
+		}
+	};
+}
+
+const anchorAt = (from: number, to: number): CommentAnchor =>
+	buildAnchor('We prove the estimator is sharp for smooth solutions.', from, to);
+const typed = (id: string, restore: string) =>
+	openEvent({ id, file: 'main.tex', by: 'ana', body: '', anchor: anchorAt(0, 2), at: 'now', restore });
+
+const STORE_SHARE_RUNS = Number(process.env.STORE_SHARE_RUNS ?? 60);
+
+describe('a store following a session log', () => {
+	it('puts the host log and staged events in first, and keeps the staged ones off disk until a save', async () => {
+		const opened = openEvent({ id: 'c1', file: 'main.tex', by: 'ana', body: 'hm', anchor: anchorAt(3, 8), at: 'now' });
+		disks['/seed/.texpile/comments.jsonl'] = JSON.stringify(opened) + '\n';
+		const s = session('/seed');
+		await s.host.load('/seed');
+		s.host.stage(typed('s1', 'Our'));
+		await s.start();
+		expect(s.guest.threads.map((t) => t.id)).toEqual(['c1', 's1']);
+		expect(parseLog(s.disk()).map((e) => e.t)).toEqual(['open']);
+		await s.host.append();
+		expect(parseLog(s.disk()).map((e) => (e.t === 'open' ? e.id : e.t))).toEqual(['c1', 's1']);
+	});
+
+	it('keeps one unsaved anchor per suggestion in the session, not one per keystroke', async () => {
+		const s = session('/anchors');
+		await s.start();
+		s.host.stage(typed('s1', 'Our'));
+		for (let i = 1; i <= 20; i++) {
+			const restore = i === 1 ? { restore: 'Ours' } : {};
+			s.host.stage(anchorEvent({ thread: 's1', anchor: anchorAt(0, i), by: 'ana', at: `t${i}`, ...restore }));
+		}
+		expect(s.log()).toHaveLength(2);
+		expect(s.guest.threads[0].anchor.end).toBe(20);
+		expect(s.guest.threads[0].restore).toBe('Ours');
+		await s.host.append();
+		// saved as one line, the way a solo save collapses the staged events
+		expect(s.log()).toHaveLength(1);
+		expect(parseLog(s.disk())).toEqual([{ ...typed('s1', 'Ours'), anchor: anchorAt(0, 20) }]);
+	});
+
+	it('takes lines someone added to the file during the session into it, and only those', async () => {
+		const s = session('/pulled');
+		await s.start();
+		await s.host.append(replyEvent({ id: 'r0', thread: 'none', by: 'ana', body: 'x', at: 'now' }));
+		const pulled = openEvent({ id: 'p1', file: 'main.tex', by: 'bo', body: 'from git', anchor: anchorAt(3, 8), at: 'later' });
+		disks['/pulled/.texpile/comments.jsonl'] = s.disk() + JSON.stringify(pulled) + '\n';
+		await s.host.reload();
+		expect(s.log()).toHaveLength(2);
+		expect(s.guest.threads.map((t) => t.id)).toEqual(['p1']);
+		await s.host.reload();
+		expect(s.log()).toHaveLength(2);
+	});
+
+	it('stages again what was unsaved when the session ends', async () => {
+		const s = session('/ends');
+		await s.start();
+		s.host.stage(typed('s1', 'Our'));
+		s.host.stopSharing();
+		expect(s.host.hasStaged).toBe(true);
+		expect(s.host.serialize()).toBe(JSON.stringify(typed('s1', 'Our')) + '\n');
+	});
+
+	// the oracle: any run of staged events, saves, replies and discards writes byte for byte what the
+	// store writes on its own, and a guest following the session sees the same threads throughout
+	it(
+		'writes what a store on its own writes, for any run of staged events and saves',
+		async () => {
+			for (let seed = 1; seed <= STORE_SHARE_RUNS; seed++) {
+				// every open is a new thread, as a random id makes it in the app; the rest name an opened one
+				const ids: string[] = [];
+				const rand = rng(seed);
+				const pick = <T>(xs: T[]): T => xs[Math.floor(rand() * xs.length)];
+				const solo = new CommentStore();
+				await solo.load(`/solo${seed}`);
+				const s = session(`/shared${seed}`);
+				await s.start();
+				const both = async (f: (store: InstanceType<typeof CommentStore>) => unknown) => {
+					await f(solo);
+					await f(s.host);
+				};
+				const done: string[] = [];
+				for (let step = 0; step < 40; step++) {
+					const roll = ids.length ? rand() : 0;
+					const id = roll < 0.2 ? `s${ids.push(`s${ids.length}`) - 1}` : pick(ids);
+					const at = `t${step}`;
+					const anchor = anchorAt(Math.floor(rand() * 10), 10 + Math.floor(rand() * 20));
+					let e: CommentEvent | null = null;
+					if (roll < 0.2) e = openEvent({ id, file: 'main.tex', by: 'ana', body: '', anchor, at, restore: pick(['', 'old', 'older']) });
+					else if (roll < 0.5) {
+						const restore = rand() < 0.5 ? { restore: pick(['', 'a', 'b']) } : {};
+						const file = rand() < 0.15 ? { file: pick(['main.tex', 'other.tex']) } : {};
+						e = anchorEvent({ thread: id, anchor, by: 'ana', at, ...restore, ...file });
+					} else if (roll < 0.58) e = resolveEvent({ thread: id, resolved: true, decision: 'closed', by: 'ana', at });
+					else if (roll < 0.66) e = deleteEvent({ thread: id, by: 'ana', at });
+					if (e) {
+						const staged = e;
+						done.push(`stage ${JSON.stringify(e)}`);
+						await both((store) => store.stage(staged));
+					} else if (roll < 0.8) {
+						done.push('save');
+						await both((store) => store.append());
+					} else if (roll < 0.9) {
+						done.push(`reply ${id}`);
+						await both((store) => store.append(replyEvent({ id: `r${step}`, thread: id, by: 'bo', body: 'ok', at })));
+					} else {
+						const file = pick(['main.tex', 'other.tex']);
+						done.push(`discard ${file}`);
+						await both((store) => store.discardStaged(file));
+					}
+					const where = [`seed ${seed} step ${step}`, ...done.slice(-12)].join('\n');
+					expect(JSON.stringify(s.host.threads), where).toBe(JSON.stringify(solo.threads));
+					expect(JSON.stringify(s.guest.threads), where).toBe(JSON.stringify(solo.threads));
+					expect(s.disk(), where).toBe(disks[`/solo${seed}/.texpile/comments.jsonl`] ?? '');
+				}
+				await both((store) => store.append());
+				expect(s.disk()).toBe(disks[`/solo${seed}/.texpile/comments.jsonl`] ?? '');
+				expect(foldLog(parseLog(s.log().join('\n')))).toEqual(solo.threads);
+			}
+		},
+		30_000 + STORE_SHARE_RUNS * 20
+	);
 });

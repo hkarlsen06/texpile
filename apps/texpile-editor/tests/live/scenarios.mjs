@@ -135,6 +135,15 @@ export const FIXTURES = [
 				op: { t: 'deleteAfter', n: 90 },
 				expect: ['EXACT'],
 				maxMs: 16000
+			},
+			{
+				// the last whole paragraph before the break loses a line, and the page builder takes the next line
+				// of the paragraph straddling the break back onto the first page
+				name: 'underflow-pull',
+				anchor: 'Filler paragraph fillerthirteen',
+				op: { t: 'deleteAfter', n: 55 },
+				expect: ['EXACT'],
+				maxMs: 16000
 			}
 		]
 	},
@@ -178,6 +187,12 @@ export const FIXTURES = [
 		]
 	},
 	{
+		// a two-sided page stretched to its foot with a booktabs [h] table in its flow: the table's rules refused
+		// every certificate on the page until the float was read as one box of the list
+		name: 'floatpage',
+		scenarios: [{ name: 'float-page-stretched-edit', anchor: 'A compile would', op: { t: 'append', text: 'x' }, expect: ['EXACT'] }]
+	},
+	{
 		name: 'cjk',
 		scenarios: [
 			{ name: 'cjk-prose', anchor: '字体', expect: ['EXACT'] },
@@ -198,6 +213,16 @@ export const FIXTURES = [
 				name: 'book-stretch-grow',
 				anchor: 'certificate machinery',
 				op: { t: 'append', text: ' plus the appended clause that makes the paragraph one line taller than before' },
+				expect: ['EXACT'],
+				maxMs: 16000
+			},
+			{
+				// the display above hangs so deep that TeX put \lineskip over this paragraph, so a taller first line
+				// moves it and everything under it down, where \baselineskip would have held its baseline still: the
+				// engine packs the column again, and the adopted records are graded against the compile after it
+				name: 'book-taller-under-display',
+				anchor: 'Filler alpha',
+				op: { t: 'append', text: ' Å' },
 				expect: ['EXACT'],
 				maxMs: 16000
 			}
@@ -257,6 +282,38 @@ export const FIXTURES = [
 			// prose that USES a macro without touching it: nothing about the command moved, so
 			// both gates should render, and the structural one must not refuse on presence alone
 			{ name: 'prose-using-macro', anchor: 'continues with enough', expect: ['EXACT'] }
+		]
+	},
+	{
+		// 11pt: a leading of 1.2 times the size is 13.2pt, TeX's is 13.6pt, so a guess shows
+		name: 'probe',
+		scenarios: [
+			{ name: 'one-line-edit', anchor: 'one line paragraph', expect: ['EXACT'] },
+			{
+				name: 'one-line-wraps',
+				anchor: 'ends here.',
+				op: { t: 'append', text: ' It then carries on with enough further words to wrap onto a second line of the column.' },
+				expect: ['EXACT']
+			},
+			{
+				name: 'paragraph-grows',
+				anchor: 'or loses one.',
+				op: { t: 'append', text: ' Enough words are added here to make the paragraph take one more line than it did.' },
+				expect: ['EXACT']
+			}
+		]
+	},
+	{
+		// a footnote above the edit: TeX keeps it at the foot while the text grows, which no push of
+		// the column below reproduces and the skeleton cannot model
+		name: 'probefoot',
+		scenarios: [
+			{
+				name: 'grows-below-note',
+				anchor: 'when a line grows.',
+				op: { t: 'append', text: ' Enough words are added here to make the paragraph take one more line than it did.' },
+				expect: ['RECOMPILE']
+			}
 		]
 	}
 ];

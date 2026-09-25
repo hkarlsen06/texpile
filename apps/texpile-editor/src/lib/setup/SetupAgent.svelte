@@ -17,7 +17,6 @@
 		codex: () => m.prefs_ai_agent_codex(),
 		agy: () => m.prefs_ai_agent_agy()
 	};
-	const here = $derived(PRESET_AGENTS.filter((a) => installed?.[a]));
 	const picked = $derived(settings.current.aiAgent ?? '');
 
 	function pick(value: PresetAgent | 'custom' | ''): void {
@@ -27,8 +26,15 @@
 
 <div class="flex flex-col gap-2.5">
 	<SetupChoice kind="radio" checked={picked === ''} label={m.prefs_ai_agent_off()} onpick={() => pick('')} />
-	{#each here as a (a)}
-		<SetupChoice kind="radio" checked={picked === a} label={LABELS[a]()} aside={m.prefs_ai_agent_installed()} onpick={() => pick(a)} />
+	{#each PRESET_AGENTS as a (a)}
+		<SetupChoice
+			kind="radio"
+			checked={picked === a}
+			label={LABELS[a]()}
+			aside={installed === null ? undefined : installed[a] ? m.prefs_ai_agent_installed() : m.setup_agent_not_installed()}
+			disabled={installed !== null && !installed[a]}
+			onpick={() => pick(a)}
+		/>
 	{/each}
 	<SetupChoice kind="radio" checked={picked === 'custom'} label={m.prefs_ai_agent_custom()} onpick={() => pick('custom')} />
 </div>

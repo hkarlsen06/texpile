@@ -29,7 +29,7 @@ function attrsEqualExceptStamps(a: Record<string, unknown>, b: Record<string, un
 }
 
 // the stamps live only on top-level blocks, so children compare with plain .eq
-function blockEq(a: PMNode, b: PMNode): boolean {
+export function blockEq(a: PMNode, b: PMNode): boolean {
 	return a.type === b.type && Mark.sameSet(a.marks, b.marks) && attrsEqualExceptStamps(a.attrs, b.attrs) && a.content.eq(b.content);
 }
 

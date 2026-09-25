@@ -15,6 +15,8 @@
 	import type { RegionParser, SourceMap } from '$lib/editor/visual/sourceSpans';
 	import { sourceAnchorFor, type SourceAnchorFn } from '$lib/editor/visual/extensions/pmComments';
 	import { dirname } from '$lib/workspace/fileSystem';
+	import { caretFromMargin } from '$lib/editor/visual/marginClick';
+	import { editorViewStore } from '$lib/stores/editorStore';
 	import { m } from '$lib/paraglide/messages';
 
 	let {
@@ -87,7 +89,11 @@
      The \noindent marker has to fit this 48px too, which is why it is abbreviated (app.css).
      No bottom padding: the editor itself runs to the foot of the pane (app.css), so a drop or a
      click below the last block lands in it -->
-<div class="flex min-h-full flex-col px-12 pt-8">
+<div
+	class="flex min-h-full flex-col px-12 pt-8"
+	onmousedown={(event) => caretFromMargin(event, editorViewStore.current)}
+	role="presentation"
+>
 	<!-- the measure: past it a wide window pads with empty space rather than stretching the line length -->
 	<div class="texpile-main-editor mx-auto w-full max-w-3xl min-w-0">
 		{#if docMeta?.hadDocumentEnv && kind === 'tex'}

@@ -50,7 +50,7 @@ export type EditorPaneProps = {
 	onUseSource?: () => void;
 	docMeta: Pick<ParsedLatexFile, 'preamble' | 'postamble' | 'hadDocumentEnv'> | null;
 	allReferences: BiblatexReference[];
-	sourceGotoLine: { line: number; token: number; selectText?: string } | undefined;
+	sourceGotoLine: { line: number; token: number; selectText?: string; column?: number; path?: string } | undefined;
 	sourceScrollAnchor: { scroll: number | null; cursor: number | null } | null;
 	sourceDiagnostics: NonNullable<ComponentProps<typeof SourceEditor>['diagnostics']>;
 	diffOriginal: string;

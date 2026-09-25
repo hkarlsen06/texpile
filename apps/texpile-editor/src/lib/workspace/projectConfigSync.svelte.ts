@@ -18,6 +18,7 @@ import {
 	savedMainFileRel,
 	setMainFile,
 	effectiveCompileFormat,
+	mainFile,
 	isCommandTrusted,
 	trustCommand,
 	type CompileOutputs
@@ -51,6 +52,11 @@ function defaults(): CompileConfigState {
 
 /** the adopted state, reactive; defaults between folders and for guests (who never compile). */
 export const compileConfig = box<CompileConfigState>(defaults());
+
+/** the folder's live mode where it applies: to a main file that compiles with LaTeX */
+export function latexLiveMode(): boolean {
+	return compileConfig.current.latex.liveMode && effectiveCompileFormat(mainFile.current) === 'latex';
+}
 
 export class ProjectConfigSync {
 	/** a command the project asks for that this machine has not accepted; drives the bar */
@@ -115,7 +121,9 @@ export class ProjectConfigSync {
 			else if (format === effectiveCompileFormat(savedMainFile(root))) pending = { root, format, command: fc.command };
 		}
 		this.pending = pending;
-		compileConfig.current = state;
+		// unchanged settings keep their object: a new one on every save re-ran everything that reads them, and the Typst
+		// preview retried a missing tinymist, one toast per keystroke's save
+		if (JSON.stringify(state) !== JSON.stringify(compileConfig.current)) compileConfig.current = state;
 	}
 
 	/**

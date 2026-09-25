@@ -97,7 +97,9 @@ http
 							// \splitmaxdepth at its permissive default: the harness held more in a
 							// column than the page builder does, and graded renders against a fit
 							// the product never claims
-							capacity: body.capacity
+							capacity: body.capacity,
+							pack: body.pack,
+							maxDepth: body.maxDepth
 						})
 					);
 				case '/synctex':

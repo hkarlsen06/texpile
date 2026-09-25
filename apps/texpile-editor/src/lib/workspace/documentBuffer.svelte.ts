@@ -55,12 +55,12 @@ export function isRawTextKind(kind: FileKind): kind is 'text' | 'bib' {
 }
 
 export type DocumentBufferDeps = {
-	/** queue a debounced write of the given content */
-	scheduleSave(path: string | null, content: string): void;
+	/** queue a debounced write of the given content; `before` is the text the change was made to */
+	scheduleSave(path: string | null, content: string, before?: string): void;
 	/** drop a queued write (the buffer already matches disk) */
 	discardQueuedSave(): void;
 	/** hand an edit to a shared session even when it leaves the file as saved */
-	shareEdit?(path: string | null, content: string): void;
+	shareEdit?(path: string | null, content: string, before?: string): void;
 	/** write immediately, notifying the user; force bypasses the external-write guard (conflict
 	 * modal's "keep mine", where the user has seen disk differs and chosen to overwrite) */
 	writeNow(path: string, content: string, force?: boolean): void;
@@ -240,9 +240,9 @@ export class DocumentBuffer {
 		this.binaryWarning = { path, size };
 	}
 
-	private queueSave(text: string): void {
+	private queueSave(text: string, before?: string): void {
 		if (this.encodingIssue) return;
-		this.deps.scheduleSave(this.path, text);
+		this.deps.scheduleSave(this.path, text, before);
 	}
 
 	adoptParsed(parsed: ParsedLatexFile, source: string): void {
@@ -269,6 +269,7 @@ export class DocumentBuffer {
 	onVisualChange(doc: PMNode): void {
 		if (!this.docMeta || this.visualStale) return;
 		this.lastDoc = doc;
+		const before = this.texSource;
 		const { text, map } = this.serializeFile(doc);
 		this.texSource = text;
 		this.sourceMap = map;
@@ -280,13 +281,27 @@ export class DocumentBuffer {
 			if (isDirty.current) isDirty.current = false;
 			this.deps.discardQueuedSave();
 			// the shared text still holds the edit being undone (a guest's baseline never moves at all)
-			this.deps.shareEdit?.(this.path, this.texSource);
+			this.deps.shareEdit?.(this.path, this.texSource, before);
 			return;
 		}
 		isDirty.current = true;
-		this.queueSave(this.texSource);
+		this.queueSave(this.texSource, before);
 		this.deps.noteLocalEdit();
 		this.deps.clearPendingAnchor();
+	}
+
+	/** a doc patched in from a collaborator's change that is not the parse's own: its map is of the text
+	 *  it writes, and text other than the shared one is an edit of its own */
+	restate(doc: PMNode): void {
+		if (!this.docMeta) return;
+		const before = this.texSource;
+		const { text, map } = this.serializeFile(doc);
+		this.sourceMap = map;
+		this.lastDocSource = text;
+		if (text === before) return;
+		this.texSource = text;
+		isDirty.current = true;
+		this.queueSave(text, before);
 	}
 
 	/** inline preamble-frontmatter edit (\title/\author/\date): splice the new text into the
@@ -294,12 +309,13 @@ export class DocumentBuffer {
 	editFrontmatter(kind: string, inner: string): void {
 		if (!this.docMeta || !this.lastDoc || this.kind !== 'tex') return; // \title/\author is LaTeX-only
 		this.docMeta = { ...this.docMeta, preamble: replacePreambleFrontmatter(this.docMeta.preamble, kind, inner) };
+		const before = this.texSource;
 		const { text, map } = serializeLatexFileDetailed(this.docMeta, this.lastDoc);
 		this.texSource = text;
 		this.sourceMap = map;
 		this.lastDocSource = this.texSource;
 		isDirty.current = true;
-		this.queueSave(this.texSource);
+		this.queueSave(this.texSource, before);
 	}
 
 	/** a source edit IS texSource, write it verbatim */
@@ -317,10 +333,11 @@ export class DocumentBuffer {
 
 	/** replace the whole source (formatter, disk reload, history step) and re-derive the views */
 	replaceSource(text: string, opts: { dirty: boolean }): void {
+		const before = this.texSource;
 		this.texSource = text;
 		if (opts.dirty) {
 			isDirty.current = true;
-			this.queueSave(text);
+			this.queueSave(text, before);
 		}
 		if (this.deps.isVisualMode()) this.deps.rebuildVisual();
 	}

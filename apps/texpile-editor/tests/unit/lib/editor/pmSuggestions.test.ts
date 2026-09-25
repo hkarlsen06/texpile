@@ -153,10 +153,84 @@ it('keeps struck words in their own tint while a selection crosses them and afte
 	view.destroy();
 });
 
+// a Delete of `restore` at the end of `words`, drawn in a view of `source`
+function drawnCut(source: string, words: string, restore: string) {
+	const at = source.indexOf(words) + words.length;
+	const file = parseLatexFile(source);
+	const s = { id: 'cut', from: at, to: at, restore, mine: true, anchor: buildAnchor(source, at, at) };
+	const { ranges } = placePmSuggestions(file.doc, [s], {
+		text: source,
+		map: file.map,
+		body: { from: 0, to: source.length },
+		parse: (src) => parseLatexRegion(src)
+	});
+	const view = new EditorView(document.body.appendChild(document.createElement('div')), {
+		state: EditorState.create({ doc: file.doc, plugins: [pmSuggestions()] })
+	});
+	setPmSuggestions(view, ranges);
+	return view;
+}
+
+// Louis's screenshot: the end of the first item drawn as a line of the block, the last item's words as
+// another, and under the block an empty line the caret could be put on
+it('strikes the words cut from an item in its line and stands the items taken whole after it', () => {
+	const view = drawnCut(
+		'\\begin{itemize}\n\\item Paragraphs wra\n\\end{itemize}\n\n\\begin{enumerate}\n\\item First, open the folder.\n\\end{enumerate}\n',
+		'Paragraphs wra',
+		'pped by hand.\n\\item Inline math such as $E = mc^2$.\n\\item A table, a link and a quotation.'
+	);
+	const first = view.dom.querySelector('p')!;
+	expect(first.querySelector('.pm-suggest-old')?.textContent).toBe('pped by hand.');
+	const gone = view.dom.querySelector('.pm-suggest-gone')!;
+	expect(gone.parentElement).toBe(view.dom);
+	const items = [...gone.querySelectorAll('.prosemirror-flat-list')];
+	expect(items.map((item) => item.querySelector('[role=math]')?.getAttribute('aria-label') ?? item.textContent)).toEqual([
+		'E = mc^2',
+		'A table, a link and a quotation.'
+	]);
+	expect(gone.previousElementSibling?.textContent).toBe('Paragraphs wrapped by hand.');
+	view.destroy();
+});
+
+// Docs style: until it is decided, the cut leaves each end on the line it was on, with the items it took
+// whole between them where they stood
+it('keeps each end of a cut on its own line with the items taken whole between them', () => {
+	const view = drawnCut(
+		'\\begin{itemize}\n\\item Paragraphs wraa link and a quotation.\n\\end{itemize}\n\n\\begin{enumerate}\n\\item First.\n\\end{enumerate}\n',
+		'Paragraphs wra',
+		'pped by hand.\n\\item Inline math.\n\\item A table, '
+	);
+	const first = view.dom.querySelector('p')!;
+	const drawn = [...first.querySelectorAll('.pm-suggest-old, .pm-suggest-break-removed')].filter(
+		(e) => !e.parentElement?.closest('.pm-suggest-gone')
+	);
+	expect(
+		drawn.map((e) =>
+			e.classList.contains('pm-suggest-gone') ? `[${e.textContent}]` : e.classList.contains('pm-suggest-break') ? '|' : e.textContent
+		)
+	).toEqual(['pped by hand.', '|', '[Inline math.]', 'A table, ']);
+	expect(first.querySelector('.pm-suggest-gone')?.hasAttribute('data-line-end')).toBe(true);
+	view.destroy();
+});
+
+it('ends the line a removed paragraph break ended, after the bar', () => {
+	const view = drawnCut('First paragraph.Second paragraph.\n', 'First paragraph.', '\n\n');
+	const p = view.dom.querySelector('p')!;
+	const bar = p.querySelector('.pm-suggest-break-removed')!;
+	expect(bar).not.toBeNull();
+	expect(bar.nextElementSibling?.matches('br[data-line-end]')).toBe(true);
+	view.destroy();
+});
+
+it('draws a table taken out as a table and a formula as the formula', () => {
+	const { doc } = parseLatexFile('\\begin{tabular}{ll}\na & b \\\\\n\\end{tabular}\n\n\\[ x^2 \\]\n');
+	const drawn = goneBlocksElement(doc.type.schema, [doc.child(0), doc.child(1)], 'x', false);
+	expect([...drawn.querySelectorAll('table td')].map((td) => td.textContent)).toEqual(['a', 'b']);
+	expect(drawn.querySelector('[role=math]')?.getAttribute('aria-label')).toBe('x^2');
+});
+
 it('draws a struck include as the text its chip shows', () => {
 	const { doc } = parseLatexFile('\\input{intro}\n\n\\include{related}\n');
 	const blocks = [doc.child(0), doc.child(1)];
-	expect(goneBlocksElement(doc.type.schema, { head: [], blocks, tail: [] }, 'x', false).textContent).toBe(
-		'\\input{intro}\\include{related}'
-	);
+	expect(goneBlocksElement(doc.type.schema, blocks, 'x', false).textContent).toBe('\\input{intro}\\include{related}');
 });

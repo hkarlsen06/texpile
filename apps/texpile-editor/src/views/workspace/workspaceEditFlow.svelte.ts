@@ -42,7 +42,7 @@ export class WorkspaceEditFlow {
 		const { doc, modes } = d.wsdoc;
 		// debounced autosave + serial write chain live in lib/workspace/savePipeline.svelte.ts
 		this.saver = new SavePipeline({
-			sessionEdit: (path, content) => d.session().edit(path, content),
+			sessionEdit: (path, content, before) => d.session().edit(path, content, before),
 			isGuest: d.guest,
 			autosaveActive: () => this.autosaveActive(),
 			// autosave stands down for this file: writing would recreate a name the user did not ask

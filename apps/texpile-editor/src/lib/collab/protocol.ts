@@ -76,16 +76,7 @@ export type ControlPayload =
 	// host -> guests, unsolicited: tinymist's live diagnostics. Measured to be published for files
 	// the host does not have open, so this is a straight relay rather than the host having to hold
 	// every guest's file open on their behalf.
-	| { kind: 'lsp-notify'; method: string; params?: unknown }
-	/**
-	 * One review-comment event, in both directions: a guest asking the host to append it, and the
-	 * host telling everyone it happened.
-	 *
-	 * The log is already an append-only event stream, so the thing on the wire is the thing on
-	 * disk - there is no second representation to keep in step. The whole log at join time is too
-	 * big for a control frame and goes over the blob channel instead (blob name 'comments').
-	 */
-	| { kind: 'comment-event'; event: CommentEvent };
+	| { kind: 'lsp-notify'; method: string; params?: unknown };
 
 /**
  * One hop of the Typst preview relay.

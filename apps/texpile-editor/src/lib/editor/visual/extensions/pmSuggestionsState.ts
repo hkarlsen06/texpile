@@ -19,9 +19,11 @@ export type PmSuggestionsMeta =
 export const pmSuggestionsKey = new PluginKey<PmSuggestionsState>('texpile-suggestions');
 
 export function hasOldWords(r: PmSuggestionRange): boolean {
-	// blocks that are gone hang at a join rather than beside a caret, so none of the caret's own
-	// machinery (stepping over them, typing on a side of them) has anything to act on
-	return !!r.restore && !r.partial && !r.format && !r.gone && !r.node && !r.brk && r.old.length > 0;
+	// blocks that are gone alone hang between blocks, where no caret stands; the words cut from the
+	// blocks on either side of the join are struck in their lines, and the caret goes before or after
+	// them as it does beside any others
+	const words = r.gone ? r.gone.head.length + r.gone.tail.length > 0 : r.old.length > 0;
+	return !!r.restore && !r.partial && !r.format && !r.node && !r.brk && words;
 }
 
 export function struckAt(state: EditorState, at: number): PmSuggestionRange[] {
@@ -30,9 +32,13 @@ export function struckAt(state: EditorState, at: number): PmSuggestionRange[] {
 
 /** ids of the old words a range selection runs across */
 export function oldWordsInSelection(state: EditorState): Set<string> {
-	const { from, to, empty } = state.selection;
+	return oldWordsBetween(state, state.selection.from, state.selection.to);
+}
+
+/** the same for any range, a peer's selection */
+export function oldWordsBetween(state: EditorState, from: number, to: number): Set<string> {
 	const ids = new Set<string>();
-	if (empty) return ids;
+	if (from >= to) return ids;
 	for (const r of pmSuggestionsKey.getState(state)?.ranges ?? []) {
 		if (!hasOldWords(r)) continue;
 		// at an end of the range the old words are inside it only when drawn on its side of the caret

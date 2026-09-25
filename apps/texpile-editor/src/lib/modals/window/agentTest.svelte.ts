@@ -3,6 +3,8 @@ import { agentBridge, agentName } from '$lib/ai/selectionRefiner';
 import { m } from '$lib/paraglide/messages';
 
 const PROMPT = 'Reply with the single word: ready';
+// rules of its own, so the test takes the same way through the agent that Refine does
+const SYSTEM = 'You answer in one word.';
 
 export class AgentTest {
 	running = $state<string | null>(null);
@@ -16,7 +18,7 @@ export class AgentTest {
 		this.result = null;
 		const agent = agentName();
 		const started = performance.now();
-		const answer = await bridge.run(id, PROMPT);
+		const answer = await bridge.run(id, PROMPT, SYSTEM);
 		this.running = null;
 		const seconds = String(Math.max(1, Math.round((performance.now() - started) / 1000)));
 		if (answer.ok) this.result = { ok: true, text: m.prefs_ai_test_ok({ agent, seconds, reply: answer.text.trim().slice(0, 60) }) };

@@ -11,7 +11,8 @@ import * as syncProtocol from 'y-protocols/sync';
 import type { Transport, TransportStatus } from '$lib/collab/transport';
 import { CollabSession, manifestOf, locksOf, textOf } from '$lib/collab/session';
 import type { SessionVersion } from '$lib/collab/compatibility';
-import { HostMaterializer, spliceDiff, isShared, isGeneratedArtifact, decodeIfText, EDIT_ORIGIN } from '$lib/collab/materialize';
+import { HostMaterializer, isShared, isGeneratedArtifact, decodeIfText, EDIT_ORIGIN } from '$lib/collab/materialize';
+import { spliceDiff } from '$lib/collab/spliceDiff';
 
 class FakeHub {
 	transports = new Set<FakeTransport>();
@@ -198,6 +199,19 @@ describe('collab session end-to-end', () => {
 		guest.session.destroy();
 	});
 
+	it("shows a guest who joins later the host's presence at once, not at the next awareness renewal", async () => {
+		const key = (await deriveSessionKeys(generateShareCode())).contentKey;
+		const hub = new FakeHub();
+		const host = await makeParty(hub, 'host', 'Host', key);
+		host.session.setSuggesting(true);
+		await new Promise((r) => setTimeout(r, 100));
+		const guest = await makeParty(hub, 'guest', 'Guest', key);
+		await until(() => [...guest.session.peers.values()].some((p) => p.role === 'host' && p.suggesting === true), 1000);
+
+		host.session.destroy();
+		guest.session.destroy();
+	});
+
 	it('carries a renamed profile to the peers of a running session', async () => {
 		const key = (await deriveSessionKeys(generateShareCode())).contentKey;
 		const hub = new FakeHub();
@@ -359,6 +373,41 @@ describe('collab session end-to-end', () => {
 
 		mat.destroy();
 		for (const p of [host, g1, g2]) p.session.destroy();
+	});
+
+	it("keeps a guest's words the host's editor has not taken in yet when the host types", async () => {
+		const key = (await deriveSessionKeys(generateShareCode())).contentKey;
+		const hub = new FakeHub();
+		const shown = 'one two three\n\nfour five six\n';
+		const { fs } = fakeFs({ 'main.tex': shown });
+		const host = await makeParty(hub, 'host', 'Host', key);
+		const mat = new HostMaterializer(host.doc, 'root', fs, join);
+		await mat.seed();
+		const guest = await makeParty(hub, 'guest', 'Guest', key);
+		await until(() => textOf(guest.doc, 'main.tex').toString() === shown);
+
+		textOf(guest.doc, 'main.tex').insert(3, ' GUEST');
+		await until(() => textOf(host.doc, 'main.tex').toString().includes('GUEST'));
+		// keystrokes from the text the host's visual editor still shows, before its re-parse lands
+		let before = shown;
+		for (const word of [' H1', ' H2']) {
+			const next = before.slice(0, -1) + word + '\n';
+			mat.hostEdit('main.tex', next, before);
+			before = next;
+		}
+		await until(() => textOf(guest.doc, 'main.tex').toString().includes('H2'));
+		expect(textOf(host.doc, 'main.tex').toString()).toBe('one GUEST two three\n\nfour five six H1 H2\n');
+		expect(textOf(guest.doc, 'main.tex').toString()).toBe(textOf(host.doc, 'main.tex').toString());
+
+		// the re-parse lands, then the host types again
+		const adopted = textOf(host.doc, 'main.tex').toString();
+		mat.hostEdit('main.tex', adopted);
+		mat.hostEdit('main.tex', adopted.replace('one', 'one!'), adopted);
+		expect(textOf(host.doc, 'main.tex').toString()).toBe('one! GUEST two three\n\nfour five six H1 H2\n');
+
+		mat.destroy();
+		host.session.destroy();
+		guest.session.destroy();
 	});
 
 	it('preserves CRLF on write-back while sharing LF internally', async () => {

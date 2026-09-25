@@ -375,6 +375,15 @@ export class CollabSession {
 				const enc = encoding.createEncoder();
 				syncProtocol.writeSyncStep1(enc, this.doc);
 				this.post({ type: FrameType.SYNC, from: this.clientId, to: frame.from, payload: encoding.toUint8Array(enc) });
+				// our presence went out at our own handshake; a peer joining later otherwise waits for the 15 s renewal
+				if (frame.to === BROADCAST) {
+					this.post({
+						type: FrameType.AWARENESS,
+						from: this.clientId,
+						to: frame.from,
+						payload: encodeAwarenessUpdate(this.awareness, [this.clientId])
+					});
+				}
 				break;
 			}
 			case FrameType.BLOB_REQUEST:
