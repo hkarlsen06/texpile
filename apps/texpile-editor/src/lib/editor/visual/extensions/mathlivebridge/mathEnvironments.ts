@@ -168,3 +168,17 @@ export function isMathLatexEmpty(rawValue: string): boolean {
 
 	return strippedValue.length === 0;
 }
+
+/** an empty display of the same kind, for Shift+Enter. */
+export function emptyMathBlockLike(node: Node): Node {
+	const { environment, numbered, starredEnv, continuesAfter } = node.attrs;
+	const { schema } = node.type;
+	// continuesAfter: the prose after this display now follows the new one
+	if (environment) {
+		const env = numbered ? environment : `${environment}*`;
+		const latex = `\\begin{${env}}\\end{${env}}`;
+		return node.type.create({ ...computeMathAttrs(latex), continuesAfter }, schema.text(latex));
+	}
+	const label = numbered ? generateLabel('equation') : null;
+	return node.type.create({ numbered, starredEnv, continuesAfter, label }, schema.text(' '));
+}

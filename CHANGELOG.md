@@ -5,6 +5,8 @@ Release notes for Texpile Desktop. Add notes under `## [Unreleased]` as you work
 
 ## [Unreleased]
 
+- feat: shift-enter in a display equation starts a new one of the same kind below it (by @hkarlsen06)
+
 ## [1.2.0] - 2026-09-25
 
 - feat: suggestion mode (by @louisqli)
