@@ -13,3 +13,13 @@ export function isSelfRendered(node: PMNode): boolean {
 	if (node.isText) return false;
 	return node.isAtom || CODEMIRROR_BACKED.has(node.type.name);
 }
+
+// the node a change sits inside that draws its own content, at or above `pos`
+export function selfRenderedAround(doc: PMNode, pos: number, to = pos): { from: number; to: number } | null {
+	const $pos = doc.resolve(pos);
+	for (let d = $pos.depth; d > 0; d--) {
+		if ($pos.node(d).isLeaf || !isSelfRendered($pos.node(d))) continue;
+		return to <= $pos.after(d) ? { from: $pos.before(d), to: $pos.after(d) } : null;
+	}
+	return null;
+}

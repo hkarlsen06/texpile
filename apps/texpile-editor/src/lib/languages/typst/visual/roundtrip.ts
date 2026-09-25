@@ -6,7 +6,8 @@
 import { typstToProseMirror } from './converter';
 import { serializeToTypstDetailed } from './serializer';
 import { padTables } from '$lib/editor/visual/padTables';
-import { collectMap, rememberParseMap, shiftMap, warnMapDefects, type RegionParse, type SourceMap } from '$lib/editor/visual/sourceSpans';
+import { collectMap, shiftMap, type RegionParse, type SourceMap } from '$lib/editor/visual/sourceSpans';
+import { rememberParseMap, warnMapDefects } from '$lib/editor/visual/parseOrigins';
 import type { Node } from 'prosemirror-model';
 import type { ParsedLatexFile, ParsePhase } from '$lib/workspace/latexRoundtrip';
 

@@ -13,11 +13,11 @@ function withoutMacros(body: RawSpan, macros: Macro[]): MappedText | null {
 	const parts: { len: number; spans: LeafSpan[] }[] = [];
 	let text = '';
 	let at = body.from;
-	const piece = (to: number) => {
+	function piece(to: number) {
 		const p = body.text.slice(at - body.from, to - body.from);
 		parts.push({ len: p.length, spans: bytesSpan(p.length, at) });
 		text += p;
-	};
+	}
 	for (const m of macros) {
 		const span = macroSpan(m);
 		if (!span || span.from < at || span.to > body.to) return null;

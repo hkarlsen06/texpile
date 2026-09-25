@@ -4,7 +4,7 @@
 // compiles. \def-defined pairs were already understood, \newcommand ones were not.
 import { describe, it, expect } from 'vitest';
 import { parseLatexFile, serializeLatexFile } from '$lib/workspace/latexRoundtrip';
-import { withoutOrigins } from '$lib/editor/visual/sourceSpans';
+import { withoutOrigins } from '$lib/editor/visual/parseOrigins';
 
 const PREAMBLE =
 	'\\documentclass{article}\n\\newcommand{\\bea}{\\begin{eqnarray}}\n\\newcommand{\\eea}{\\end{eqnarray}}\n\\begin{document}\n';

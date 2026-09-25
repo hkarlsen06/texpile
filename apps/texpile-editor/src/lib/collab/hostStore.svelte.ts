@@ -218,7 +218,9 @@ class HostCollabController {
 	/** every host edit funnels through here (called from scheduleSave, per keystroke). */
 	edit(absPath: string, content: string, before?: string): void {
 		const rel = this.active ? this.rel(absPath) : null;
-		const lf = (s: string) => s.replace(/\r\n?/g, '\n');
+		function lf(s: string) {
+			return s.replace(/\r\n?/g, '\n');
+		}
 		// text-or-not is the manifest's call now (hostEdit checks the entry's kind itself)
 		if (rel && isShared(rel)) this.materializer?.hostEdit(rel, lf(content), before === undefined ? undefined : lf(before));
 	}

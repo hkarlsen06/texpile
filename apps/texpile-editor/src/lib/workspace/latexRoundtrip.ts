@@ -1,18 +1,11 @@
 // the .tex file IS the document: opening splits preamble/body and parses only the body;
 // saving regenerates only the body and splices it back under the untouched preamble
 import * as LatexParser from '$lib/languages/latex/parser/latexParser';
-import { dropParagraphEnd, serializeToLatexDetailed } from '$lib/languages/latex/serializer/latexSerializer';
+import { serializeToLatexDetailed } from '$lib/languages/latex/serializer/latexSerializer';
+import { dropParagraphEnd } from '$lib/languages/latex/serializer/paragraphEnds';
 import { padTables } from '$lib/editor/visual/padTables';
-import {
-	collectMap,
-	rememberParseMap,
-	shiftMap,
-	warnMapDefects,
-	type ParseBody,
-	type ParseOrigins,
-	type RegionParse,
-	type SourceMap
-} from '$lib/editor/visual/sourceSpans';
+import { collectMap, shiftMap, type RegionParse, type SourceMap } from '$lib/editor/visual/sourceSpans';
+import { rememberParseMap, warnMapDefects, type ParseBody, type ParseOrigins } from '$lib/editor/visual/parseOrigins';
 import type { Node } from 'prosemirror-model';
 
 // the importer runs in max-fidelity mode: unrecognized constructs are preserved as raw/inline LaTeX

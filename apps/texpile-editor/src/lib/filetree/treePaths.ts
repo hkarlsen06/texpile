@@ -22,7 +22,7 @@ export function isInside(path: string, ancestor: string): boolean {
 /** the entries directly inside `dir`; empty when the walk never reached it (depth cap, read error) */
 export function childrenOf(tree: TreeEntry[], dir: string, root: string): TreeEntry[] {
 	if (samePath(dir, root)) return tree;
-	const find = (list: TreeEntry[]): TreeEntry[] | null => {
+	function find(list: TreeEntry[]): TreeEntry[] | null {
 		for (const e of list) {
 			if (e.type !== 'dir') continue;
 			if (samePath(e.path, dir)) return e.children ?? [];
@@ -32,7 +32,7 @@ export function childrenOf(tree: TreeEntry[], dir: string, root: string): TreeEn
 			}
 		}
 		return null;
-	};
+	}
 	return find(tree) ?? [];
 }
 

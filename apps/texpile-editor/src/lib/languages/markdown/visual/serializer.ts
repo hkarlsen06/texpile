@@ -7,7 +7,7 @@
 // mid-run), so plain concatenation of parts is a valid document.
 import type { Node } from 'prosemirror-model';
 import { createBlockAssembly, type DocSerializeResult } from '$lib/serializer/blockAssembly';
-import type { ParseOrigins } from '$lib/editor/visual/sourceSpans';
+import type { ParseOrigins } from '$lib/editor/visual/parseOrigins';
 import type { Ctx } from '$lib/serializer/types';
 import { escMd } from './inlineSyntax';
 import { imageMarkdown, renderInline, mdShadow, isMdHandlerLeaf } from './markdownInline';

@@ -75,11 +75,15 @@ export function tip(node: HTMLElement, text: string | null | undefined, options?
 		if (owner === node) hideTip();
 	}
 
-	const onenter = (e: PointerEvent) => e.pointerType !== 'touch' && open(false);
+	function onenter(e: PointerEvent) {
+		return e.pointerType !== 'touch' && open(false);
+	}
 	// a text field always matches :focus-visible, and a card over the box you are typing in is
 	// not a hint, it is an obstacle
 	const typable = /^(input|textarea)$/i.test(node.tagName) || node.isContentEditable;
-	const onfocus = () => !typable && node.matches(':focus-visible') && open(true);
+	function onfocus() {
+		return !typable && node.matches(':focus-visible') && open(true);
+	}
 
 	node.addEventListener('pointerenter', onenter);
 	node.addEventListener('pointerleave', close);

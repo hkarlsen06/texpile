@@ -4,13 +4,7 @@ import { Fragment, type Node as PMNode } from 'prosemirror-model';
 import { parseBodyOf, parseLatexFile } from '$lib/workspace/latexRoundtrip';
 import { parseCarryPlugin } from '$lib/editor/visual/parseCarry';
 import {
-	adoptParse,
 	alignedSpans,
-	blockOriginOf,
-	originsOf,
-	parseOf,
-	withoutOrigins,
-	rememberParseMap,
 	charsOf,
 	concatSpans,
 	nearestPm,
@@ -22,6 +16,7 @@ import {
 	spansOfChars,
 	type Segment
 } from '$lib/editor/visual/sourceSpans';
+import { adoptParse, blockOriginOf, originsOf, parseOf, withoutOrigins, rememberParseMap } from '$lib/editor/visual/parseOrigins';
 
 describe('leaf spans', () => {
 	it('aligns a text against its bytes character by character', () => {

@@ -30,3 +30,6 @@ export {
 } from './fieldConfig';
 
 export { bibDisplayText, bibAuthorShort } from './bibDisplayText';
+
+export { validateEntry, type BibProblem } from './bibValidate';
+export { bibProblemText } from './bibProblemText';

@@ -6,15 +6,8 @@
 import { markdownToProseMirror } from './converter';
 import { serializeToMarkdownDetailed } from './serializer';
 import { padTables } from '$lib/editor/visual/padTables';
-import {
-	collectMap,
-	mapToCrlf,
-	rememberParseMap,
-	shiftMap,
-	warnMapDefects,
-	type RegionParse,
-	type SourceMap
-} from '$lib/editor/visual/sourceSpans';
+import { collectMap, mapToCrlf, shiftMap, type RegionParse, type SourceMap } from '$lib/editor/visual/sourceSpans';
+import { rememberParseMap, warnMapDefects } from '$lib/editor/visual/parseOrigins';
 import type { Node } from 'prosemirror-model';
 import { parseBodyOf, type ParsedLatexFile, type ParsePhase } from '$lib/workspace/latexRoundtrip';
 

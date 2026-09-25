@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Node } from 'prosemirror-model';
 import { parseLatexFile, serializeLatexFile } from '$lib/workspace/latexRoundtrip';
 import { serializeToLatex } from '$lib/languages/latex/serializer/latexSerializer';
-import { withoutOrigins } from '$lib/editor/visual/sourceSpans';
+import { withoutOrigins } from '$lib/editor/visual/parseOrigins';
 
 function chipsOf(source: string): string[] {
 	const chips: string[] = [];

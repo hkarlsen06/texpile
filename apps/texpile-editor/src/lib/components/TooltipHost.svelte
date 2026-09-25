@@ -34,7 +34,9 @@
 	// has to take it down rather than leave it stranded. On `win`, not svelte:window: that is
 	// always the opener's
 	$effect(() => {
-		const onKey = (e: KeyboardEvent) => e.key === 'Escape' && hideTip();
+		function onKey(e: KeyboardEvent) {
+			if (e.key === 'Escape') hideTip();
+		}
 		win.document.addEventListener('scroll', hideTip, true);
 		win.addEventListener('resize', hideTip);
 		win.addEventListener('keydown', onKey);

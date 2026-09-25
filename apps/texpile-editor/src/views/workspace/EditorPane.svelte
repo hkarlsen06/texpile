@@ -4,11 +4,12 @@
 	// state behind it all lives in WorkspaceView.
 	import { tip } from '$lib/components/tooltip.svelte';
 	import { fileMode } from '$lib/workspace/fileMode.svelte';
-	import { Loader2, CircleAlert, FileWarning, Info, GitCompare, RefreshCw } from '@lucide/svelte';
+	import { Loader2, CircleAlert, FileWarning, Info } from '@lucide/svelte';
 	import { isTexpileManaged } from '$lib/comments/managed';
 	import SearchBar from '$lib/editor/visual/SearchBar.svelte';
-	import StarterPicker from '$lib/workspace/StarterPicker.svelte';
 	import DiffPane from './DiffPane.svelte';
+	import VisualCompareBar from './VisualCompareBar.svelte';
+	import NewDocumentStart from './NewDocumentStart.svelte';
 	import SourceEditor from '$lib/editor/source/SourceEditor.svelte';
 	import BibManager from '$lib/editor/visual/bib/BibManager.svelte';
 	import PDFViewer from '$lib/preview/PDFViewer.svelte';
@@ -26,7 +27,7 @@
 	import EditorToolbarStrip from './EditorToolbarStrip.svelte';
 	import VisualEditorHost from './VisualEditorHost.svelte';
 	import CommentRail from '$lib/comments/rail/CommentRail.svelte';
-	import { attachVisualDiff } from '$lib/editor/visual/diff/attachVisualDiff';
+	import { attachVisualDiffOutsideComposition } from '$lib/editor/visual/diff/attachVisualDiff';
 	import { untrack } from 'svelte';
 	import { m } from '$lib/paraglide/messages';
 
@@ -124,10 +125,6 @@
 	let readyFor = $state<string | null>(null);
 	const editorReady = $derived(!!loadedPath && readyFor === loadedPath);
 
-	/** which starter tab is open, so the blurb above the grid names the extension it is offering.
-	 *  Deliberately not persisted - it is a view of the templates, not a setting. */
-	let starterLang = $state<'latex' | 'typst'>('latex');
-
 	/** Rendered for the whole build, but it holds itself invisible until the wait is real (see
 	 * lateReveal.ts), so a fast build never flashes a bar. Deliberately not a size threshold: that
 	 * would bake in an assumption about how fast the machine is, and suppress the bar on a slow CPU
@@ -173,14 +170,7 @@
 	$effect(() => {
 		const view = editorViewStore.current;
 		const wanted = comparing && viewMode === 'visual' && structured && diffVersionDoc ? { oldDoc: diffVersionDoc } : null;
-		if (!view) return;
-		const apply = () => untrack(() => attachVisualDiff(view, wanted));
-		if (!view.composing) {
-			apply();
-			return;
-		}
-		view.dom.addEventListener('compositionend', apply, { once: true });
-		return () => view.dom.removeEventListener('compositionend', apply);
+		if (view) return untrack(() => attachVisualDiffOutsideComposition(view, wanted));
 	});
 
 	// noted before a file's first build, forgotten in onVisualReady: a build that takes the renderer
@@ -269,33 +259,14 @@
 		</div>
 	{/if}
 	{#if loadedPath && comparing && viewMode === 'visual' && structured}
-		<div class="bg-surface-100-900 text-muted border-surface-200-800 flex min-h-10 shrink-0 items-center gap-2 border-b px-3 text-xs">
-			<GitCompare class="size-3.5 shrink-0" />
-			<span class="font-medium">{m.wsview_diff_since()}</span>
-			{#if compare}<span class="text-muted min-w-0 truncate" use:tip={compare.hash}>· {compare.subject}</span>{/if}
-			<!-- What it cannot show, said out loud: an unmarked document otherwise reads as "nothing
-			     changed". No count - the number would be of source runs, which nothing on screen shows. -->
-			{#if fileDeleted}
-				<span class="text-muted min-w-0 truncate">· {m.wsview_diff_file_deleted()}</span>
-			{:else if versionParsing}
-				<!-- a parse that lands quickly should flash nothing at all; see lateReveal.ts -->
-				<span class="text-muted reveal-late min-w-0 truncate">· {m.wsview_diff_finding_changes()}</span>
-			{:else if diffVersionUnavailable}
-				<span class="text-muted min-w-0 truncate">· {m.wsview_diff_version_unparsed()}</span>
-			{:else if diffVersionPreamble !== null && docMeta && diffVersionPreamble !== docMeta.preamble}
-				<span class="text-muted min-w-0 truncate">· {m.wsview_diff_source_only()}</span>
-			{/if}
-			<div class="ml-auto flex shrink-0 items-center gap-1">
-				<button
-					class="btn-icon btn-icon-xs hover:preset-tonal"
-					onclick={onRefreshDiff}
-					use:tip={m.wsview_refresh_diff()}
-					aria-label={m.wsview_refresh_diff()}
-				>
-					<RefreshCw class="size-3.5" />
-				</button>
-			</div>
-		</div>
+		<VisualCompareBar
+			{compare}
+			{fileDeleted}
+			{versionParsing}
+			versionUnavailable={diffVersionUnavailable}
+			sourceOnly={diffVersionPreamble !== null && !!docMeta && diffVersionPreamble !== docMeta.preamble}
+			onRefresh={onRefreshDiff}
+		/>
 	{/if}
 	<!-- relative anchors the floating find bar; it sits outside the scroller so it doesn't scroll away -->
 	<div class="relative min-h-0 min-w-0 flex-1">
@@ -313,26 +284,7 @@
 				: ''} {comparing || kind === 'pdf' ? '' : 'scroll-inset-r'}"
 		>
 			{#if folderEmpty && !activeFilePath.current}
-				<div class="mx-auto mt-16 max-w-xl px-6">
-					<div class="text-center">
-						<h2 class="text-lg font-semibold">{m.wsview_start_new_doc_heading()}</h2>
-						<p class="text-muted mt-1 text-sm">
-							<!-- follows the open tab: telling someone reading the Typst templates that this folder
-							     has no .tex files in it is true and useless -->
-							{m.wsview_start_new_doc_desc_pre()} <code>{starterLang === 'typst' ? '.typ' : '.tex'}</code>
-							{m.wsview_start_new_doc_desc_post()}
-						</p>
-					</div>
-					<div class="mt-6">
-						<StarterPicker
-							onPick={onPickStarter}
-							onBlank={onBlankStarter}
-							onImport={onImportStarter}
-							busy={applyingStarter}
-							bind:lang={starterLang}
-						/>
-					</div>
-				</div>
+				<NewDocumentStart onPick={onPickStarter} onBlank={onBlankStarter} onImport={onImportStarter} busy={applyingStarter} />
 			{:else if loadError}
 				<div class="text-error-ink mx-auto mt-12 flex max-w-md flex-col items-center gap-2 text-center">
 					<CircleAlert class="size-8" />

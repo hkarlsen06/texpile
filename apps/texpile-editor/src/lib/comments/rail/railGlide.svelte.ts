@@ -10,45 +10,48 @@ function behavior(): ScrollBehavior {
 	return matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
 }
 
+function slideCardsIntoView(el: HTMLElement, box: HTMLElement, afterJump: boolean): void {
+	function whole() {
+		const edge = box.getBoundingClientRect().left + box.clientWidth + 1;
+		return [...el.querySelectorAll('.comment-card')].every((c) => c.getBoundingClientRect().right <= edge);
+	}
+	function go(again = 2) {
+		if (whole()) return;
+		const edge = box.getBoundingClientRect().left + box.clientWidth;
+		const over = Math.max(...[...el.querySelectorAll('.comment-card')].map((c) => c.getBoundingClientRect().right - edge));
+		box.scrollTo({ left: box.scrollLeft + over, behavior: behavior() });
+		let last = box.scrollLeft;
+		function stop() {
+			box.removeEventListener('scroll', onScroll);
+			clearTimeout(timer);
+		}
+		function onScroll() {
+			const now = box.scrollLeft;
+			if (whole() || now < last) return stop();
+			if (now === last) {
+				stop();
+				if (again > 0) go(again - 1);
+			}
+			last = now;
+		}
+		const timer = setTimeout(() => {
+			stop();
+			if (again > 0 && !whole()) go(0);
+		}, 900);
+		box.addEventListener('scroll', onScroll);
+	}
+	if (afterJump) setTimeout(go, 120);
+	else go();
+}
+
 export class RailGlide {
 	leaving = $state(false);
 
 	constructor(private readonly parts: () => RailGlideParts) {}
 
 	reveal(afterJump = false): void {
-		const { rail: el, box } = this.parts();
-		if (!el || !box) return;
-		const whole = () => {
-			const edge = box.getBoundingClientRect().left + box.clientWidth + 1;
-			return [...el.querySelectorAll('.comment-card')].every((c) => c.getBoundingClientRect().right <= edge);
-		};
-		const go = (again = 2) => {
-			if (whole()) return;
-			const edge = box.getBoundingClientRect().left + box.clientWidth;
-			const over = Math.max(...[...el.querySelectorAll('.comment-card')].map((c) => c.getBoundingClientRect().right - edge));
-			box.scrollTo({ left: box.scrollLeft + over, behavior: behavior() });
-			let last = box.scrollLeft;
-			const stop = () => {
-				box.removeEventListener('scroll', onScroll);
-				clearTimeout(timer);
-			};
-			const onScroll = () => {
-				const now = box.scrollLeft;
-				if (whole() || now < last) return stop();
-				if (now === last) {
-					stop();
-					if (again > 0) go(again - 1);
-				}
-				last = now;
-			};
-			const timer = setTimeout(() => {
-				stop();
-				if (again > 0 && !whole()) go(0);
-			}, 900);
-			box.addEventListener('scroll', onScroll);
-		};
-		if (afterJump) setTimeout(go, 120);
-		else go();
+		const { rail, box } = this.parts();
+		if (rail && box) slideCardsIntoView(rail, box, afterJump);
 	}
 
 	retreat(): void {

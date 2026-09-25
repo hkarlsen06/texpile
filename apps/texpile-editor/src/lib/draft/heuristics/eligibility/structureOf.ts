@@ -17,7 +17,9 @@ const TEXT = new Set(['string', 'whitespace']);
 // prev + \par + run as one unit so the engine sets the paragraph spacing itself, and a
 // paragraph the USER splits is caught upstream as a structural edit and never arrives here.
 // The layout it implies is the certificate's question, not this gate's.
-const ours = (n: Node) => n.type === 'macro' && (n as { content?: unknown }).content === 'par';
+function ours(n: Node) {
+	return n.type === 'macro' && (n as { content?: unknown }).content === 'par';
+}
 
 export function structureOf(nodes: Node[]): string[] {
 	// A comment's CONTENT never becomes ink and this project rejects semantic comments, so

@@ -6,7 +6,7 @@
 import { describe, it, expect } from 'vitest';
 import { Fragment, type Node } from 'prosemirror-model';
 import { parseLatexFile, serializeLatexFile } from '$lib/workspace/latexRoundtrip';
-import { withoutOrigins } from '$lib/editor/visual/sourceSpans';
+import { withoutOrigins } from '$lib/editor/visual/parseOrigins';
 
 function parse(body: string) {
 	return parseLatexFile(`\\documentclass{article}\n\\begin{document}\n${body}\n\\end{document}\n`);

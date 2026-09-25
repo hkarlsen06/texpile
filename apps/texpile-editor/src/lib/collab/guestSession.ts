@@ -38,7 +38,9 @@ export const guestSession: EditSession = {
 		if (!path || collabGuest.isLocked(path)) return;
 		const t = collabGuest.ytextFor(path);
 		if (!t) return;
-		const lf = (s: string) => s.replace(/\r\n?/g, '\n');
+		function lf(s: string) {
+			return s.replace(/\r\n?/g, '\n');
+		}
 		collabGuest.fork?.fold(t, lf(content), before === undefined ? undefined : lf(before), EDIT_ORIGIN);
 	},
 	async beforeOpen() {},

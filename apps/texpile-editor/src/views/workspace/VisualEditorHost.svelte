@@ -13,7 +13,7 @@
 	import type { CommentAnchor } from '$lib/comments/anchor';
 	import type { CommentRange } from '$lib/editor/visual/extensions/comments';
 	import type { RegionParser, SourceMap } from '$lib/editor/visual/sourceSpans';
-	import { sourceAnchorFor, type SourceAnchorFn } from '$lib/editor/visual/extensions/pmComments';
+	import { sourceAnchorFor } from '$lib/editor/visual/extensions/pmComments';
 	import { dirname } from '$lib/workspace/fileSystem';
 	import { caretFromMargin } from '$lib/editor/visual/marginClick';
 	import { editorViewStore } from '$lib/stores/editorStore';
@@ -80,7 +80,9 @@
 			: { from: 0, to: texSource.length }
 	);
 	// a selection in any of the editors, as the range of texSource its characters are
-	const sourceAnchor: SourceAnchorFn = (doc, from, to) => sourceAnchorFor(doc, sourceMap, texSource, from, to);
+	function sourceAnchor(doc: PMNode, from: number, to: number): CommentAnchor | null {
+		return sourceAnchorFor(doc, sourceMap, texSource, from, to);
+	}
 </script>
 
 <!-- texpile-main-editor scopes the editor's right-click context menu (ContextMenu.svelte) -->

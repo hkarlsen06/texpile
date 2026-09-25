@@ -1,5 +1,5 @@
 // Select-all that respects the field the caret is in, then the document.
-import { TextSelection, type Command } from 'prosemirror-state';
+import { TextSelection, type EditorState, type Transaction } from 'prosemirror-state';
 import type { ResolvedPos } from 'prosemirror-model';
 
 // captions and notes hold prose but are not `isolating` (table cells are, via prosemirror-tables):
@@ -21,7 +21,7 @@ function fieldDepth($pos: ResolvedPos): number | null {
  * replaced it (and autosave wrote that a second later). Take the field first; a second press falls
  * through to the document.
  */
-export const selectAllScoped: Command = (state, dispatch) => {
+export function selectAllScoped(state: EditorState, dispatch?: (tr: Transaction) => void): boolean {
 	const { $from, from, to } = state.selection;
 	const depth = fieldDepth($from);
 	if (depth === null) return false;
@@ -31,4 +31,4 @@ export const selectAllScoped: Command = (state, dispatch) => {
 	if (to > end || (from <= start && to >= end)) return false;
 	dispatch?.(state.tr.setSelection(TextSelection.create(state.doc, start, end)).scrollIntoView());
 	return true;
-};
+}

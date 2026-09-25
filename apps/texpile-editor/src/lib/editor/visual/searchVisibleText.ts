@@ -1,6 +1,6 @@
 // Find and replace over the text the editor actually shows.
 import { getSearchState } from 'prosemirror-search';
-import { TextSelection, type Command, type EditorState } from 'prosemirror-state';
+import { TextSelection, type EditorState, type Transaction } from 'prosemirror-state';
 import type { SearchQuery } from 'prosemirror-search';
 
 type Match = NonNullable<ReturnType<SearchQuery['findNext']>>;
@@ -41,7 +41,7 @@ function applyReplacements(state: EditorState, query: SearchQuery, matches: Matc
 	return tr;
 }
 
-export const replaceAllVisible: Command = (state, dispatch) => {
+export function replaceAllVisible(state: EditorState, dispatch?: (tr: Transaction) => void): boolean {
 	const search = getSearchState(state);
 	if (!search) return false;
 	const range = search.range ?? { from: 0, to: state.doc.content.size };
@@ -49,10 +49,10 @@ export const replaceAllVisible: Command = (state, dispatch) => {
 	if (!matches.length) return false;
 	dispatch?.(applyReplacements(state, search.query, matches));
 	return true;
-};
+}
 
 /** replace the match under the selection, then move to the next one; select it first if not on one */
-export const replaceNextVisible: Command = (state, dispatch) => {
+export function replaceNextVisible(state: EditorState, dispatch?: (tr: Transaction) => void): boolean {
 	const search = getSearchState(state);
 	if (!search) return false;
 	const all = visibleMatches(state, search.query);
@@ -71,7 +71,7 @@ export const replaceNextVisible: Command = (state, dispatch) => {
 		dispatch(tr.scrollIntoView());
 	}
 	return true;
-};
+}
 
 /** step to the next (dir 1) or previous (dir -1) visible match, wrapping at the ends */
 export function stepToMatch(state: EditorState, dir: 1 | -1): TextSelection | null {

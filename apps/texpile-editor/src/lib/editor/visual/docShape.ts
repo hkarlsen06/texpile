@@ -37,9 +37,14 @@ export function visibleLines(doc: PMNode, format: VisualFormat): string[] {
 		});
 		return cells;
 	}
-	function render(cells: Cell[]): string {
-		const word = (c: string) => /^[\p{L}\p{N}]$/u.test(c);
-		const emphasis = (m: string) => /^(strong|em|s)$/.test(m);
+	function render(given: Cell[]): string {
+		const cells = given.map((c) => ({ ...c }));
+		function word(c: string) {
+			return /^[\p{L}\p{N}]$/u.test(c);
+		}
+		function emphasis(m: string) {
+			return /^(strong|em|s)$/.test(m);
+		}
 		const head = cells.findIndex((c) => c.ch !== ' ' && c.ch !== '⏎' && !c.marks.includes('item_label'));
 		if (head >= 0) for (let i = head; i < cells.length; i++) cells[i].marks = cells[i].marks.filter((m) => m !== 'item_label');
 		if (format === 'md') {
@@ -51,7 +56,9 @@ export function visibleLines(doc: PMNode, format: VisualFormat): string[] {
 				}
 				let j = i;
 				while (j < cells.length && word(cells[j].ch)) j++;
-				const key = (k: number) => cells[k].marks.filter(emphasis).sort().join('+');
+				function key(k: number) {
+					return cells[k].marks.filter(emphasis).sort().join('+');
+				}
 				if (cells.slice(i, j).some((_, k) => key(i + k) !== key(i)))
 					for (let k = i; k < j; k++) cells[k].marks = cells[k].marks.filter((m) => !emphasis(m));
 				i = j;
@@ -91,7 +98,9 @@ export function visibleLines(doc: PMNode, format: VisualFormat): string[] {
 		else lines.push(`${path}${name}: ${text}`);
 	}
 	function typstDisplay(child: PMNode, path: string): boolean {
-		const equation = (tex: string, label: unknown) => `${path}block_math: ${tex.replace(/\s+/g, ' ').trim()}${label ? ` <${label}>` : ''}`;
+		function equation(tex: string, label: unknown) {
+			return `${path}block_math: ${tex.replace(/\s+/g, ' ').trim()}${label ? ` <${label}>` : ''}`;
+		}
 		if (child.type.name === 'block_math') {
 			lines.push(equation(child.textContent, child.attrs.label));
 			return true;
@@ -151,15 +160,16 @@ export function visibleLines(doc: PMNode, format: VisualFormat): string[] {
 		});
 	}
 	walkBlocks(doc, '');
-	return lines.reduce<string[]>((out, line) => {
+	const raw = /^(.*?)raw_latex: (.*)$/;
+	const out: string[] = [];
+	for (const line of lines) {
 		const prev = out[out.length - 1];
-		const raw = /^(.*?)raw_latex: (.*)$/;
 		const a = prev && raw.exec(prev);
 		const b = raw.exec(line);
 		if (a && b && a[1] === b[1]) out[out.length - 1] = `${a[1]}raw_latex: ${a[2]}${b[2]}`;
 		else out.push(line);
-		return out;
-	}, []);
+	}
+	return out;
 }
 
 export function printedLine(line: string, format: VisualFormat): string {

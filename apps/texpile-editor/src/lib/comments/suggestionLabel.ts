@@ -19,7 +19,9 @@ const FORMAT_NAMES: Record<string, () => string> = {
 export function suggestionLabel(file: string, quote: string, restore: string): string {
 	const format = formatChange(quote, restore, regionParserForPath(file));
 	if (format) {
-		const named = (names: string[]) => names.map((name) => FORMAT_NAMES[name]?.() ?? name).join(', ');
+		function named(names: string[]) {
+			return names.map((name) => FORMAT_NAMES[name]?.() ?? name).join(', ');
+		}
 		const parts: string[] = [];
 		if (format.added.length) parts.push(named(format.added));
 		if (format.removed.length) parts.push(m.comments_suggest_format_removed({ names: named(format.removed) }));

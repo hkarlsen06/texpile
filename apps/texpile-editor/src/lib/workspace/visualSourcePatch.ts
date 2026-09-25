@@ -1,7 +1,7 @@
 // a source edit applied to the mounted visual editor as one undoable step
 import type { EditorView as PMEditorView } from 'prosemirror-view';
 import { computeBlockPatch, syncParseAttrs } from '$lib/editor/visual/blockPatch';
-import { adoptParse } from '$lib/editor/visual/sourceSpans';
+import { adoptParse } from '$lib/editor/visual/parseOrigins';
 import type { DocumentBuffer } from '$lib/workspace/documentBuffer.svelte';
 import type { ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
 

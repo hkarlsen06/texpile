@@ -129,7 +129,9 @@ export class SavePipeline {
 	 * lands in the new path instead of re-creating the old one. */
 	retarget(from: string, to: string) {
 		const sep = from.includes('\\') ? '\\' : '/';
-		const covers = (p: string) => samePath(p, from) || p.startsWith(from + sep);
+		function covers(p: string) {
+			return samePath(p, from) || p.startsWith(from + sep);
+		}
 		// nothing queued means the edit is in flight instead; if that write fails it must not come
 		// back pointed at a path this rename just emptied. Only when the rename is actually the one
 		// that moved it: an unrelated rename would otherwise cost a legitimate retry

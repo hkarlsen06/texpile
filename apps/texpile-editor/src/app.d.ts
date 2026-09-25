@@ -136,6 +136,7 @@ export {};
 
 // @codemirror/search finds the panel's input by this attribute
 declare module 'svelte/elements' {
+	// eslint-disable-next-line @typescript-eslint/naming-convention, @typescript-eslint/consistent-type-definitions -- augments svelte's own interface
 	interface HTMLInputAttributes {
 		'main-field'?: string;
 	}

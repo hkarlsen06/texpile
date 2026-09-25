@@ -47,13 +47,13 @@ export const crossBlockEdits = new Plugin({
 			// ProseMirror's own cut copies and then throws taking the selection out: the copy is made as it makes it
 			cut(view, event) {
 				const sel = view.state.selection;
-				const data = event.clipboardData;
-				if (!data || !(sel instanceof TextSelection) || sel.empty || !throws(() => view.state.tr.deleteSelection())) return false;
+				const clipboard = event.clipboardData;
+				if (!clipboard || !(sel instanceof TextSelection) || sel.empty || !throws(() => view.state.tr.deleteSelection())) return false;
 				const { dom, text } = view.serializeForClipboard(sel.content());
 				event.preventDefault();
-				data.clearData();
-				data.setData('text/html', dom.innerHTML);
-				data.setData('text/plain', text);
+				clipboard.clearData();
+				clipboard.setData('text/html', dom.innerHTML);
+				clipboard.setData('text/plain', text);
 				view.dispatch(deleteApart(view.state.tr, sel.from, sel.to).scrollIntoView().setMeta('uiEvent', 'cut'));
 				return true;
 			}

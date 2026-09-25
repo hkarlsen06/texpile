@@ -27,6 +27,7 @@ class DecisionMarkStep extends Step {
 		return this;
 	}
 	// never sent anywhere: the history keeps it, and nothing else reads steps as JSON
+	// eslint-disable-next-line @typescript-eslint/naming-convention -- prosemirror-transform Step API method
 	override toJSON() {
 		return { stepType: 'texpileDecision', seq: this.seq, undone: this.undone };
 	}

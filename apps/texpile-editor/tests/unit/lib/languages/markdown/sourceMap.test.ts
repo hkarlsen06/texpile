@@ -4,7 +4,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import type { Node as PMNode } from 'prosemirror-model';
 import { parseMarkdownFile, serializeMarkdownFile, serializeMarkdownFileDetailed } from '$lib/languages/markdown/visual/roundtrip';
-import { pmToSource, sourceToPm, withoutOrigins } from '$lib/editor/visual/sourceSpans';
+import { pmToSource, sourceToPm } from '$lib/editor/visual/sourceSpans';
+import { withoutOrigins } from '$lib/editor/visual/parseOrigins';
 import { auditMap, coverage } from '../../editor/visual/sourceMapAudit';
 import { FORMATS } from '../../workspace/visualEditsFuzz';
 

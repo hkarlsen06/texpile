@@ -331,7 +331,9 @@ export class TreeOps {
 		visualDocCache.rename(from, to);
 		this.deps.afterPathMoved?.(from, to);
 		const active = activeFilePath.current;
-		const under = (p: string, dir: string) => p.replace(/\\/g, '/').startsWith(dir.replace(/\\/g, '/') + '/');
+		function under(p: string, dir: string) {
+			return p.replace(/\\/g, '/').startsWith(dir.replace(/\\/g, '/') + '/');
+		}
 		if (active && samePath(active, from)) activeFilePath.current = to;
 		else if (active && under(active, from)) activeFilePath.current = to + active.slice(from.length);
 		// the main-file pointer follows too: compile, draft mode and the typst preview all target

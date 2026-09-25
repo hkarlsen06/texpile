@@ -4,7 +4,8 @@
 import { TextSelection } from 'prosemirror-state';
 import type { EditorView as PMEditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
-import { adoptParse, type ParseOrigins, type SourceMap } from '$lib/editor/visual/sourceSpans';
+import { type SourceMap } from '$lib/editor/visual/sourceSpans';
+import { adoptParse, type ParseOrigins } from '$lib/editor/visual/parseOrigins';
 import { offsetAtPm, pmAtOffset } from '$lib/editor/visual/sourceMap';
 import { computeBlockPatch, protectCaretBlock, syncParseAttrs } from '$lib/editor/visual/blockPatch';
 import { carriedOffset, patchAroundCaret } from './caretPatch';

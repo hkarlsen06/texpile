@@ -2,7 +2,7 @@
 // then back to visual). Node views settling on that mount dispatched a transaction, which
 // serialized the OLD doc over the newer texSource and dropped the queued autosave of it.
 import { describe, it, expect, vi } from 'vitest';
-import { noParse } from '$lib/editor/visual/sourceSpans';
+import { noParse } from '$lib/editor/visual/parseOrigins';
 import { DocumentBuffer } from '$lib/workspace/documentBuffer.svelte';
 import { parseLatexFile } from '$lib/workspace/latexRoundtrip';
 import { Fragment, type Node as PMNode } from 'prosemirror-model';

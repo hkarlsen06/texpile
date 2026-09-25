@@ -150,7 +150,9 @@ export class DraftPatcher {
 		}
 		if (start <= req.line) return null;
 		const drop = start - req.line;
-		const cut = (s: string) => s.split('\n').slice(drop).join('\n');
+		function cut(s: string) {
+			return s.split('\n').slice(drop).join('\n');
+		}
 		const orig = cut(req.orig);
 		if (!orig.trim()) return null;
 		return { ...req, line: start, orig, text: cut(req.text) };
@@ -192,7 +194,8 @@ export class DraftPatcher {
 		this.pendingReason = null;
 	}
 
-	async instantPatch(req: PatchReq): Promise<void> {
+	async instantPatch(asked: PatchReq): Promise<void> {
+		let req = asked;
 		const h = this.hooks;
 		if (!h.hasNative() || !h.pageCount() || h.compiling()) {
 			// while a compile is in flight, hold the latest edit; run it once compile finishes
@@ -343,7 +346,9 @@ export class DraftPatcher {
 			if (/^\s*\\begin\{/.test(req.text) && /^\s*\\begin\{/.test(req.orig) && band.column)
 				openings.push({ lead: '\\par', hsize: band.column.w });
 			let opening = openings[Math.min(cal.opening ?? 0, openings.length - 1)];
-			const typesetAs = (text: string, o = opening) => h.daemonTypeset({ text: o.lead + text, hsize: o.hsize });
+			function typesetAs(text: string, o = opening) {
+				return h.daemonTypeset({ text: o.lead + text, hsize: o.hsize });
+			}
 			let r = await typesetAs(req.text);
 			if (!r.ok || (r.stats && (r.stats as any).certified === false)) {
 				await abandonToCompile(h, req, 'typeset', { ok: r.ok }, (reason) => this.schedulePause(req.onRecompile, reason), bandOf(cal));
@@ -358,7 +363,9 @@ export class DraftPatcher {
 			// that did not change means the text was consumed as a value (\gdef\ver{2.0} ->
 			// {3.0}, an index term) and its only effect is elsewhere -- the pass is the only
 			// honest render. One extra daemon round trip, paid only on this tier.
-			const typesetOrig = () => typesetAs(req.orig);
+			function typesetOrig() {
+				return typesetAs(req.orig);
+			}
 			let origTypeset: Awaited<ReturnType<typeof typesetOrig>> | null = null;
 			if (req.interiorEdit) {
 				origTypeset = await typesetOrig();

@@ -2,7 +2,7 @@
 // stays the same until a re-parse lands. This plugin hands the parse on to each new document, so
 // the serializer can always ask a document which parse's blocks it still holds
 import { Plugin, PluginKey } from 'prosemirror-state';
-import { adoptParse, parseOf } from './sourceSpans';
+import { adoptParse, parseOf } from './parseOrigins';
 
 export const parseCarryKey = new PluginKey<null>('parseCarry');
 

@@ -71,7 +71,9 @@ const MARKS: Record<string, (attrs: Record<string, unknown>) => { open: string; 
  */
 export type BareUrl = (text: string, href: string) => string | null;
 
-const plainBareUrl: BareUrl = (text, href) => (text === esc(href, 'text') ? `\\url{${href}}` : null);
+function plainBareUrl(text: string, href: string): string | null {
+	return text === esc(href, 'text') ? `\\url{${href}}` : null;
+}
 
 let bareUrl: BareUrl = plainBareUrl;
 
@@ -110,4 +112,35 @@ export function markableMarks(node: Node): readonly Mark[] | null {
  * (\textbf{\texttt{X}} vs \texttt{\textbf{X}} are different commands), so require exact match. */
 export function marksKey(marks: readonly Mark[]): string {
 	return marks.map((m) => `${m.type.name}:${JSON.stringify(m.attrs)}`).join('|');
+}
+
+// character by character: every rule below maps one character to its bytes, which is what lets
+// the source map tell a text leaf's characters apart
+export function bareTextString(text: string, isCode: boolean): string {
+	let result = esc(text, 'text');
+	// a pasted tab becomes one space: there's no clean tab mapping and a space is idempotent.
+	// a bare " stays as-is: \texttt{"} re-parses to a code mark and compounds every save.
+	result = result.replace(/\t/g, ' ');
+	// Every tie became a no-break space on the way in, so a tilde still here is one someone typed
+	// meaning the character - emitted bare it would compile to a tie and vanish from the PDF.
+	// MUST run before the no-break space goes back to ~, or it would escape that one too. Code
+	// keeps its literal bytes and never had the tie converted, so it is left alone.
+	if (!isCode) result = result.replace(/~/g, '\\textasciitilde{}');
+	// a no-break space (from a ~ tie) must go back to ~, not a raw U+00A0 byte (renders
+	// differently without inputenc, and is unfaithful to the source either way).
+	result = result.replace(/\u00A0/g, '~');
+	// typographic chars become LaTeX ligatures so the .tex stays ASCII and round-trips; skipped
+	// in code, where they are literal.
+	if (!isCode) {
+		result = result
+			.replace(/\u2014/g, '---')
+			.replace(/\u2013/g, '--')
+			.replace(/\u201C/g, '``')
+			.replace(/\u201D/g, "''")
+			.replace(/\u2018/g, '`')
+			.replace(/\u2019/g, "'")
+			// \ldots reads back as U+2026, which had no way home and left a non-ASCII byte behind
+			.replace(/\u2026/g, '\\ldots{}');
+	}
+	return result;
 }

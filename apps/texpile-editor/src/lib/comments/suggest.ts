@@ -1,6 +1,6 @@
 // a suggestion is a comment thread carrying the words it took out
 import type { Node as PMNode } from 'prosemirror-model';
-import type { CommentThread } from './log';
+import type { CommentEvent, CommentThread } from './log';
 import type { RegionParser } from '$lib/editor/visual/sourceSpans';
 import { m } from '$lib/paraglide/messages';
 
@@ -91,4 +91,12 @@ export function shownWords(words: string): string {
 	if (/\n[ \t]*\n/.test(words)) return m.comments_suggest_paragraph_break();
 	if (words.includes('\n')) return m.comments_suggest_line_break();
 	return words.replace(/\t/g, '⇥').replace(/ /g, '·');
+}
+
+/** an event whose effect on the open file is more than one comment's range */
+export function touchesSuggestions(e: CommentEvent, before: CommentThread[], events: CommentEvent[]): boolean {
+	if (e.t === 'move' || e.t === 'delete-message') return true;
+	if (e.t === 'edit') return false;
+	const id = e.t === 'open' ? e.id : e.thread;
+	return before.some((t) => t.id === id && isSuggestion(t)) || events.some((x) => x.t === 'open' && x.id === id && x.restore !== undefined);
 }

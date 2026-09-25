@@ -113,6 +113,7 @@ class BreakBar extends WidgetType {
 	override eq(other: BreakBar): boolean {
 		return other.id === this.id && other.focus === this.focus && other.way === this.way;
 	}
+	// eslint-disable-next-line @typescript-eslint/naming-convention -- @codemirror WidgetType API method
 	toDOM(): HTMLElement {
 		const bar = document.createElement('span');
 		bar.className = `cm-suggest-break cm-suggest-break-${this.way}${this.focus ? ' cm-suggest-focused' : ''}`;
@@ -136,6 +137,7 @@ class SuggestedWords extends WidgetType {
 	override eq(other: SuggestedWords): boolean {
 		return other.text === this.text && other.id === this.id && other.focus === this.focus && other.kind === this.kind;
 	}
+	// eslint-disable-next-line @typescript-eslint/naming-convention -- @codemirror WidgetType API method
 	toDOM(): HTMLElement {
 		const span = document.createElement('span');
 		span.className = `cm-suggest-${this.kind}${this.focus ? ' cm-suggest-focused' : ''}`;

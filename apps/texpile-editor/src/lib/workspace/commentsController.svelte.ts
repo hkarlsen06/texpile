@@ -6,7 +6,6 @@
 import { untrack } from 'svelte';
 import { CommentStore, relativeTo, type CommentLogShare } from '$lib/comments/store.svelte';
 import { buildAnchor, resolveAnchor, type CommentAnchor } from '$lib/comments/anchor';
-import { MIN_QUOTE, POINT_WEAK, searchContext, searchQuote } from '$lib/comments/anchorSearch';
 import {
 	anchorEvent,
 	deleteEvent,
@@ -14,7 +13,6 @@ import {
 	editEvent,
 	moveEvent,
 	openEvent,
-	placeEvent,
 	replyEvent,
 	resolveEvent,
 	parseLog,
@@ -25,11 +23,14 @@ import {
 import { lineOf } from '$lib/comments/anchorLocate';
 import { resolveAuthor, forgetAuthor } from '$lib/comments/author';
 import type { CommentRange } from '$lib/editor/visual/extensions/comments';
-import { isSuggestion } from '$lib/comments/suggest';
+import { isSuggestion, touchesSuggestions } from '$lib/comments/suggest';
 import { activeSuggestions, suggestionVisibility } from '$lib/comments/activeSuggestions.svelte';
 import type { EditMode } from '$lib/comments/suggestCompare';
 import { SuggestionsController, type SourceEdit } from './suggestionsController';
 import type { RemoteEdit } from './suggestionStates';
+import { driftedAnchors, placeThreads, withAnchors } from './threadPlacement';
+import { ghostThreads, placementBadges } from './threadBadges';
+import { PlacementVerdicts } from './placementVerdicts';
 
 type Deps = {
 	/** absolute workspace root, or null before a folder is open */
@@ -104,23 +105,20 @@ export class CommentsController {
 	private visual = $state(false);
 	/** a thread we are opening a different file for; selected once that file re-anchors */
 	private pendingOpen: string | null = null;
-	/** verdicts whose place event is still being written, keyed d:/h: + thread id; a second pass
-	 *  landing before the first commit (a disk reload and a log refresh from one watcher event)
-	 *  must not write the same line twice */
-	private inFlight = new Map<string, boolean>();
+	private lastWords = new Map<string, CommentAnchor>();
 	private carried: { text: string; anchors: Map<string, CommentAnchor> } | null = null;
 	knownAnchors = $state.raw<Map<string, CommentAnchor>>(new Map());
 
 	withKnownAnchors(threads: CommentThread[]): CommentThread[] {
-		const known = this.knownAnchors;
-		if (known.size === 0) return threads;
-		return threads.map((t) => {
-			const a = known.get(t.id);
-			return a && a !== t.anchor ? { ...t, anchor: a } : t;
-		});
+		return withAnchors(threads, this.knownAnchors);
 	}
 
 	readonly suggestions: SuggestionsController;
+	private readonly verdicts = new PlacementVerdicts({
+		store: this.store,
+		author: () => this.author(),
+		commit: (...events) => this.commit(...events)
+	});
 
 	constructor(private readonly deps: Deps) {
 		this.suggestions = new SuggestionsController({
@@ -153,12 +151,7 @@ export class CommentsController {
 	}
 
 	get ghosts(): Set<string> {
-		const out = new Set<string>();
-		const expanded = new Set(this.ranges.filter((r) => r.to > r.from).map((r) => r.id));
-		for (const r of this.ranges) if (r.to === r.from) out.add(r.id);
-		for (const t of this.store.threads) if (!t.anchor.quote && !expanded.has(t.id) && !isSuggestion(t)) out.add(t.id);
-		for (const [id, a] of this.knownAnchors) if (!a.quote && !expanded.has(id)) out.add(id);
-		return out;
+		return ghostThreads(this.ranges, this.store.threads, this.knownAnchors);
 	}
 	get activeFile(): string | null {
 		return this.file;
@@ -231,21 +224,9 @@ export class CommentsController {
 	 * the weaker evidence and must not survive next to it.
 	 */
 	private applyOrphans(): void {
-		const merged = new Set(this.activeLost);
-		for (const t of this.store.threads) {
-			if (t.file === this.file) continue; // measured above, not remembered
-			if (t.detached) merged.add(t.id);
-		}
-		this.orphaned = merged;
 		// nothing is "not in this view" while the view is source; see setVisualMode
-		const hidden = new Set<string>();
-		if (this.visual) {
-			for (const id of this.activeHidden) hidden.add(id);
-			for (const t of this.store.threads) {
-				if (t.file === this.file) continue; // measured above, not remembered
-				if (t.hidden) hidden.add(t.id);
-			}
-		}
+		const { orphaned, hidden } = placementBadges(this.store.threads, this.file, this.activeLost, this.activeHidden, this.visual);
+		this.orphaned = orphaned;
 		this.hiddenNow = hidden;
 	}
 
@@ -286,56 +267,25 @@ export class CommentsController {
 			return;
 		}
 		const text = this.fresh();
-		const ranges: CommentRange[] = [];
-		const lost = new Set<string>();
-		const weak = new Set<string>();
 		const carried = this.carried;
 		this.carried = null;
 		const live = this.deps.liveAnchors?.(text) ?? null;
 		const handed = carried && carried.text === text ? carried.anchors : null;
-		const known = new Map(untrack(() => this.knownAnchors));
-		let knownChanged = false;
-		for (const t of this.store.forFile(this.file)) {
-			if (isSuggestion(t)) continue;
-			let exact = live?.get(t.id) ?? handed?.get(t.id) ?? null;
-			if (exact) {
-				exact = this.wordsBack(t, exact, text);
-				ranges.push({ id: t.id, from: exact.start, to: exact.end, resolved: t.resolved });
-				const had = known.get(t.id);
-				if (!had || !sameAnchor(had, exact)) {
-					known.set(t.id, exact);
-					knownChanged = true;
-				}
-				continue;
-			}
-			const prior = known.get(t.id);
-			if (!(prior ?? t.anchor).quote) {
-				const back = this.revive(t, text, (prior ?? t.anchor).start);
-				if (back) {
-					ranges.push({ id: t.id, from: back.start, to: back.end, resolved: t.resolved });
-					known.set(t.id, back);
-					knownChanged = true;
-				}
-				continue;
-			}
-			let hit = null;
-			for (const a of prior ? [prior, t.anchor] : [t.anchor]) {
-				hit = resolveAnchor(text, a);
-				if (hit) break;
-			}
-			if (hit) {
-				ranges.push({ id: t.id, from: hit.from, to: hit.to, resolved: t.resolved });
-				if (hit.weak) weak.add(t.id);
-				this.lastWords.set(t.id, buildAnchor(text, hit.from, hit.to));
-			} else lost.add(t.id);
-		}
+		const placed = placeThreads(
+			this.store.forFile(this.file),
+			text,
+			(id) => live?.get(id) ?? handed?.get(id) ?? null,
+			untrack(() => this.knownAnchors),
+			this.lastWords
+		);
+		const { ranges, lost, weak } = placed;
 		for (const id of this.suggestions.place(this.file, text)) lost.add(id);
-		if (knownChanged) this.knownAnchors = known;
+		if (placed.known) this.knownAnchors = placed.known;
 		this.ranges = ranges;
 		this.activeLost = lost;
 		this.weak = weak;
 		this.applyOrphans();
-		void this.recordDetached(this.file, lost);
+		void this.verdicts.detached(this.file, lost);
 		if (this.pendingOpen) {
 			const target = this.pendingOpen;
 			this.pendingOpen = null;
@@ -358,58 +308,6 @@ export class CommentsController {
 		this.applyOrphans();
 	}
 
-	private lastWords = new Map<string, CommentAnchor>();
-	private wordsBack(t: CommentThread, exact: CommentAnchor, text: string): CommentAnchor {
-		if (exact.quote) {
-			this.lastWords.set(t.id, exact);
-			return exact;
-		}
-		return this.revive(t, text, exact.start) ?? exact;
-	}
-	private revive(t: CommentThread, text: string, hint: number): CommentAnchor | null {
-		const words = this.lastWords.get(t.id) ?? (t.anchor.quote ? t.anchor : null);
-		if (!words) return null;
-		const hit =
-			words.quote.length < MIN_QUOTE
-				? searchContext(text, words.quote, words.prefix, words.suffix, hint)
-				: searchQuote(text, words.quote, words.prefix, words.suffix, hint);
-		if (!hit || hit.context < Math.min(POINT_WEAK, words.prefix.length + words.suffix.length)) return null;
-		return buildAnchor(text, hit.from, hit.to);
-	}
-
-	/**
-	 * Write back what we just measured, for the threads whose recorded status was wrong or missing.
-	 *
-	 * ONLY the differences. Two reasons, and the second is not optional: appending on every pass
-	 * would grow a committed file every time anyone opened a folder, and - because appending
-	 * reassigns `store.threads`, which resolve() reads - it would re-enter resolve() and append
-	 * again, forever. Writing only deltas makes the second pass find nothing to say and stop.
-	 */
-	private async recordDetached(file: string, lost: Set<string>): Promise<void> {
-		if (!this.store.writable) return;
-		const stale = this.store.forFile(file).filter((t) => asFlag(t.detached) !== lost.has(t.id));
-		await this.recordPlacement('d:', stale, lost, (t) => ({ thread: t.id, detached: lost.has(t.id) }));
-	}
-
-	/** the write behind recordDetached and recordHidden, skipping verdicts already on their way */
-	private async recordPlacement(
-		key: 'd:' | 'h:',
-		stale: CommentThread[],
-		lost: Set<string>,
-		fields: (t: CommentThread) => { thread: string; detached?: boolean; hidden?: boolean }
-	): Promise<void> {
-		const fresh = stale.filter((t) => this.inFlight.get(key + t.id) !== lost.has(t.id));
-		if (fresh.length === 0) return;
-		for (const t of fresh) this.inFlight.set(key + t.id, lost.has(t.id));
-		try {
-			const by = await this.author();
-			const at = new Date().toISOString();
-			await this.commit(...fresh.map((t) => placeEvent({ ...fields(t), by, at })));
-		} finally {
-			for (const t of fresh) this.inFlight.delete(key + t.id);
-		}
-	}
-
 	/**
 	 * The visual editor reporting which threads it could not draw, for the document it just placed.
 	 *
@@ -419,9 +317,7 @@ export class CommentsController {
 	async recordHidden(file: string, lost: Set<string>): Promise<void> {
 		this.activeHidden = file === this.file ? lost : new Set();
 		this.applyOrphans();
-		if (!this.store.writable) return;
-		const stale = this.store.forFile(file).filter((t) => !isSuggestion(t) && asFlag(t.hidden) !== lost.has(t.id));
-		await this.recordPlacement('h:', stale, lost, (t) => ({ thread: t.id, hidden: lost.has(t.id) }));
+		await this.verdicts.hidden(file, lost);
 	}
 
 	/**
@@ -512,14 +408,7 @@ export class CommentsController {
 		if (relativeTo(root, absPath) !== this.file) return;
 		const live = this.deps.liveAnchors?.(text);
 		if (!live) return;
-		const moved: { id: string; anchor: CommentAnchor }[] = [];
-		for (const t of this.store.forFile(this.file)) {
-			const anchor = live.get(t.id);
-			if (!anchor || t.resolved || isSuggestion(t)) continue;
-			const hit = resolveAnchor(text, t.anchor);
-			if (hit && !hit.weak && hit.from === anchor.start && hit.to === anchor.end) continue;
-			moved.push({ id: t.id, anchor });
-		}
+		const moved = driftedAnchors(this.store.forFile(this.file), text, live);
 		if (moved.length === 0) return;
 		const by = await this.author();
 		const at = new Date().toISOString();
@@ -702,29 +591,4 @@ export class CommentsController {
 		const own = by?.trim();
 		return own ? Promise.resolve(own) : resolveAuthor(this.deps.root(), this.deps.preferredAuthor());
 	}
-}
-
-/**
- * An unrecorded status read as "fine", which is what makes browsing a project free.
- *
- * The panel only ever asks `if (t.detached)`, so "nobody has looked" and "looked, nothing wrong"
- * produce the same row. Telling them apart on disk would therefore buy nothing and cost a line per
- * thread the first time anyone opens each file - a committed log gaining hundreds of entries that
- * all say nothing is wrong. So only the interesting answer is written: `true` when the text has
- * gone, and `false` only to CORRECT a recorded `true` that is no longer so.
- */
-function asFlag(v: boolean | undefined): boolean {
-	return v === true;
-}
-
-/** an event whose effect on the open file is more than one comment's range */
-function touchesSuggestions(e: CommentEvent, before: CommentThread[], events: CommentEvent[]): boolean {
-	if (e.t === 'move' || e.t === 'delete-message') return true;
-	if (e.t === 'edit') return false;
-	const id = e.t === 'open' ? e.id : e.thread;
-	return before.some((t) => t.id === id && isSuggestion(t)) || events.some((x) => x.t === 'open' && x.id === id && x.restore !== undefined);
-}
-
-function sameAnchor(a: CommentAnchor, b: CommentAnchor): boolean {
-	return a.start === b.start && a.end === b.end && a.quote === b.quote && a.prefix === b.prefix && a.suffix === b.suffix;
 }

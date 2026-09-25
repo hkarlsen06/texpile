@@ -2,10 +2,8 @@
 	// The typed entry form: type picker, per-type fields, and the citation key under Advanced.
 	// BibManager owns the reference list, validation, and the save/commit path.
 	import { ChevronDown, TriangleAlert } from '@lucide/svelte';
-	import { getFieldsForType, type BiblatexReference } from '$lib/languages/bib/biblatex';
+	import { bibProblemText, getFieldsForType, validateEntry, type BiblatexReference } from '$lib/languages/bib/biblatex';
 	import { generateLabel } from '$lib/editor/visual/label';
-	import { validateEntry } from '$lib/languages/bib/bibValidate';
-	import { bibProblemText } from '$lib/languages/bib/bibProblemText';
 	import { m } from '$lib/paraglide/messages';
 
 	let {

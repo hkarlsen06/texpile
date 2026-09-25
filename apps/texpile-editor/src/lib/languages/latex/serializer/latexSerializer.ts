@@ -8,122 +8,20 @@
 import { Fragment, type Node, type Mark } from 'prosemirror-model';
 import { serializeTable, serializeRowCells, serializeCell } from './tableSerializer';
 import { FIG_IMG_SLOT, FIG_CAP_SLOT, FIG_LAB_SLOT } from '../parser/converter';
-import {
-	blankLineAt,
-	createBlockAssembly,
-	follows,
-	isLastOfParse,
-	type DocSerializeResult,
-	type Neighbour
-} from '$lib/serializer/blockAssembly';
+import { blankLineAt, createBlockAssembly, type DocSerializeResult } from '$lib/serializer/blockAssembly';
 import type { Ctx, NodeHandler } from '$lib/serializer/types';
-// direct, not through the image barrel: that one pulls in svelte and the DOM
-import { DEFAULT_FIGURE_FRACTION } from '$lib/editor/visual/extensions/image/figureDefaults';
-import { esc, applyMarks, joinInline, markableMarks, marksKey, setBareUrl } from './textEscapes';
+import { esc, applyMarks, bareTextString, joinInline, markableMarks, marksKey } from './textEscapes';
 import { blockMath, alignEnvironment } from './mathBlocks';
-import {
-	blockOriginOf,
-	spansOfChars,
-	type BlockOrigin,
-	type CharSource,
-	type ParseOrigins,
-	type Segment
-} from '$lib/editor/visual/sourceSpans';
+import { isHandlerLeaf, mapRunLeaves, renderShadowed, shadowed, withoutShadow } from './latexShadowRun';
+import { buildIncludegraphics } from './includegraphics';
+import { continuesList, runEnvName } from './listContinuation';
+import { dropParagraphEnd, paragraphGap } from './paragraphEnds';
+import { guardItemBody, headsItem, labelKey } from './itemLabels';
+import type { Segment } from '$lib/editor/visual/sourceSpans';
+import type { ParseOrigins } from '$lib/editor/visual/parseOrigins';
 export { esc, sanitizeText, type EscMode } from './textEscapes';
 
 export type { DocSerializeResult } from '$lib/serializer/blockAssembly';
-
-// ---- source map. A shadow run of a block stands a private-use character in for the characters
-// of every leaf, keeping the ones the joins and trims look at, so each leaf can be found in the
-// real output afterwards. The shadow is believed only where it equals the real output everywhere
-// else; a block whose shadow differs maps no leaves at all
-const PUA_FIRST = 0xe000;
-const PUA_LAST = 0xf8ff;
-type ShadowLeaf = { node: Node; emitted: string; placeholder: string; bare?: boolean };
-let shadow: ShadowLeaf[] | null = null;
-// what the joins, the trims and the comment checks read. A space is kept as a no-break space: still
-// whitespace to every trim, but never a byte of markup, so an edge a handler trimmed can be told
-// from the bytes beside it
-const KEPT = /[\n\t\r%\\{}]/;
-// nodes whose handler output is one run: their bytes come from attrs, not from text leaves
-const HANDLER_LEAVES = new Set([
-	'block_math',
-	'code_block',
-	'raw_latex',
-	'citation',
-	'ref',
-	'label',
-	'hard_break',
-	'includedoc',
-	'horizontal_rule'
-]);
-
-function isPua(ch: string): boolean {
-	const c = ch.charCodeAt(0);
-	return c >= PUA_FIRST && c <= PUA_LAST;
-}
-
-function isHandlerLeaf(node: Node): boolean {
-	return HANDLER_LEAVES.has(node.type.name) || (node.type.name === 'image' && node.childCount === 0);
-}
-
-function placeholderFor(emitted: string, k: number): string {
-	const id = String.fromCharCode(PUA_FIRST + k);
-	// a trailing control word stays: the join after it looks for one
-	const tail = /\\[a-zA-Z@]+$/.exec(emitted);
-	const keep = tail ? tail.index : emitted.length;
-	let out = '';
-	for (let i = 0; i < keep; i++) {
-		const c = emitted[i];
-		// the join after a control word looks for a letter first, and a comment chip is known by its %
-		if (i === 0 && /[a-zA-Z%\\]/.test(c)) out += c;
-		else if (c === ' ') out += ' ';
-		else out += KEPT.test(c) ? c : id;
-	}
-	return out + emitted.slice(keep);
-}
-
-/** in a shadow run, what stands for this leaf's emission; the emission itself otherwise */
-function shadowed(node: Node, emitted: string): string {
-	if (!shadow || shadow.length > PUA_LAST - PUA_FIRST) return emitted;
-	const placeholder = placeholderFor(emitted, shadow.length);
-	shadow.push({ node, emitted, placeholder });
-	return placeholder;
-}
-
-const shadowBareUrl = (text: string, href: string): string | null => {
-	const k = shadow ? shadow.findIndex((l) => l.placeholder === text) : -1;
-	if (k < 0) return null;
-	const leaf = shadow![k];
-	if (leaf.emitted !== esc(href, 'text')) return null;
-	// the call carries the raw href, so that is what the leaf's characters are from now on
-	leaf.emitted = href;
-	leaf.placeholder = placeholderFor(href, k);
-	leaf.bare = true;
-	return `\\url{${leaf.placeholder}}`;
-};
-
-/** the characters of a text leaf against its emission, one by one; the whole run when they cannot be told */
-function textLeafSpans(leaf: ShadowLeaf): CharSource[] {
-	const text = leaf.node.text ?? '';
-	const chars: CharSource[] = [];
-	if (leaf.bare) {
-		if (leaf.emitted !== text) return new Array<CharSource>(text.length).fill({ srcFrom: 0, srcTo: leaf.emitted.length, kind: 'sub' });
-		for (let i = 0; i < text.length; i++) chars.push({ srcFrom: i, srcTo: i + 1, kind: 'text' });
-		return chars;
-	}
-	const isCode = leaf.node.marks.some((m) => m.type.name === 'code');
-	let off = 0;
-	for (let i = 0; i < text.length; i++) {
-		const e = bareTextString(text[i], isCode);
-		if (!leaf.emitted.startsWith(e, off))
-			return new Array<CharSource>(text.length).fill({ srcFrom: 0, srcTo: leaf.emitted.length, kind: 'sub' });
-		chars.push({ srcFrom: off, srcTo: off + e.length, kind: e === text[i] ? 'text' : 'sub' });
-		off += e.length;
-	}
-	if (off !== leaf.emitted.length) return new Array<CharSource>(text.length).fill({ srcFrom: 0, srcTo: leaf.emitted.length, kind: 'sub' });
-	return chars;
-}
 
 /** where the leaves of a regenerated block sit in its text, or null when the shadow could not be believed */
 function mapBlockLeaves(block: Node, ctx: Ctx, real: string): Segment[] | null {
@@ -153,147 +51,9 @@ function mapInlineLeaves(block: Node, nodes: Node[], text: string, _atStart: boo
 	return mapRunLeaves(run, text, () => renderChildren(run, ctx.inTableCell));
 }
 
-/** where the leaves of `block` sit in `real`, the text `render` writes for it, told by a shadow run */
-function mapRunLeaves(block: Node, real: string, render: () => string): Segment[] | null {
-	const leaves: ShadowLeaf[] = [];
-	shadow = leaves;
-	setBareUrl(shadowBareUrl);
-	let out: string;
-	try {
-		out = render();
-	} finally {
-		shadow = null;
-		setBareUrl(null);
-	}
-	if (out.length !== real.length) return null;
-	for (let i = 0; i < out.length; i++) {
-		if (out[i] === real[i] || isPua(out[i]) || (out[i] === ' ' && real[i] === ' ')) continue;
-		return null;
-	}
-
-	// the leaves' positions, relative to the block node; a block that is itself one run stands at 0.
-	// A child written out as its bytes (a chunk) is one run too, its own leaves carried inside it
-	const chunks = new Set<Node>();
-	for (const leaf of leaves)
-		if (!leaf.node.isText && !leaf.node.isLeaf && !isHandlerLeaf(leaf.node) && !leaf.node.type.spec.leafText) chunks.add(leaf.node);
-	const at = new Map<Node, number>();
-	let twice = false;
-	if (isHandlerLeaf(block) || block.type.spec.leafText) at.set(block, 0);
-	block.descendants((n, pos) => {
-		const leaf = n.isText || n.isLeaf || isHandlerLeaf(n) || !!n.type.spec.leafText || chunks.has(n);
-		if (!leaf) return true;
-		if (at.has(n)) twice = true;
-		at.set(n, pos + 1);
-		return false;
-	});
-	if (twice) return null;
-
-	// a leaf with a marker is found by it, allowing for whitespace a handler trimmed off its edges;
-	// one without, by being the only thing in the gap between the found leaves either side of it
-	type Found = { start: number; lead: number; tail: number };
-	const located: (Found | null)[] = leaves.map((leaf, k) => {
-		const id = String.fromCharCode(PUA_FIRST + k);
-		const p = leaf.placeholder;
-		const j = p.indexOf(id);
-		if (j < 0) return null;
-		const i0 = out.indexOf(id);
-		if (i0 < 0) return null;
-		const maxLead = Math.min(j, /^\s*/.exec(p)![0].length);
-		const maxTail = /\s*$/.exec(p)![0].length;
-		for (let lead = 0; lead <= maxLead; lead++) {
-			const start = i0 - (j - lead);
-			if (start < 0) continue;
-			for (let tail = 0; tail <= maxTail && lead + tail < p.length; tail++) {
-				if (out.startsWith(p.slice(lead, p.length - tail), start)) return { start, lead, tail };
-			}
-		}
-		return null;
-	});
-	for (let k = 0; k < leaves.length; k++) {
-		if (located[k] !== null || !leaves[k].emitted) continue;
-		let from = 0;
-		for (let p = k - 1; p >= 0; p--) {
-			const f = located[p];
-			if (f) {
-				from = f.start + leaves[p].emitted.length - f.lead - f.tail;
-				break;
-			}
-		}
-		let to = real.length;
-		for (let q = k + 1; q < leaves.length; q++) {
-			const f = located[q];
-			if (f) {
-				to = f.start;
-				break;
-			}
-		}
-		if (from > to) continue;
-		const gap = real.slice(from, to);
-		const first = gap.indexOf(leaves[k].emitted);
-		if (first < 0 || gap.indexOf(leaves[k].emitted, first + 1) >= 0) continue;
-		located[k] = { start: from + first, lead: 0, tail: 0 };
-	}
-
-	const segs: Segment[] = [];
-	for (let k = 0; k < leaves.length; k++) {
-		const found = located[k];
-		const leaf = leaves[k];
-		const pm = at.get(leaf.node);
-		if (!found || pm === undefined) continue;
-		const { start, lead, tail } = found;
-		const coreLen = leaf.emitted.length - lead - tail;
-		if (leaf.node.isText) {
-			// characters a handler trimmed off stand for nothing
-			const chars = textLeafSpans(leaf).map((c) => {
-				if (!c) return null;
-				const srcFrom = Math.max(0, c.srcFrom - lead);
-				const srcTo = Math.min(coreLen, c.srcTo - lead);
-				return srcTo > srcFrom ? { srcFrom, srcTo, kind: c.kind } : null;
-			});
-			for (const s of spansOfChars(chars)) {
-				segs.push({ pmFrom: pm + s.from, pmTo: pm + s.to, srcFrom: start + s.srcFrom, srcTo: start + s.srcTo, kind: s.kind });
-			}
-			continue;
-		}
-		// a chunk's runs are where the parse had them, moved to where its bytes landed
-		if (chunks.has(leaf.node)) {
-			const origin = blockOriginOf(leaf.node);
-			if (!origin || origin.srcFrom === undefined || lead > 0 || tail > 0) continue;
-			for (const s of origin.leaves) {
-				segs.push({
-					pmFrom: pm + (s.pmFrom - origin.pmFrom),
-					pmTo: pm + (s.pmTo - origin.pmFrom),
-					srcFrom: start + (s.srcFrom - origin.srcFrom),
-					srcTo: start + (s.srcTo - origin.srcFrom),
-					kind: s.kind
-				});
-			}
-			continue;
-		}
-		// an atom whose text child appears once inside its emission maps that child character for character
-		const core = leaf.emitted.slice(lead, lead + coreLen);
-		const inner = leaf.node.childCount === 1 && leaf.node.firstChild!.isText ? (leaf.node.firstChild!.text ?? '') : '';
-		const at1 = inner ? core.indexOf(inner) : -1;
-		if (inner && at1 >= 0 && core.indexOf(inner, at1 + 1) < 0) {
-			segs.push({ pmFrom: pm + 1, pmTo: pm + 1 + inner.length, srcFrom: start + at1, srcTo: start + at1 + inner.length, kind: 'text' });
-		} else if (coreLen > 0) {
-			segs.push({ pmFrom: pm, pmTo: pm + leaf.node.nodeSize, srcFrom: start, srcTo: start + coreLen, kind: 'sub' });
-		}
-	}
-	return segs.sort((a, b) => a.pmFrom - b.pmFrom);
-}
-
 /** the real and shadow runs of one block side by side, for the oracles to say why a block maps no leaves */
 export function shadowRunOf(block: Node, ctx: Ctx): { real: string; shadow: string } {
-	const real = serializeNode(block, ctx);
-	shadow = [];
-	setBareUrl(shadowBareUrl);
-	try {
-		return { real, shadow: serializeNode(block, ctx) };
-	} finally {
-		shadow = null;
-		setBareUrl(null);
-	}
+	return { real: serializeNode(block, ctx), shadow: renderShadowed(() => serializeNode(block, ctx)) };
 }
 
 /** A text/leaf node's content WITHOUT its own marks, for runs wrapped once by the caller. */
@@ -349,62 +109,6 @@ export function renderChildren(node: Node, inTableCell: boolean): string {
 }
 
 /**
- * Two lists the source wrote as separate environments stay separate: the verbatim layer emits a
- * pristine neighbour with its own \begin and \end, so coalescing a regenerated one into it left
- * an unbalanced environment. Editor-made list nodes carry no source group and still coalesce, and
- * so do items a Tab or Shift+Tab brought together: the file ended no environment between them.
- */
-function sameSourceList(a: Node, b: Node): boolean {
-	const oa = blockOriginOf(a);
-	const ob = blockOriginOf(b);
-	if (!oa || !ob || (oa.parse === ob.parse && oa.index - oa.member === ob.index - ob.member)) return true;
-	return !(oa.member === oa.size - 1 && ob.member === 0);
-}
-
-/** whether `parent`'s child at `index` is written as more of the list environment before it, with no \begin of its own */
-function continuesList(parent: Node, index: number): boolean {
-	const node = parent.child(index);
-	const prev = index > 0 ? parent.child(index - 1) : null;
-	if (node.type.name !== 'list' || prev?.type.name !== 'list' || prev.attrs.kind !== node.attrs.kind || !sameSourceList(prev, node))
-		return false;
-	const own = ownEnvName(node);
-	const prevEnv = runEnvName(prev, { parent, index: index - 1 }) ?? (node.attrs.kind === 'ordered' ? 'enumerate' : 'itemize');
-	return own === null || own === prevEnv;
-}
-
-/** the environment name a list node carries itself, if any */
-function ownEnvName(node: Node): string | null {
-	return typeof node.attrs.envName === 'string' && node.attrs.envName ? node.attrs.envName : null;
-}
-
-/** the environment name the first node of this run of list nodes carries, if any */
-function runEnvName(node: Node, ctx: Pick<Ctx, 'parent' | 'index'>): string | null {
-	if (!ctx.parent) return typeof node.attrs.envName === 'string' ? node.attrs.envName : null;
-	const kind = node.attrs.kind;
-	for (let i = ctx.index; i >= 0; i--) {
-		const n = ctx.parent.child(i);
-		if (n.type.name !== 'list' || n.attrs.kind !== kind || (i < ctx.index && !sameSourceList(n, ctx.parent.child(i + 1)))) break;
-		if (typeof n.attrs.envName === 'string' && n.attrs.envName) return n.attrs.envName;
-	}
-	return null;
-}
-
-// the same label written as source and re-serialized from the editor differs by markup, ties,
-// dash ligatures and quote curling; those are folded, and any other character typed in counts
-function labelKey(s: string): string {
-	return s
-		.replace(/\\[a-zA-Z@]+\s*/g, '')
-		.replace(/[{}]/g, '')
-		.replace(/~|\u00A0/g, ' ')
-		.replace(/---|—/g, '-')
-		.replace(/--|–/g, '-')
-		.replace(/``|''|[“”"]/g, '"')
-		.replace(/[`‘’]/g, "'")
-		.replace(/\s+/g, ' ')
-		.trim();
-}
-
-/**
  * The label at the head of an item, and the paragraph with it removed.
  *
  * The run is identified by the item_label mark createList puts on it, not by matching text: a
@@ -412,17 +116,6 @@ function labelKey(s: string): string {
  * label is not the label. `latex` is the run re-serialized, which is what an edited label has
  * to be written back as; the caller prefers the untouched source when the two still agree.
  */
-/** an item body beginning with `[` reads as the item's label, and one beginning with `<` as a
- *  beamer overlay: an empty group in front keeps the bytes text */
-function guardItemBody(body: string): string {
-	return /^[[<]/.test(body) ? '{}' + body : body;
-}
-
-/** whether `ctx` is the first block of a list item, whose bytes follow \item directly */
-function headsItem(ctx: Ctx | undefined): boolean {
-	return !!ctx && ctx.parent?.type.name === 'list' && ctx.index === 0;
-}
-
 function splitLeadingLabel(item: Node): { latex: string; body: Node; glued: boolean } | null {
 	if (item.type.name !== 'paragraph') return null;
 	// through the LAST marked node, not the first unmarked one
@@ -459,74 +152,6 @@ const HEADING_CMD: Record<number, string> = {
 	4: '\\paragraph',
 	5: '\\subparagraph'
 };
-
-/** Drop width=/scale=/height= entries from an \includegraphics option list (keep trim, clip, angle…). */
-function stripSizeKeys(opts: string): string {
-	return opts
-		.split(',')
-		.map((s) => s.trim())
-		.filter((s) => s && !/^(width|scale|height|totalheight)\s*=/.test(s))
-		.join(', ');
-}
-
-/**
- * Rebuild the \includegraphics for an image node.
- * - resized in the editor (width/maxWidth set): emit width=<frac>\textwidth, keeping other
- *   captured options (trim/clip/angle) and replacing the original size keys.
- * - options === '': the source had no brackets, emit \includegraphics{src} verbatim.
- * - options a non-empty string: emit it verbatim.
- * - options == null (editor-created, never resized): the default width.
- */
-function buildIncludegraphics(node: Node): string {
-	const src = String(node.attrs.src ?? '');
-	const options = node.attrs.options as string | null;
-	const w = Number(node.attrs.width);
-	const mw = Number(node.attrs.maxWidth);
-	if (Number.isFinite(w) && Number.isFinite(mw) && mw > 0) {
-		const frac = Math.round((w / mw) * 100) / 100; // resize already snaps; this guards stray values
-		const rest = stripSizeKeys(typeof options === 'string' ? options : '');
-		const opts = [`width=${frac}\\textwidth`, rest].filter(Boolean).join(', ');
-		return `\\includegraphics[${opts}]{${src}}`;
-	}
-	if (options === '') return `\\includegraphics{${src}}`;
-	if (typeof options === 'string') return `\\includegraphics[${options}]{${src}}`;
-	return `\\includegraphics[width=${DEFAULT_FIGURE_FRACTION}\\textwidth]{${src}}`;
-}
-
-/**
- * A \par the source had stays while the same block follows, so typing never rewrites how a
- * paragraph ends. `was` is what the parse knew the paragraph as before the edit; `next` is the
- * block written after it, or 'end' for the body's end.
- */
-export function dropParagraphEnd(
-	text: string,
-	last: Node | null,
-	was: BlockOrigin | null = null,
-	next: BlockOrigin | 'end' | null = null
-): string {
-	if (last?.type.name !== 'paragraph') return text;
-	const hadPar = typeof was?.text === 'string' && /\\par\s*$/.test(was.text);
-	const kept = hadPar && (next === 'end' ? isLastOfParse(was!) : follows(was, next));
-	return kept ? text : text.replace(/[ \t]*\\par$/, '');
-}
-
-// the file's own gap between a pair still the source pair, even a single line end: prose can
-// only merge across one into prose, so after anything but a paragraph (a heading, an
-// environment, a comment line) the gap is safe as written, and after a paragraph while it still
-// ends in the \par the file gave it
-function paragraphGap(prev: Neighbour, next: Neighbour, contiguous: boolean, before: string): string | null {
-	const origin = next.origin ?? next.was;
-	const pre = origin?.pre;
-	// a later member of a construct (an item of a list written as one) has no gap of its own
-	if (!contiguous || typeof pre !== 'string' || origin!.member !== 0) return null;
-	// a paragraph, or a heading, after a paragraph on a single line end takes a blank line unless
-	// a \par parts them; an environment, a list or a display the paragraph ran into opens on the
-	// file's own gap, as it did
-	const prose = next.node.type.name === 'paragraph' || next.node.type.name === 'heading';
-	if (prev.node.type.name === 'paragraph' && prose && !/\\par\s*$/.test(before.slice(-16))) return null;
-	// a comment ending what was written owns the rest of its line: the next block needs a line of its own
-	return /(^|[^\\])(\\\\)*%[^\n]*\n*$/.test(before) && !pre.startsWith('\n') ? '\n' + pre : pre;
-}
 
 function envBody(node: Node): string {
 	return dropParagraphEnd(renderChildren(node, false).replace(/^\n+|\n+$/g, ''), node.lastChild) + '\n';
@@ -602,37 +227,6 @@ function bareText(node: Node): string {
 			node.marks.some((m) => m.type.name === 'code')
 		)
 	);
-}
-
-// character by character: every rule below maps one character to its bytes, which is what lets
-// the source map tell a text leaf's characters apart
-function bareTextString(text: string, isCode: boolean): string {
-	let result = esc(text, 'text');
-	// a pasted tab becomes one space: there's no clean tab mapping and a space is idempotent.
-	// a bare " stays as-is: \texttt{"} re-parses to a code mark and compounds every save.
-	result = result.replace(/\t/g, ' ');
-	// Every tie became a no-break space on the way in, so a tilde still here is one someone typed
-	// meaning the character - emitted bare it would compile to a tie and vanish from the PDF.
-	// MUST run before the no-break space goes back to ~, or it would escape that one too. Code
-	// keeps its literal bytes and never had the tie converted, so it is left alone.
-	if (!isCode) result = result.replace(/~/g, '\\textasciitilde{}');
-	// a no-break space (from a ~ tie) must go back to ~, not a raw U+00A0 byte (renders
-	// differently without inputenc, and is unfaithful to the source either way).
-	result = result.replace(/\u00A0/g, '~');
-	// typographic chars become LaTeX ligatures so the .tex stays ASCII and round-trips; skipped
-	// in code, where they are literal.
-	if (!isCode) {
-		result = result
-			.replace(/\u2014/g, '---')
-			.replace(/\u2013/g, '--')
-			.replace(/\u201C/g, '``')
-			.replace(/\u201D/g, "''")
-			.replace(/\u2018/g, '`')
-			.replace(/\u2019/g, "'")
-			// \ldots reads back as U+2026, which had no way home and left a non-ASCII byte behind
-			.replace(/\u2026/g, '\\ldots{}');
-	}
-	return result;
 }
 
 const NODES: Record<string, NodeHandler> = {
@@ -829,20 +423,15 @@ const NODES: Record<string, NodeHandler> = {
 		// says the same thing, since re-serializing turns a tie into a no-break space and a `--`
 		// into a dash; once the run says something else, the user edited the label and that wins
 		const itemLabel = typeof node.attrs.itemLabel === 'string' ? node.attrs.itemLabel : null;
-		// the label is compared with the source's by its words, which a shadow run would not have
-		const shadowing = shadow;
-		shadow = null;
 		// the block carrying the label: the first, unless a line break at its start left empty
-		// paragraphs in front of it, which \item writes as nothing
+		// paragraphs in front of it, which \item writes as nothing. Read with the shadow off: the label
+		// is compared with the source's by its words
 		let first = 0;
-		let labelled: ReturnType<typeof splitLeadingLabel>;
-		try {
+		const labelled = withoutShadow(() => {
 			while (first < node.childCount - 1 && isEmptyParagraph(node.child(first)) && splitLeadingLabel(node.child(first + 1)) !== null)
 				first++;
-			labelled = node.childCount > 0 ? splitLeadingLabel(node.child(first)) : null;
-		} finally {
-			shadow = shadowing;
-		}
+			return node.childCount > 0 ? splitLeadingLabel(node.child(first)) : null;
+		});
 		const sourceHolds = itemLabel != null && labelled != null && labelKey(labelled.latex) === labelKey(itemLabel);
 		const label = labelled ? (sourceHolds ? itemLabel : labelled.latex) : itemLabel === '' ? '' : null;
 		// a `]` in the label would close the bracket early: braces around it keep it inside

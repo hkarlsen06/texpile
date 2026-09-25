@@ -10,7 +10,9 @@ const EDITOR_KEEP = 300;
 function maxHeight(): number {
 	return browser && typeof window !== 'undefined' ? Math.max(MIN_HEIGHT, window.innerHeight - EDITOR_KEEP) : 700;
 }
-const clampHeight = (h: number) => clampTo(MIN_HEIGHT, maxHeight())(h);
+function clampHeight(h: number) {
+	return clampTo(MIN_HEIGHT, maxHeight())(h);
+}
 
 /** the imperative handle TerminalDock exposes */
 export type DockHandle = {

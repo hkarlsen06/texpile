@@ -3,7 +3,8 @@ import { Fragment, type Node } from 'prosemirror-model';
 import { Transform } from 'prosemirror-transform';
 import { schema } from '$lib/languages/latex/schema/latexPMSchema';
 import { parseBodyOf, parseLatexFile, serializeLatexFile, serializeLatexFileDetailed } from '../../../../src/lib/workspace/latexRoundtrip';
-import { pmToSource, rememberParseMap, withoutOrigins } from '$lib/editor/visual/sourceSpans';
+import { pmToSource } from '$lib/editor/visual/sourceSpans';
+import { rememberParseMap, withoutOrigins } from '$lib/editor/visual/parseOrigins';
 import { padTables } from '$lib/editor/visual/padTables';
 
 // verbatim source preservation: untouched blocks round-trip byte-for-byte through the parse's

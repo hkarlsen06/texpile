@@ -66,7 +66,9 @@ export function syncPmComments(args: PmCommentsSyncArgs): void {
 		lastFp = fp;
 		lastEpoch = epoch;
 		const held = new Map((pmCommentsKey.getState(v.state)?.ranges ?? []).map((r) => [r.id, r]));
-		const keeps = (r: CommentRange) => !swapped && held.has(r.id) && lastById.get(r.id) === byId.get(r.id);
+		function keeps(r: CommentRange) {
+			return !swapped && held.has(r.id) && lastById.get(r.id) === byId.get(r.id);
+		}
 		lastById = byId;
 		const placed = placePmComments(
 			v.state.doc,

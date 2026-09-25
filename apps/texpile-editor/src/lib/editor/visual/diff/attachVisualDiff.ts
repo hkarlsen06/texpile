@@ -46,3 +46,15 @@ export function attachVisualDiff(view: EditorView, input: VisualDiffInput | null
 		);
 	}
 }
+
+export function attachVisualDiffOutsideComposition(view: EditorView, input: VisualDiffInput | null): (() => void) | undefined {
+	function apply() {
+		attachVisualDiff(view, input);
+	}
+	if (!view.composing) {
+		apply();
+		return;
+	}
+	view.dom.addEventListener('compositionend', apply, { once: true });
+	return () => view.dom.removeEventListener('compositionend', apply);
+}

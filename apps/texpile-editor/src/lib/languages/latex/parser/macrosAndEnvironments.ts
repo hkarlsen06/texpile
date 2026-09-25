@@ -8,13 +8,15 @@
 // where they sit in the file; content that cannot be found in the file is parsed as upstream does
 // and left without positions, since no position is better than a wrong one. Every other step is
 // upstream's, in upstream's order.
-import type { Plugin } from 'unified';
+import type { Transformer } from 'unified';
 import type * as Ast from '@unified-latex/unified-latex-types';
 import { visit } from '@unified-latex/unified-latex-util-visit';
 import { match } from '@unified-latex/unified-latex-util-match';
 import { printRaw } from '@unified-latex/unified-latex-util-print-raw';
 import { attachMacroArgsInArray, gobbleArguments } from '@unified-latex/unified-latex-util-arguments';
 import { parseMathMinimal } from '@unified-latex/unified-latex-util-parse';
+
+/* eslint-disable no-param-reassign -- a unified plugin transforms the tree in place, as upstream's does */
 
 type Position = NonNullable<Ast.Node['position']>;
 type Positioned = { position?: Position; content?: unknown; args?: unknown[] };
@@ -28,7 +30,7 @@ export type MacrosAndEnvironmentsOptions = {
 function extent(nodes: unknown[]): { from: number; to: number } | null {
 	let from = Infinity;
 	let to = -Infinity;
-	const walk = (n: unknown): void => {
+	function walk(n: unknown): void {
 		if (!n || typeof n !== 'object') return;
 		const p = (n as Positioned).position;
 		if (p) {
@@ -36,14 +38,14 @@ function extent(nodes: unknown[]): { from: number; to: number } | null {
 			if (typeof p.end?.offset === 'number') to = Math.max(to, p.end.offset);
 		}
 		for (const kids of [(n as Positioned).content, (n as Positioned).args]) if (Array.isArray(kids)) kids.forEach(walk);
-	};
+	}
 	nodes.forEach(walk);
 	return Number.isFinite(from) && Number.isFinite(to) && from < to ? { from, to } : null;
 }
 
 /** every position under `nodes` moved by `by`; with `by` null, dropped */
 function moved(nodes: unknown[], by: number | null): void {
-	const walk = (n: unknown): void => {
+	function walk(n: unknown): void {
 		if (!n || typeof n !== 'object') return;
 		const node = n as Positioned;
 		if (node.position) {
@@ -56,7 +58,7 @@ function moved(nodes: unknown[], by: number | null): void {
 			}
 		}
 		for (const kids of [node.content, node.args]) if (Array.isArray(kids)) kids.forEach(walk);
-	};
+	}
 	nodes.forEach(walk);
 }
 
@@ -82,17 +84,17 @@ function reparsedAsMath(nodes: Ast.Node[], source: string | undefined): Ast.Node
 }
 
 /** upstream's processEnvironment: arguments attached, render info merged, the body processed */
-function processEnvironment(env: Ast.Environment, info: Ast.EnvInfo): void {
-	if (info.signature && env.args == null) env.args = gobbleArguments(env.content, info.signature).args;
-	if (info.renderInfo != null) env._renderInfo = { ...(env._renderInfo || {}), ...info.renderInfo };
-	if (typeof info.processContent === 'function') env.content = info.processContent(env.content);
+function processEnvironment(env: Ast.Environment, envInfo: Ast.EnvInfo): void {
+	if (envInfo.signature && env.args == null) env.args = gobbleArguments(env.content, envInfo.signature).args;
+	if (envInfo.renderInfo != null) env._renderInfo = { ...(env._renderInfo || {}), ...envInfo.renderInfo };
+	if (typeof envInfo.processContent === 'function') env.content = envInfo.processContent(env.content);
 }
 
 function mathOnly<T extends { renderInfo?: { inMathMode?: boolean } }>(table: Record<string, T>): Record<string, T> {
-	return Object.fromEntries(Object.entries(table).filter(([, info]) => info.renderInfo?.inMathMode === true));
+	return Object.fromEntries(Object.entries(table).filter(([, entry]) => entry.renderInfo?.inMathMode === true));
 }
 
-export const processMacrosAndEnvironments: Plugin<[MacrosAndEnvironmentsOptions], Ast.Root, Ast.Root> = function (options) {
+export function processMacrosAndEnvironments(options: MacrosAndEnvironmentsOptions): Transformer<Ast.Root, Ast.Root> {
 	const { environments, macros } = options;
 	const mathMacros = mathOnly(macros);
 	const mathEnvs = mathOnly(environments);
@@ -100,12 +102,12 @@ export const processMacrosAndEnvironments: Plugin<[MacrosAndEnvironmentsOptions]
 	const isMathMacro = match.createMacroMatcher(Object.keys(mathMacros));
 	const isRelevantEnvironment = match.createEnvironmentMatcher(environments);
 	const isRelevantMathEnvironment = match.createEnvironmentMatcher(mathEnvs);
-	const processEnv = (node: Ast.Environment): void => {
+	function processEnv(node: Ast.Environment): void {
 		const name = printRaw(node.env);
-		const info = environments[name];
-		if (!info) throw new Error(`Could not find environment info for environment "${name}"`);
-		processEnvironment(node, info);
-	};
+		const envInfo = environments[name];
+		if (!envInfo) throw new Error(`Could not find environment info for environment "${name}"`);
+		processEnvironment(node, envInfo);
+	}
 	return (tree, file) => {
 		const source = typeof file.value === 'string' ? file.value : undefined;
 		visit(
@@ -144,4 +146,4 @@ export const processMacrosAndEnvironments: Plugin<[MacrosAndEnvironmentsOptions]
 			{ includeArrays: true }
 		);
 	};
-};
+}

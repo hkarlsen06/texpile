@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { noParse } from '$lib/editor/visual/sourceSpans';
+import { noParse } from '$lib/editor/visual/parseOrigins';
 import { visualDocCache } from '$lib/workspace/visualDocCache';
 import type { ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
 

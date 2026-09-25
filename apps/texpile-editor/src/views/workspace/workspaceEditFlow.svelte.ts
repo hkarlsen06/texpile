@@ -2,7 +2,7 @@
 // unsaved-edit gate, on-disk change detection, tab activation/closing, and the load-the-
 // active-file effect that ties them together.
 import { untrack } from 'svelte';
-import { noParse, parseOf } from '$lib/editor/visual/sourceSpans';
+import { noParse, parseOf } from '$lib/editor/visual/parseOrigins';
 import { SavePipeline } from '$lib/workspace/savePipeline.svelte';
 import { ExternalChangeWatcher } from '$lib/workspace/externalChange.svelte';
 import { UnsavedGuard } from '$lib/workspace/unsavedGuard.svelte';

@@ -53,7 +53,9 @@ export function withoutInk(p: Patch): Patch {
  * records, and a font the page never loaded gets a new id.
  */
 export function recordsAfterPatch(records: any[], patch: Patch): any[] {
-	const key = (f: any) => `${f.name}|${f.file}|${f.size}|${f.sub ?? ''}`;
+	function key(f: any) {
+		return `${f.name}|${f.file}|${f.size}|${f.sub ?? ''}`;
+	}
 	const pageFont = new Map<string, number>();
 	let next = 0;
 	for (const r of records)

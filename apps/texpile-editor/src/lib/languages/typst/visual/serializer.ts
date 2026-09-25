@@ -6,7 +6,8 @@
 // assembly's boundary hook at the top level.
 import { Fragment, type Node } from 'prosemirror-model';
 import { blankLineAt, createBlockAssembly, type DocSerializeResult } from '$lib/serializer/blockAssembly';
-import type { ParseOrigins, Segment } from '$lib/editor/visual/sourceSpans';
+import type { Segment } from '$lib/editor/visual/sourceSpans';
+import type { ParseOrigins } from '$lib/editor/visual/parseOrigins';
 import type { Ctx } from '$lib/serializer/types';
 import {
 	escLineStart,

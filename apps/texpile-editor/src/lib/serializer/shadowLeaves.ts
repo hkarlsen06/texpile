@@ -74,7 +74,9 @@ export function createShadow(dialect: ShadowDialect): Shadow {
 	/** the characters of a text leaf against its emission, one by one; the whole run when they cannot be told */
 	function textLeafSpans(leaf: ShadowLeaf): CharSource[] {
 		const text = leaf.node.text ?? '';
-		const whole = () => new Array<CharSource>(text.length).fill({ srcFrom: 0, srcTo: leaf.emitted.length, kind: 'sub' });
+		function whole() {
+			return new Array<CharSource>(text.length).fill({ srcFrom: 0, srcTo: leaf.emitted.length, kind: 'sub' });
+		}
 		const chars: CharSource[] = [];
 		let off = 0;
 		for (let i = 0; i < text.length; i++) {

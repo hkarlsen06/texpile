@@ -3,20 +3,18 @@
 	// entries that only edit as CM text, and per-row delete.
 	import { tip } from '$lib/components/tooltip.svelte';
 	import { AlertTriangle, Code, Trash2 } from '@lucide/svelte';
-	import { fitsVisualEditor, type BiblatexReference } from '$lib/languages/bib/biblatex';
-	import { validateEntry } from '$lib/languages/bib/bibValidate';
-	import { bibProblemText } from '$lib/languages/bib/bibProblemText';
-	import { bibDisplayText } from '$lib/languages/bib/biblatex';
+	import { bibDisplayText, bibProblemText, fitsVisualEditor, validateEntry, type BiblatexReference } from '$lib/languages/bib/biblatex';
 	import { m } from '$lib/paraglide/messages';
 
 	// one walk per row per render; a bibliography is short and the check is a few set lookups
-	const problemsOf = (ref: BiblatexReference) =>
-		validateEntry(
+	function problemsOf(ref: BiblatexReference) {
+		return validateEntry(
 			ref.entrytype,
 			Object.entries(ref)
 				.filter(([, v]) => typeof v === 'string' && v.trim().length > 0)
 				.map(([k]) => k)
 		);
+	}
 
 	let {
 		refs,

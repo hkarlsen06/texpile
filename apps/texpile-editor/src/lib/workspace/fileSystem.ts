@@ -459,7 +459,9 @@ export function samePath(a: string, b: string) {
 /** `abs` written relative to `root` with forward slashes, or null when it is not under it */
 export function relativeInside(root: string, abs: string): string | null {
 	if (!root || !abs) return null;
-	const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '');
+	function norm(p: string) {
+		return p.replace(/\\/g, '/').replace(/\/+$/, '');
+	}
 	const r = norm(root);
 	const a = norm(abs);
 	if (!a.toLowerCase().startsWith(r.toLowerCase() + '/')) return null;

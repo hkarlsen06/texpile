@@ -26,13 +26,13 @@ export function blockAtPm(map: SourceMap, pos: number, assoc: Side = 1): Segment
 	if (!top) return null;
 	const inner = map.inner ?? [];
 	let best: Segment | null = null;
-	const better = (s: Segment) => {
+	function better(s: Segment) {
 		if (!best) return true;
 		const a = s.pmTo - s.pmFrom;
 		const b = best.pmTo - best.pmFrom;
 		if (a !== b) return a < b;
 		return assoc < 0 ? s.pmTo === pos && best.pmFrom === pos : s.pmFrom === pos && best.pmTo === pos;
-	};
+	}
 	for (let i = indexStartingBy(inner, 'pmFrom', pos); i >= 0 && inner[i].pmFrom >= top.pmFrom; i--) {
 		const s = inner[i];
 		if (pos <= s.pmTo && better(s)) best = s;
@@ -46,13 +46,13 @@ export function blockAtSource(map: SourceMap, offset: number, assoc: Side = 1): 
 	if (!top) return null;
 	const inner = bySource(map.inner ?? []);
 	let best: Segment | null = null;
-	const better = (s: Segment) => {
+	function better(s: Segment) {
 		if (!best) return true;
 		const a = s.srcTo - s.srcFrom;
 		const b = best.srcTo - best.srcFrom;
 		if (a !== b) return a < b;
 		return assoc < 0 ? s.srcTo === offset && best.srcFrom === offset : s.srcFrom === offset && best.srcTo === offset;
-	};
+	}
 	for (let i = indexStartingBy(inner, 'srcFrom', offset); i >= 0 && inner[i].srcFrom >= top.srcFrom; i--) {
 		const s = inner[i];
 		if (offset <= s.srcTo && better(s)) best = s;
@@ -77,7 +77,9 @@ export function offsetAtPm(map: SourceMap, pos: number, assoc: Side = -1): numbe
 	if (exact !== null) return exact;
 	const block = blockAtPm(map, pos, assoc);
 	const { before, after } = around(map.leaves, 'pmFrom', pos);
-	const within = (s: Segment | null) => (s && (!block || (s.pmFrom >= block.pmFrom && s.pmTo <= block.pmTo)) ? s : null);
+	function within(s: Segment | null) {
+		return s && (!block || (s.pmFrom >= block.pmFrom && s.pmTo <= block.pmTo)) ? s : null;
+	}
 	const b = within(before);
 	const a = within(after);
 	const pick = assoc < 0 ? (b ?? a) : (a ?? b);
@@ -91,7 +93,9 @@ export function pmAtOffset(map: SourceMap, offset: number, assoc: Side = 1): num
 	if (exact !== null) return exact;
 	const block = blockAtSource(map, offset, assoc);
 	const { before, after } = around(bySource(map.leaves), 'srcFrom', offset);
-	const within = (s: Segment | null) => (s && (!block || (s.srcFrom >= block.srcFrom && s.srcTo <= block.srcTo)) ? s : null);
+	function within(s: Segment | null) {
+		return s && (!block || (s.srcFrom >= block.srcFrom && s.srcTo <= block.srcTo)) ? s : null;
+	}
 	const b = within(before);
 	const a = within(after);
 	const pick = assoc < 0 ? (b ?? a) : (a ?? b);

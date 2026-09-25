@@ -255,7 +255,9 @@ export class WorkspaceIntegrations {
 				(p) => d.provider.fileUrl(p),
 				(p, blob) => d.provider.writeBinary(p, blob)
 			);
-			const searchOpts = () => ({ root: workspaceRoot.current, loadedPath: doc.path, source: doc.texSource });
+			function searchOpts() {
+				return { root: workspaceRoot.current, loadedPath: doc.path, source: doc.texSource };
+			}
 			setGraphicResolver((rel) => graphicCandidateUrls(rel, { ...searchOpts(), fileUrl: (p) => d.provider.fileUrl(p) }));
 			// the rendered image node resolves through the same directories, so a figure cannot
 			// preview on hover and 403 in the document

@@ -8,11 +8,12 @@ export function recordDrift(
 	adopted: any[],
 	fresh: any[]
 ): { rows: number; freshRows: number; maxDy: number; maxDx: number; worst?: { ay: number; fy: number }[] } {
-	const lines = (rs: any[]) =>
-		rs
+	function lines(rs: any[]) {
+		return rs
 			.filter((r) => r.t === 'pl' && r.y !== undefined)
 			.map((r) => ({ x: r.x ?? 0, y: r.y }))
 			.sort((a, b) => a.y - b.y || a.x - b.x);
+	}
 	const a = lines(adopted);
 	const f = lines(fresh);
 	let maxDy = 0;

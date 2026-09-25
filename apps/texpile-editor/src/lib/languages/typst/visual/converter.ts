@@ -37,11 +37,11 @@ import {
 	collectMap,
 	noteBlockSpan,
 	noteSpans,
-	rememberParseMap,
 	standsFor,
 	type LeafSpan,
 	withAttrs
 } from '$lib/editor/visual/sourceSpans';
+import { rememberParseMap } from '$lib/editor/visual/parseOrigins';
 import { tableSeg } from './tableConvert';
 import { figureSeg } from './figureConvert';
 import { headingSeg, headingCallSeg, listSeg, termSeg, quoteSeg, aloneWithLabel, labelGapOf } from './segConvert';

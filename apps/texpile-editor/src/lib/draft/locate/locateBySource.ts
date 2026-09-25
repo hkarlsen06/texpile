@@ -65,13 +65,13 @@ export async function locateBySource(
 	// one line has no second row to show its indent against: where its first glyph sits in its own
 	// box does, and the page's line record and the daemon's both say where the box starts
 	const firstInBox = probeRows.length ? probeRows[0].left - lines[0].x : null;
-	const sameIndent = (records: any[], boxX: number): boolean => {
+	function sameIndent(records: any[], boxX: number): boolean {
 		const row = glyphRows(
 			records.filter((x: any) => x.t === 'g' || x.t === 'glyph'),
 			paper.blSkip || LINE_GAP_FALLBACK
 		)[0];
 		return firstInBox !== null && !!row && Math.abs(row.left - boxX - firstInBox) <= ENGINE_EPS;
-	};
+	}
 	// and the same question about the FONT, asked only when it has to be. A footnote, an
 	// abstract or a quote runs at its own size and leading, and the daemon's body-size box
 	// breaks it to a different number of lines -- but body text is almost every band, so the

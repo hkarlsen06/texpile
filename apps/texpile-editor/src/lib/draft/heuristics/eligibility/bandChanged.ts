@@ -7,12 +7,12 @@
 // kerning, and hyphenation never mislead it the way a character diff would.
 type Rec = Record<string, unknown>;
 
-const keep = (r: Rec): string | null => {
+function keep(r: Rec): string | null {
 	if (r.t === 'g') return `g${r.c}/${r.f}@${r.x},${r.y}`;
 	if (r.t === 'line') return `l${r.n}@${r.x},${r.y}:${r.w},${r.h},${r.d}`;
 	if (r.t === 'rule' || r.t === 'image') return `${r.t}@${r.x},${r.y}:${r.w},${r.h}`;
 	return null;
-};
+}
 
 export function bandChanged(oldRecs: Rec[], newRecs: Rec[]): boolean {
 	const a = oldRecs.map(keep).filter(Boolean);

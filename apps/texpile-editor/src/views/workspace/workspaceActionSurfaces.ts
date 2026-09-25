@@ -119,6 +119,7 @@ export function makeMainActions(d: ActionSurfaceDeps) {
 			if (file) void d.commentsCtl.recordHidden(file, new Set(lost));
 		},
 		selectComment: (id: string) => {
+			// eslint-disable-next-line no-param-reassign -- the deps hand over the live controllers this surface drives
 			d.commentsCtl.selected = id;
 		},
 		openComment: (t: CommentThread) => d.commentsCtl.open(t),
@@ -158,6 +159,7 @@ export function makeMainActions(d: ActionSurfaceDeps) {
 				reveal: isDesktop() && !d.guest() ? (p) => void revealItem(p) : undefined,
 				showInTree: (p) => {
 					d.layout().setSidebarOpen(true);
+					// eslint-disable-next-line no-param-reassign -- the deps hand over the live controllers this surface drives
 					d.layout().sidebarView = 'explorer';
 					revealInTree(p);
 				}

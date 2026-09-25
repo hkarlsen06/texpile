@@ -192,7 +192,9 @@ export class DraftSession {
 		// few, and left each keystroke's last line behind, a staircase marching down the page.
 		// An adoption where nothing moved and the block kept its lines keeps the caches: plain
 		// typing must not pay a relocate on every keystroke.
-		const lines = (rs: any[]) => rs.filter((r) => r.t === 'pl' || r.t === 'line').length;
+		function lines(rs: any[]) {
+			return rs.filter((r) => r.t === 'pl' || r.t === 'line').length;
+		}
 		const dropped = p.splices.flatMap((s) => before.slice(s.from, s.to));
 		if (p.moves.length || lines(dropped) !== lines(patchInk(p) as any[])) this.patcher.geometryChanged();
 		return next;

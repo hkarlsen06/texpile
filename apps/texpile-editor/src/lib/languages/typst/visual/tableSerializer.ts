@@ -47,7 +47,9 @@ export function tableBody(node: Node, indent: string, renderBlocks: (parent: Nod
 			for (let d = 1; d < rowspan; d++) covered.set(i + d, (covered.get(i + d) ?? 0) + colspan);
 		});
 	});
-	const call = (cell: Node) => cellCall(cell, renderBlocks);
+	function call(cell: Node) {
+		return cellCall(cell, renderBlocks);
+	}
 	function rowLine(r: { cells: Node[] }) {
 		return `  ${r.cells.map(call).join(', ')},`;
 	}

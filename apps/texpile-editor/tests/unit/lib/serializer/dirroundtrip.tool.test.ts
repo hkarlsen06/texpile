@@ -19,7 +19,7 @@ import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Node } from 'prosemirror-model';
-import { withoutOrigins } from '$lib/editor/visual/sourceSpans';
+import { withoutOrigins } from '$lib/editor/visual/parseOrigins';
 
 // project.ts's fileSystem import does real network fetches, unusable under vitest. swap in a
 // real-fs shim so detectMainFile/gatherProjectMacros run their actual logic against the paper

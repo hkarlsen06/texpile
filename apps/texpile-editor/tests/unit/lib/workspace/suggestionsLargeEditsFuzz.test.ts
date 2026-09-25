@@ -31,7 +31,7 @@ import { firstRowHeader } from '$lib/languages/markdown/visual/firstRowHeader';
 import { padTables } from '$lib/editor/visual/padTables';
 import { computeBlockPatch, syncParseAttrs } from '$lib/editor/visual/blockPatch';
 import { parseCarryPlugin } from '$lib/editor/visual/parseCarry';
-import { adoptParse } from '$lib/editor/visual/sourceSpans';
+import { adoptParse } from '$lib/editor/visual/parseOrigins';
 import { serializeLatexFileDetailed, type ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
 import { serializeMarkdownFileDetailed } from '$lib/languages/markdown/visual/roundtrip';
 import { serializeTypstFileDetailed } from '$lib/languages/typst/visual/roundtrip';

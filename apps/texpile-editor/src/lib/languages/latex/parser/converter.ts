@@ -21,7 +21,8 @@ import {
 export type { PmNode, PmMark, ConversionOptions };
 
 import { capture, extentOf, nodeExtent, repairExtentTail, prefixSpans, startOf, type CaptureState } from './convert/origCapture';
-import { blockSpanOf, collectMap, noteBlockSpan, rememberParseMap } from '$lib/editor/visual/sourceSpans';
+import { blockSpanOf, collectMap, noteBlockSpan } from '$lib/editor/visual/sourceSpans';
+import { rememberParseMap } from '$lib/editor/visual/parseOrigins';
 import { macroHandlers } from './convert/macroHandlers';
 import { TABLE_RULE_MACROS } from './convert/tableConvert';
 import { isBlockNode } from './convert/blockKinds';

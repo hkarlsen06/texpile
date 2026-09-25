@@ -5,7 +5,8 @@ import { Fragment, type Node } from 'prosemirror-model';
 import { parseLatexFile, serializeLatexFileDetailed } from '$lib/workspace/latexRoundtrip';
 import { parseMarkdownFile, serializeMarkdownFileDetailed } from '$lib/languages/markdown/visual/roundtrip';
 import { parseTypstFile, serializeTypstFileDetailed } from '$lib/languages/typst/visual/roundtrip';
-import { forgetBlock, pmToSource, type SourceMap } from '$lib/editor/visual/sourceSpans';
+import { pmToSource, type SourceMap } from '$lib/editor/visual/sourceSpans';
+import { forgetBlock } from '$lib/editor/visual/parseOrigins';
 
 function retype(doc: Node, path: number[], fn: (t: string) => string): Node {
 	function go(node: Node, depth: number): Node {

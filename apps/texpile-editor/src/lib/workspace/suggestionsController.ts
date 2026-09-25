@@ -1,29 +1,21 @@
 // turning edits to the open file into suggestions, and accepting or rejecting them
 import { buildAnchor } from '$lib/comments/anchor';
 import { resolveExactly } from '$lib/comments/anchorSearch';
-import {
-	anchorEvent,
-	deleteEvent,
-	openEvent,
-	resolveEvent,
-	type CommentEvent,
-	type CommentThread,
-	type SuggestionDecision
-} from '$lib/comments/log';
+import { resolveEvent, type CommentEvent, type CommentThread, type SuggestionDecision } from '$lib/comments/log';
 import {
 	compareSuggestions,
-	type ComparedSuggestions,
 	type EditMode,
 	type PlacedSuggestion,
 	type TypingSide,
 	type WhitespaceChanges
 } from '$lib/comments/suggestCompare';
-import { isOpenSuggestion, spotRanks, suggestionAuthor } from '$lib/comments/suggest';
+import { isOpenSuggestion, suggestionAuthor } from '$lib/comments/suggest';
 import { carryGestures, type TextSpan } from '$lib/comments/editGestures';
 import { commonEnds } from '$lib/comments/suggestHunks';
 import { activeSuggestions, takeTypedSides } from '$lib/comments/activeSuggestions.svelte';
 import type { CommentStore } from '$lib/comments/store.svelte';
-import { anchorOf, placedBehind, sameFileState, sameMark, sameSuggestions, withoutRejected } from './suggestionStates';
+import { changeEvents, movedAnchorEvents } from './suggestionEvents';
+import { placedBehind, sameFileState, sameMark, sameSuggestions, withoutRejected } from './suggestionStates';
 import type { ExpectedReject, FileState, RemoteEdit } from './suggestionStates';
 
 const SPACE_WAIT_MS = 1000;
@@ -210,18 +202,7 @@ export class SuggestionsController {
 		const state = this.states.get(file);
 		if (state?.text === content && state.placed.length) {
 			const by = await this.deps.author();
-			const at = new Date().toISOString();
-			const threads = new Map(this.deps.store.forFile(file).map((t) => [t.id, t]));
-			const ranks = spotRanks(state.placed);
-			const moved: CommentEvent[] = [];
-			for (const s of state.placed) {
-				const was = threads.get(s.id)?.anchor;
-				const now = anchorOf(content, s, ranks);
-				if (was && (was.quote !== now.quote || was.prefix !== now.prefix || was.suffix !== now.suffix || was.rank !== now.rank)) {
-					moved.push(anchorEvent({ thread: s.id, anchor: now, by, at }));
-				}
-			}
-			this.stage(moved);
+			this.stage(movedAnchorEvents(content, state.placed, this.deps.store.forFile(file), by));
 		}
 	}
 
@@ -390,7 +371,7 @@ export class SuggestionsController {
 		}
 		for (const c of r.changes)
 			if (agent && c.t === 'open' && r.placed.some((s) => s.id === c.id && s.author === author)) agent.opened.push(c.id);
-		this.stage(this.eventsFor(file, after, r, author, agent?.note));
+		this.stage(changeEvents(file, after, r, author, agent?.note ?? '', this.deps.store.threads));
 		if (file === this.deps.activeFile()) this.show(after, r.placed);
 	}
 
@@ -428,30 +409,6 @@ export class SuggestionsController {
 		const now = this.states.get(file)!;
 		if (file === this.deps.activeFile()) this.show(now.text, now.placed);
 		this.deps.onLost?.(file, lost);
-	}
-
-	private eventsFor(file: string, text: string, r: ComparedSuggestions, by: string, note = ''): CommentEvent[] {
-		const at = new Date().toISOString();
-		const placed = new Map(r.placed.map((s) => [s.id, s]));
-		const ranks = spotRanks(r.placed);
-		const out: CommentEvent[] = [];
-		for (const c of r.changes) {
-			const s = placed.get(c.id);
-			if (c.t === 'open' && s) {
-				const body = s.author === by ? note : '';
-				out.push(openEvent({ id: s.id, file, by: s.author, body, anchor: anchorOf(text, s, ranks), at, restore: s.restore }));
-			} else if (c.t === 'revise' && s) {
-				out.push(anchorEvent({ thread: s.id, anchor: anchorOf(text, s, ranks), restore: s.restore, by, at }));
-			} else if (c.t === 'close') {
-				out.push(resolveEvent({ thread: c.id, resolved: true, decision: 'closed', by, at }));
-			} else if (c.t === 'withdraw') {
-				const answered = (this.deps.store.threads.find((x) => x.id === c.id)?.messages.length ?? 0) > 1;
-				out.push(
-					answered ? resolveEvent({ thread: c.id, resolved: true, decision: 'closed', by, at }) : deleteEvent({ thread: c.id, by, at })
-				);
-			}
-		}
-		return out;
 	}
 
 	private stage(events: CommentEvent[]): void {

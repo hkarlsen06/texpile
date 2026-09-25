@@ -5,7 +5,8 @@ import { mdSchema } from '$lib/languages/markdown/visual/schema';
 import type { Node as PMNode } from 'prosemirror-model';
 import { latexParserWorker, resetLatexParserWorker } from './latexParserWorker';
 import { parseBodyOf, type ParsedLatexFile, type ParsePhase } from './latexRoundtrip';
-import { rememberParseMap, warnMapDefects, type SourceMap } from '$lib/editor/visual/sourceSpans';
+import { type SourceMap } from '$lib/editor/visual/sourceSpans';
+import { rememberParseMap, warnMapDefects } from '$lib/editor/visual/parseOrigins';
 
 type PendingRequest = {
 	resolve: (value: ParsedLatexFile) => void;

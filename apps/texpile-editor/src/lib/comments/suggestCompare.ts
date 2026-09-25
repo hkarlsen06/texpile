@@ -175,7 +175,9 @@ export function compareSuggestions(o: CompareInput): ComparedSuggestions {
 			if (a >= wa0 && a < wa1 && beforeOwner[a - wa0] >= 0) return false;
 		const c = whitespaceChange(before, h, inserted)!;
 		if (c.spaced) return true;
-		const own = (at: number) => at < wa0 || at >= wa1 || beforeOwner[at - wa0] < 0;
+		function own(at: number) {
+			return at < wa0 || at >= wa1 || beforeOwner[at - wa0] < 0;
+		}
 		return (own(c.at - 1) && /\s/.test(before[c.at - 1] ?? ' ')) || (own(c.at + c.cut) && /\s/.test(before[c.at + c.cut] ?? ' '));
 	}
 
@@ -247,7 +249,9 @@ export function compareSuggestions(o: CompareInput): ComparedSuggestions {
 			return;
 		}
 
-		const pointAt = (at: number, skip: number) => entries.some((x, j) => j !== skip && isPoint(j) && !x.fate && x.from === at);
+		function pointAt(at: number, skip: number) {
+			return entries.some((x, j) => j !== skip && isPoint(j) && !x.fate && x.from === at);
+		}
 		let m = entries.findIndex((e, i) => {
 			if (e.author !== me || e.fate) return false;
 			if (typed && e.from === h.aFrom && e.restore && sideOf(i) === 'before') return false;

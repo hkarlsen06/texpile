@@ -6,7 +6,8 @@
 // (a link's definition): those blocks are written out whole instead of patched inside, then their
 // neighbours with them, and the file checked again. What still reads as it did is never regenerated.
 import { Fragment, type Node as PMNode } from 'prosemirror-model';
-import { forgetBlock, originsOf, type SourceMap } from '$lib/editor/visual/sourceSpans';
+import { type SourceMap } from '$lib/editor/visual/sourceSpans';
+import { forgetBlock, originsOf } from '$lib/editor/visual/parseOrigins';
 import { padTables } from '$lib/editor/visual/padTables';
 import { differingBlocks, reopenDifference, type VisualFormat } from '$lib/editor/visual/docShape';
 
@@ -62,10 +63,10 @@ function withAfresh(doc: PMNode, indices: number[]): { doc: PMNode; afresh: Set<
 const UNPARSED = Symbol('unparsed');
 
 export async function verifiedSerialize(o: VerifyOptions): Promise<Verified> {
-	const differs = async (out: Serialized): Promise<string | null | typeof UNPARSED> => {
+	async function differs(out: Serialized): Promise<string | null | typeof UNPARSED> {
 		const again = await o.reparse(out.text);
 		return again ? reopenDifference(o.doc, padTables(again), o.format) : UNPARSED;
-	};
+	}
 	const reread = await o.reparse(o.first.text);
 	if (!reread) return { ...o.first, rung: 0, rewritten: 0, difference: null, checked: false };
 	const again = padTables(reread);
@@ -74,10 +75,10 @@ export async function verifiedSerialize(o: VerifyOptions): Promise<Verified> {
 	// and the untouched ones that read otherwise now: their bytes leaned on one the edit took out (a link's definition)
 	const changed = [...new Set([...changedBlocks(o.doc), ...differingBlocks(o.doc, again, o.format)])].sort((a, b) => a - b);
 	if (changed.length === 0) return { ...o.first, rung: 3, rewritten: 0, difference: d0, checked: true };
-	const attempt = (indices: number[]): Serialized => {
+	function attempt(indices: number[]): Serialized {
 		const { doc, afresh } = withAfresh(o.doc, indices);
 		return o.serialize(doc, afresh);
-	};
+	}
 	const first = attempt(changed);
 	const d1 = await differs(first);
 	if (d1 === UNPARSED) return { ...first, rung: 1, rewritten: changed.length, difference: null, checked: false };

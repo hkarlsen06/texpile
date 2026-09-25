@@ -67,7 +67,7 @@ export type GlyphRecord = {
 export type FontRecord = { t: 'font'; id: number; size: number; name: string; file: string };
 
 /** vertical glue: `w` is the EFFECTIVE width as set, `nw` the natural width before stretch */
-export type VGlueRecord = {
+export type VglueRecord = {
 	t: 'vg';
 	x: number;
 	y: number;
@@ -80,7 +80,7 @@ export type VGlueRecord = {
 };
 
 /** an interline kern; carries real height but no x, so consumers take it positionally */
-export type VKernRecord = { t: 'vk'; y: number; w: number; z?: 1 };
+export type VkernRecord = { t: 'vk'; y: number; w: number; z?: 1 };
 
 export type PenaltyRecord = { t: 'pen'; y: number; p: number };
 
@@ -95,23 +95,23 @@ export type NoteEndRecord = { t: 'noteend' };
 
 export type RuleRecord = { t: 'rule'; col?: string } & Box;
 export type ImageRecord = { t: 'image'; col?: string } & Box;
-export type VBoxRecord = { t: 'vbox' } & Box;
+export type VboxRecord = { t: 'vbox' } & Box;
 /** closes a vbox: every record between the two is its content */
-export type VBoxEndRecord = { t: 'vboxend' };
+export type VboxEndRecord = { t: 'vboxend' };
 /** a pdf literal: drawn material the walker can flag but not interpret */
 export type LitRecord = { t: 'lit' } & Box;
 
 /** the walker's own check that it placed a line where the engine said: `dev` is its
  *  disagreement with the line's target width, and is 0 on every page of every fixture */
-export type EndXRecord = { t: 'endx'; n: number; x: number; target: number; dev: number; justified: number };
+export type EndxRecord = { t: 'endx'; n: number; x: number; target: number; dev: number; justified: number };
 
 /** anything the walker emits for a SHIPPED page */
 export type PageRecord =
 	| PlRecord
 	| GlyphRecord
 	| FontRecord
-	| VGlueRecord
-	| VKernRecord
+	| VglueRecord
+	| VkernRecord
 	| PenaltyRecord
 	| ColumnRecord
 	| ColumnEndRecord
@@ -119,12 +119,12 @@ export type PageRecord =
 	| NoteEndRecord
 	| RuleRecord
 	| ImageRecord
-	| VBoxRecord
-	| VBoxEndRecord
+	| VboxRecord
+	| VboxEndRecord
 	| LitRecord;
 
 /** anything the DAEMON emits for one typeset block */
-export type DaemonRecord = LineRecord | GlyphRecord | FontRecord | RuleRecord | ImageRecord | EndXRecord;
+export type DaemonRecord = LineRecord | GlyphRecord | FontRecord | RuleRecord | ImageRecord | EndxRecord;
 
 export type AnyRecord = PageRecord | DaemonRecord;
 

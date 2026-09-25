@@ -16,8 +16,8 @@ export function rangeOf(tok: Token): ContentRange | null {
 	return at && at.from >= 0 && at.to >= at.from ? at : null;
 }
 
-function stamp(tok: Token, from: number, to: number): void {
-	const meta = (tok.meta ??= {}) as { at?: ContentRange };
+function stamp(draft: Token, from: number, to: number): void {
+	const meta = (draft.meta ??= {}) as { at?: ContentRange };
 	if (!meta.at) meta.at = { from, to };
 }
 
@@ -39,11 +39,11 @@ function stampRead(state: StateInline, n: number, start: number): void {
 }
 
 // text the tokenizer appended itself, one character per position, since the last rule ran
-function catchUp(state: StateInline, p: Pending): void {
-	if (state.pending.length <= p.len) return;
-	if (p.len === 0) p.from = state.pos - state.pending.length;
-	p.to = state.pos;
-	p.len = state.pending.length;
+function catchUp(state: StateInline, draft: Pending): void {
+	if (state.pending.length <= draft.len) return;
+	if (draft.len === 0) draft.from = state.pos - state.pending.length;
+	draft.to = state.pos;
+	draft.len = state.pending.length;
 }
 
 export function positionsPlugin(md: MarkdownIt): void {

@@ -8,7 +8,7 @@ import { placePmSuggestions } from '$lib/editor/visual/extensions/pmSuggestionsP
 import { padTables } from '$lib/editor/visual/padTables';
 import { computeBlockPatch, syncParseAttrs } from '$lib/editor/visual/blockPatch';
 import { parseCarryPlugin } from '$lib/editor/visual/parseCarry';
-import { adoptParse } from '$lib/editor/visual/sourceSpans';
+import { adoptParse } from '$lib/editor/visual/parseOrigins';
 import type { ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
 import {
 	FORMATS,
