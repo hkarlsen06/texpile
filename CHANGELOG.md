@@ -5,6 +5,8 @@ Release notes for Texpile Desktop. Add notes under `## [Unreleased]` as you work
 
 ## [Unreleased]
 
+- fix: `\overline`, `\sqrt`, `\hat` and similar typed in the visual math editor put the caret inside them instead of after an empty box (by @hkarlsen06)
+
 ## [1.2.0] - 2026-09-25
 
 - feat: suggestion mode (by @louisqli)
