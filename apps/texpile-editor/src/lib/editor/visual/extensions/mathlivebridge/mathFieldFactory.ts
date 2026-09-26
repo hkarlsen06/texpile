@@ -85,9 +85,9 @@ function completeWithPlaceholder(event: KeyboardEvent): void {
 	const at = field.position;
 	const latex = field.getValue(at - 1, at);
 	if (!/^\\(?!placeholder\b|operatorname\b)[a-zA-Z]+(\{\})+$/.test(latex)) return;
-	let start = at - 1;
-	while (start > 0 && field.getValue(start - 1, at) === latex) start--;
-	field.selection = { ranges: [[start, at]] };
+	// one offset per empty argument; walking back while getValue matches strays into a box before it (y^2\hat)
+	const emptyArgs = latex.split('{}').length - 1;
+	field.selection = { ranges: [[at - 1 - emptyArgs, at]] };
 	field.insert(latex.replace(/\{\}/g, '{#?}'), { selectionMode: 'placeholder' });
 }
 
