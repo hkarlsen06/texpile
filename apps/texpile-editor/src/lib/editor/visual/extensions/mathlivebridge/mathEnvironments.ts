@@ -175,7 +175,9 @@ export function emptyMathBlockLike(node: Node): Node {
 	const { schema } = node.type;
 	// continuesAfter: the prose after this display now follows the new one
 	if (environment) {
-		const env = numbered ? environment : `${environment}*`;
+		// alignat needs a column count ({2}) an empty copy would not have; align lines up the same way without one
+		const kind = environment === 'alignat' ? 'align' : environment;
+		const env = numbered ? kind : `${kind}*`;
 		const latex = `\\begin{${env}}\\end{${env}}`;
 		return node.type.create({ ...computeMathAttrs(latex), continuesAfter }, schema.text(latex));
 	}
