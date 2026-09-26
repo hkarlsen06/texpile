@@ -1,5 +1,5 @@
 // suggestions drawn in the visual editor
-import { Plugin, type EditorState, type Transaction } from 'prosemirror-state';
+import { Plugin, type Transaction } from 'prosemirror-state';
 import { ReplaceStep } from 'prosemirror-transform';
 import { Decoration, DecorationSet, type EditorView } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
@@ -193,7 +193,12 @@ function build(doc: PMNode, ranges: PmSuggestionRange[], focused: string | null,
 			// a formula or a chip keeps its source as content, so an inline decoration lands on text nobody draws
 			doc.nodesBetween(r.from, r.to, (node, pos) => {
 				if (!node.isLeaf && isSelfRendered(node)) {
-					decos.push(Decoration.node(pos, pos + node.nodeSize, rangeAttrs(suggestionTint('new', on), `pm-suggest-new${focus}`)));
+					decos.push(
+						Decoration.node(pos, pos + node.nodeSize, {
+							...rangeAttrs(suggestionTint('new', on), `pm-suggest-new${focus}`),
+							'data-comment': id
+						})
+					);
 					return false;
 				}
 				return true;
@@ -201,10 +206,6 @@ function build(doc: PMNode, ranges: PmSuggestionRange[], focused: string | null,
 		}
 	}
 	return DecorationSet.create(doc, decos);
-}
-
-export function pmSuggestionAt(state: EditorState, pos: number): PmSuggestionRange | null {
-	return (pmSuggestionsKey.getState(state)?.ranges ?? []).find((r) => pos >= r.from && pos <= r.to) ?? null;
 }
 
 export function pmSuggestions(): Plugin<PmSuggestionsState> {

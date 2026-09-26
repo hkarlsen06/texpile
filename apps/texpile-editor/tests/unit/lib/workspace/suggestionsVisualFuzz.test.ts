@@ -9,7 +9,9 @@ import { padTables } from '$lib/editor/visual/padTables';
 import { computeBlockPatch, syncParseAttrs } from '$lib/editor/visual/blockPatch';
 import { parseCarryPlugin } from '$lib/editor/visual/parseCarry';
 import { adoptParse } from '$lib/editor/visual/parseOrigins';
-import type { ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
+import { serializeLatexFileDetailed, type ParsedLatexFile } from '$lib/workspace/latexRoundtrip';
+import { serializeMarkdownFileDetailed } from '$lib/languages/markdown/visual/roundtrip';
+import { serializeTypstFileDetailed } from '$lib/languages/typst/visual/roundtrip';
 import {
 	FORMATS,
 	drawnReading,
@@ -47,6 +49,7 @@ const { CommentsController } = await import('$lib/workspace/commentsController.s
 
 const ROOT = '/w';
 const RUNS = Number(process.env.SUGGEST_VISUAL_RUNS ?? 12);
+const DETAILED = { tex: serializeLatexFileDetailed, md: serializeMarkdownFileDetailed, typ: serializeTypstFileDetailed };
 const ONLY = Number(process.env.VISUAL_FUZZ_ONLY ?? 0);
 
 const paragraphs = (s: string) =>
@@ -174,6 +177,7 @@ async function suggestTyping(f: Format, original: string, edits: Edit[]) {
 	let text = original;
 	const meta = f.parse(text);
 	let state = EditorState.create({ doc: meta.doc, plugins: [parseCarryPlugin] });
+	let map = meta.map;
 	const ctl = new CommentsController({
 		root: () => ROOT,
 		preferredAuthor: () => who,
@@ -190,14 +194,17 @@ async function suggestTyping(f: Format, original: string, edits: Edit[]) {
 		const next = edit(state);
 		if (next === state) continue;
 		state = next;
-		text = f.serialize(meta, state.doc);
+		({ text, map } = DETAILED[f.name](meta, state.doc));
 		ctl.suggestions.textChanged(`${ROOT}/doc.${f.name}`, text);
 		await ctl.suggestions.settle();
 	}
 	const marks = activeSuggestions.current;
+	// placed as the editor places them while typing: on the document it holds, with the map its serializer
+	// wrote; and as it places them once the file is reopened
+	const shown = state.doc;
+	const placed = placePmSuggestions(shown, marks, { ...suggestionSource(f, meta, text), map });
 	const parsed = f.parse(text);
-	const shown = parsed.doc;
-	const placed = placePmSuggestions(shown, marks, suggestionSource(f, parsed, text));
+	const reopened = { shown: parsed.doc, placed: placePmSuggestions(parsed.doc, marks, suggestionSource(f, parsed, text)) };
 	if (process.env.SUGGEST_DEBUG)
 		console.log(
 			'PLACED ' +
@@ -214,7 +221,7 @@ async function suggestTyping(f: Format, original: string, edits: Edit[]) {
 					hidden: [...placed.hidden]
 				})
 		);
-	return { text, marks, shown, placed };
+	return { text, marks, shown, placed, reopened };
 }
 
 function blockEnd(s: EditorState, block: number): number {
@@ -395,25 +402,32 @@ describe('suggestions made in the visual editor', () => {
 					const edit = randomEdit(s, rnd, true);
 					return edit ? s.apply(edit.tr) : s;
 				});
-				const { text, marks, shown, placed } = await suggestTyping(f, original, steps);
-				// every mark drawn in full is put back, a break mark or a chip outline included (they say
-				// nothing readable as text, and one edit can arrive as several marks that only read right
-				// together); what is read is the words and the blocks
-				const whole = marks.filter((m) => !placed.partial.has(m.id) && placed.ranges.some((r) => r.id === m.id));
-				const drawn = placed.ranges.filter((r) => whole.some((m) => m.id === r.id));
-				if (!whole.length) continue;
-				let rejected = text;
-				for (const m of [...whole].sort((a, b) => b.from - a.from)) rejected = rejected.slice(0, m.from) + m.restore + rejected.slice(m.to);
-				const want = renderedText(f.parse(rejected).doc);
-				const got = renderedText(
-					shown,
-					drawn.flatMap((r) => drawnReading(r) ?? [])
-				);
-				if (want !== got) {
+				const { text, marks, shown, placed, reopened } = await suggestTyping(f, original, steps);
+				// the reading compared is the file's, so an editor holding what the file does not write (an
+				// empty paragraph, a formula as typed) is held to it only once the file is reopened
+				const views = [...(renderedText(shown) === renderedText(f.parse(text).doc) ? [{ when: 'typing', shown, placed }] : [])];
+				views.push({ when: 'reopened', ...reopened });
+				for (const view of views) {
+					// every mark drawn in full is put back, a break mark or a chip outline included (they say
+					// nothing readable as text, and one edit can arrive as several marks that only read right
+					// together); what is read is the words and the blocks
+					const whole = marks.filter((m) => !view.placed.partial.has(m.id) && view.placed.ranges.some((r) => r.id === m.id));
+					const drawn = view.placed.ranges.filter((r) => whole.some((m) => m.id === r.id));
+					if (!whole.length) continue;
+					let rejected = text;
+					for (const m of [...whole].sort((a, b) => b.from - a.from))
+						rejected = rejected.slice(0, m.from) + m.restore + rejected.slice(m.to);
+					const want = renderedText(f.parse(rejected).doc);
+					const got = renderedText(
+						view.shown,
+						drawn.flatMap((r) => drawnReading(r) ?? [])
+					);
+					if (want === got) continue;
 					if (ONLY)
 						console.log(
 							'PLACED ' +
 								JSON.stringify({
+									when: view.when,
 									marks: marks.map((m) => ({
 										from: m.from,
 										to: m.to,
@@ -422,21 +436,21 @@ describe('suggestions made in the visual editor', () => {
 										prefix: m.anchor.prefix,
 										suffix: m.anchor.suffix
 									})),
-									drawn: placed.ranges.map((r) => ({
+									drawn: view.placed.ranges.map((r) => ({
 										id: r.id.slice(0, 4),
 										from: r.from,
 										to: r.to,
 										old: oldWordsOf(r),
-										text: shown.textBetween(r.from, r.to, '|'),
+										text: view.shown.textBetween(r.from, r.to, '|'),
 										node: r.node,
 										brk: r.brk,
 										partial: r.partial
 									})),
-									partial: [...placed.partial],
-									hidden: [...placed.hidden],
+									partial: [...view.placed.partial],
+									hidden: [...view.placed.hidden],
 									blocks: (() => {
 										const out: string[] = [];
-										shown.forEach((n, pos) => out.push(`${pos}:${n.type.name}:${JSON.stringify(n.textContent.slice(0, 50))}`));
+										view.shown.forEach((n, pos) => out.push(`${pos}:${n.type.name}:${JSON.stringify(n.textContent.slice(0, 50))}`));
 										return out;
 									})()
 								})
@@ -444,8 +458,9 @@ describe('suggestions made in the visual editor', () => {
 					let s = 0;
 					while (want[s] === got[s]) s++;
 					failures.push(
-						`run ${run} (${files[run % files.length]}):\n want …${JSON.stringify(want.slice(Math.max(0, s - 60), s + 60))}\n got  …${JSON.stringify(got.slice(Math.max(0, s - 60), s + 60))}`
+						`run ${run} (${files[run % files.length]}), ${view.when}:\n want …${JSON.stringify(want.slice(Math.max(0, s - 60), s + 60))}\n got  …${JSON.stringify(got.slice(Math.max(0, s - 60), s + 60))}`
 					);
+					break;
 				}
 			}
 			expect(failures).toEqual([]);

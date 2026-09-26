@@ -14,7 +14,8 @@ export function isTypHandlerLeaf(node: Node): boolean {
 /** the shadow run that finds every leaf of a regenerated block in its text; see shadowLeaves */
 export const typstShadow = createShadow({
 	placeholder: markupPlaceholder,
-	charEmissions: (ch) => [escTypst(ch), ch],
+	// `@`, `-` and `/` are escaped only by what follows them
+	charEmissions: (ch) => [escTypst(ch), '\\' + ch, ch],
 	isHandlerLeaf: isTypHandlerLeaf
 });
 

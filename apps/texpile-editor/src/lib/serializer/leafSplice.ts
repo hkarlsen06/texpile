@@ -1,7 +1,7 @@
 // splicing a block whose leaf text alone changed
 import type { Node } from 'prosemirror-model';
 import type { Ctx } from './types';
-import type { Segment } from '$lib/editor/visual/sourceSpans';
+import { spansOfChars, type CharSource, type LeafSpan, type Segment } from '$lib/editor/visual/sourceSpans';
 import type { BlockOrigin } from '$lib/editor/visual/parseOrigins';
 import type { BlockAssemblyOptions } from './blockAssembly';
 import type { Splice, Spliced } from './blockAssemblyUtils';
@@ -24,6 +24,28 @@ function pairLeaves(now: Node, then: Node, parent: Node, nowPm: number, thenPm: 
 		b += then.child(k).nodeSize;
 	}
 	return true;
+}
+
+// the fresh bytes character by character, each the way it is written alone or escaped by a backslash
+// (some escapes depend on the character after): an escape then stands for its one character, and the
+// letters around it stay letters
+function writtenChars(middle: string, bytes: string, write: (s: string, first: boolean) => string | null): CharSource[] | null {
+	const chars: CharSource[] = [];
+	let off = 0;
+	for (const ch of middle) {
+		const e = [write(ch, chars.length === 0), '\\' + ch, ch].find((c) => c !== null && bytes.startsWith(c, off));
+		if (e === undefined || e === null) return null;
+		for (let i = 0; i < ch.length; i++)
+			chars.push(
+				e === ''
+					? null
+					: e === ch
+						? { srcFrom: off + i, srcTo: off + i + 1, kind: 'text' }
+						: { srcFrom: off, srcTo: off + e.length, kind: 'sub' }
+			);
+		off += e.length;
+	}
+	return off === bytes.length ? chars : null;
 }
 
 export function createLeafSplice(options: BlockAssemblyOptions): Splice {
@@ -55,6 +77,7 @@ export function createLeafSplice(options: BlockAssemblyOptions): Splice {
 			bytes: string;
 			pair: LeafPair;
 			exact: boolean;
+			chars: CharSource[] | null;
 			cut: number;
 			cutEnd: number;
 			runs: Segment[];
@@ -116,17 +139,19 @@ export function createLeafSplice(options: BlockAssemblyOptions): Splice {
 			const from = cut > 0 ? charEdge(byteAt(cut)!) : runs[0].srcFrom;
 			const to = cutEnd > 0 ? charEdge(byteAt(x.length - cutEnd)!) : runs[runs.length - 1].srcTo;
 			const middle = y.slice(cut, y.length - cutEnd);
-			let bytes =
-				middle === ''
-					? ''
-					: options.leafBytes(
-							p.now.type.schema.text(middle, p.now.marks),
-							p.parent,
-							p.parent === node && p.nowPm === 1 && cut === 0,
-							node,
-							ctx
-						);
+			function write(s: string, first: boolean) {
+				return options.leafBytes!(
+					p.now.type.schema.text(s, p.now.marks),
+					p.parent,
+					first && p.parent === node && p.nowPm === 1 && cut === 0,
+					node,
+					ctx
+				);
+			}
+			let bytes = middle === '' ? '' : write(middle, true);
 			if (bytes === null) return null;
+			// the prefix goes in after every line end, which moves the bytes the characters stand for
+			const chars = middle === '' || (prefix && bytes.includes('\n')) ? null : writtenChars(middle, bytes, write);
 			// fresh bytes that would fuse with the bytes kept beside them are kept apart
 			const gone = origin.text.slice(from - base, to - base);
 			if (options.keepApart) {
@@ -135,7 +160,7 @@ export function createLeafSplice(options: BlockAssemblyOptions): Splice {
 				bytes = apart;
 			}
 			if (prefix) bytes = bytes.replace(/\n/g, '\n' + prefix);
-			changes.push({ srcFrom: from, srcTo: to, bytes, gone, pair: p, exact: bytes === middle, cut, cutEnd, runs });
+			changes.push({ srcFrom: from, srcTo: to, bytes, gone, pair: p, exact: bytes === middle, chars, cut, cutEnd, runs });
 		}
 		if (changes.length === 0) return null;
 		changes.sort((a, b) => a.srcFrom - b.srcFrom);
@@ -211,13 +236,22 @@ export function createLeafSplice(options: BlockAssemblyOptions): Splice {
 					});
 			}
 			if (c.bytes.length > 0 && y.length - c.cutEnd > c.cut) {
-				leaves.push({
-					pmFrom: nowPm + c.cut,
-					pmTo: nowPm + y.length - c.cutEnd,
-					srcFrom: c.srcFrom + d - base,
-					srcTo: c.srcFrom + d + c.bytes.length - base,
+				const whole: LeafSpan = {
+					from: 0,
+					to: y.length - c.cutEnd - c.cut,
+					srcFrom: 0,
+					srcTo: c.bytes.length,
 					kind: c.exact ? 'text' : 'sub'
-				});
+				};
+				const at = c.srcFrom + d - base;
+				for (const r of c.chars ? spansOfChars(c.chars) : [whole])
+					leaves.push({
+						pmFrom: nowPm + c.cut + r.from,
+						pmTo: nowPm + c.cut + r.to,
+						srcFrom: at + r.srcFrom,
+						srcTo: at + r.srcTo,
+						kind: r.kind
+					});
 			}
 			const shift = y.length - x.length;
 			for (const r of c.runs) {

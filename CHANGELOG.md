@@ -5,28 +5,28 @@ Release notes for Texpile Desktop. Add notes under `## [Unreleased]` as you work
 
 ## [Unreleased]
 
-- fix: `^` in the visual math editor no longer turns into `\^` on Nordic and German Macs after typing a backslash
-- fix: `\boxed` and black math in the visual editor are visible in dark themes
+## [1.2.0] - 2026-09-25
 
-## [1.2.0] - 2026-09-23
-
-- feat: suggestion mode
-- feat: side by side comments
-- feat: collaboration tab in perferences
-- feat: allow switching between distrbutions
-- feat: right click an open tab to show right-click menu
-- feat: control/command-shift-t reopens closed tab
-- feat: justified text in the visual editor (Knuth-Plass line breaks and hyphenation)
-- feat: transparent themes available
-- feat: a welcome screen
-- feat: Refine rewrites selected text with an AI agent already on your computer
-- fix: version check before collaborations
-- fix: up and down arrows keep their column in the visual editor
-- fix: various visual editor improvements bugfixes
-- fix: improved dragging experience for visual editor
-- fix: Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z work when the text is not focused
-- fix: live preview will not fall back to recompile when typing fast
-
+- feat: suggestion mode (by @louisqli)
+- feat: side by side comments (by @louisqli)
+- feat: collaboration tab in preferences (by @louisqli)
+- feat: allow switching between distributions (by @louisqli)
+- feat: right click an open tab to show right-click menu (by @louisqli)
+- feat: control/command-shift-t reopens closed tab (by @louisqli)
+- feat: justified text in the visual editor (Knuth-Plass line breaks and hyphenation) (by @louisqli)
+- feat: transparent themes available (by @louisqli)
+- feat: a welcome screen (by @louisqli)
+- feat: Refine rewrites selected text with an AI agent already on your computer (by @louisqli)
+- fix: version check before collaborations (by @louisqli)
+- fix: up and down arrows keep their column in the visual editor (by @louisqli)
+- fix: various visual editor improvements and bug fixes (by @louisqli)
+- fix: improved dragging experience for visual editor (by @louisqli)
+- fix: Ctrl+Z, Ctrl+Y and Ctrl+Shift+Z work when the text is not focused (by @louisqli)
+- fix: live preview will not fall back to recompile when typing fast (by @louisqli)
+- fix: visual editor now supports synctex jumping (by @louisqli)
+- fix: `^` in the visual math editor no longer turns into `\^` on Nordic and German Macs after typing a backslash (by @hkarlsen06)
+- fix: `\boxed` and black math in the visual editor are visible in dark themes (by @hkarlsen06)
+- fix: various other minor issues (by @louisqli)
 
 ## [1.1.0] - 2026-09-10
 

@@ -11,7 +11,8 @@
 // for free. Nothing here re-searches the document.
 import { EditorView, Decoration, type DecorationSet, gutterLineClass, GutterMarker, type BlockInfo } from '@codemirror/view';
 import { StateEffect, StateField, RangeSet, type Extension, type EditorState } from '@codemirror/state';
-import { cmSuggestions, suggestionAt } from '$lib/editor/source/cmSuggestions';
+import { cmSuggestions } from '$lib/editor/source/cmSuggestions';
+import { threadAtPointer } from '$lib/comments/threadAtPointer';
 import { cmSelectionToolbar } from './cmSelectionToolbar';
 
 export type CommentRange = {
@@ -192,13 +193,11 @@ export function comments({ onSelect, onAdd, addLabel = 'Comment' }: CommentsConf
 			);
 		}),
 		EditorView.domEventHandlers({
-			mousedown(event, view) {
-				if (!onSelect) return false;
-				const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
-				if (pos === null) return false;
-				const hit = commentAt(view.state, pos) ?? suggestionAt(view.state, pos);
-				if (!hit) return false;
-				onSelect(hit.id);
+			// what is drawn under the pointer, not the caret's place: a click just beside a thread is not on it
+			mousedown(event) {
+				const id = threadAtPointer(event.target);
+				if (!onSelect || !id) return false;
+				onSelect(id);
 				// not handled: the click should still place the caret where it landed
 				return false;
 			}

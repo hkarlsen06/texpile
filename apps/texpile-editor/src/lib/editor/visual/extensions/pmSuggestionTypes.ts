@@ -39,5 +39,5 @@ export type Side = -1 | 1;
 /** one mark's share of a change: a range of the document before and the one after */
 export type Piece = { A: Span; B: Span };
 
-/** the stretch as the editor shows it: its document, where its bytes are, and the index of its first top-level node */
-export type Shown = { doc: PMNode; map: SourceMap; at: number; first: number };
+/** the stretch as the editor shows it: its document, where its bytes are, and the top-level nodes the stretch's own stand for */
+export type Shown = { doc: PMNode; map: SourceMap; at: number; tops: number[] };

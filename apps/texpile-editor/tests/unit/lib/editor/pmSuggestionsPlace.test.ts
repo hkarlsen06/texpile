@@ -1,11 +1,12 @@
 import { it, expect } from 'vitest';
 import type { Node as PMNode } from 'prosemirror-model';
 import { EditorState, TextSelection } from 'prosemirror-state';
+import { splitBlock } from 'prosemirror-commands';
 import { buildAnchor } from '$lib/comments/anchor';
 import type { SuggestionMark } from '$lib/comments/activeSuggestions.svelte';
 import { placePmSuggestions, type PmSuggestionRange } from '$lib/editor/visual/extensions/pmSuggestionsPlace';
-import { parseMarkdownFile, parseMarkdownRegion } from '$lib/languages/markdown/visual/roundtrip';
-import { parseTypstFile, parseTypstRegion } from '$lib/languages/typst/visual/roundtrip';
+import { parseMarkdownFile, parseMarkdownRegion, serializeMarkdownFileDetailed } from '$lib/languages/markdown/visual/roundtrip';
+import { parseTypstFile, parseTypstRegion, serializeTypstFileDetailed } from '$lib/languages/typst/visual/roundtrip';
 import { bodyOffsetOf, parseLatexFile, parseLatexRegion, serializeLatexFileDetailed } from '$lib/workspace/latexRoundtrip';
 
 const latex = { parse: parseLatexFile, region: (preamble: string) => (src: string) => parseLatexRegion(src, preamble) };
@@ -88,10 +89,10 @@ it('gives old words the marks of the run they sat in, at its edges and across th
 		start: [['alpha', ['strong']]],
 		end: [[' more', ['strong']]],
 		link: [['docs', ['link']]],
-		// a word partly replaced is drawn whole, the way a diff reads
+		// only as far as the suggestion reaches: the letters after it are not its words
 		across: [
 			['old', ['strong']],
-			[' thing', []]
+			[' thi', []]
 		]
 	});
 });
@@ -419,4 +420,64 @@ it('strikes one run of words taken out as one run, when its last word also stand
 	expect(ranges.length).toBe(3);
 	expect(struck.cut.trim()).toBe(words);
 	expect([struck.first.trim(), struck.next]).toEqual(['decides', 'searches']);
+});
+
+it('draws words typed after an empty paragraph, which the file does not have', () => {
+	const cases = [
+		[latex, serializeLatexFileDetailed, '\\documentclass{article}\n\\begin{document}\nKestrel here.\n\nLast one.\n\\end{document}\n'],
+		[markdown, serializeMarkdownFileDetailed, 'Kestrel here.\n\nLast one.\n'],
+		[typst, serializeTypstFileDetailed, 'Kestrel here.\n\nLast one.\n']
+	] as const;
+	for (const [format, serialize, source] of cases) {
+		const parsed = format.parse(source);
+		let state = EditorState.create({ doc: parsed.doc });
+		state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, state.doc.child(0).nodeSize - 1)));
+		splitBlock(state, (tr) => (state = state.apply(tr)));
+		splitBlock(state, (tr) => (state = state.apply(tr)));
+		state = state.apply(state.tr.insertText('a'));
+		const { text, map } = serialize(parsed, state.doc);
+		const from = text.indexOf('Kestrel here.') + 'Kestrel here.'.length;
+		const typed = mark(text, 'typed', text.slice(from, text.indexOf('a', from) + 1), '', from);
+		const body = { from: bodyOffsetOf(parsed), to: parsed.hadDocumentEnv ? text.length - parsed.postamble.length : text.length };
+		const out = placePmSuggestions(state.doc, [typed], { text, map, body, parse: format.region(parsed.preamble) });
+		expect([out.partial.size, out.hidden.size]).toEqual([0, 0]);
+		expect(out.ranges.map((r) => state.doc.textBetween(r.from, r.to))).toEqual(['a']);
+	}
+});
+
+it('draws a split after a space, and escapes typed mid-word, where the editor holds them', () => {
+	const cases = [
+		[latex, serializeLatexFileDetailed, '\\documentclass{article}\n\\begin{document}\nKestrel here. Last one.\n\\end{document}\n', '&_'],
+		[markdown, serializeMarkdownFileDetailed, 'Kestrel here. Last one.\n', '*['],
+		[typst, serializeTypstFileDetailed, 'Kestrel here. Last one.\n', '#*']
+	] as const;
+	for (const [format, serialize, source, typed] of cases) {
+		const parsed = format.parse(source);
+		const start = EditorState.create({ doc: parsed.doc });
+		function place(state: EditorState, marks: (text: string) => SuggestionMark[]) {
+			const { text, map } = serialize(parsed, state.doc);
+			const body = { from: bodyOffsetOf(parsed), to: parsed.hadDocumentEnv ? text.length - parsed.postamble.length : text.length };
+			return placePmSuggestions(state.doc, marks(text), { text, map, body, parse: format.region(parsed.preamble) });
+		}
+		// the space stays at the end of the first paragraph, and the file does not write it
+		const split = start.apply(start.tr.split(1 + 'Kestrel here. '.length));
+		const broke = place(split, (text) => [mark(text, 'split', '\n\n', ' ', text.indexOf('here.') + 5)]);
+		expect(broke.ranges.map((r) => [r.brk, r.from])).toEqual([['added', split.doc.child(0).nodeSize - 1]]);
+		// an escape stands for its one character, and the letters between two of them stay letters
+		const escaped = start.apply(start.tr.insertText(typed[1], 1 + 'Kestr'.length).insertText(typed[0], 1 + 'Kes'.length));
+		const drawn = place(escaped, (text) => {
+			const a = text.indexOf('Kes') + 3;
+			const b = text.indexOf('tr', a);
+			const c = text.indexOf('el', b);
+			return [mark(text, 'first', text.slice(a, b), '', a), mark(text, 'second', text.slice(b + 2, c), '', b + 2)];
+		});
+		expect(drawn.ranges.map((r) => escaped.doc.textBetween(r.from, r.to))).toEqual([typed[0], typed[1]]);
+	}
+});
+
+it('draws a replacement to its own edges, not the letters typed against it', () => {
+	for (const source of ['\\begin{document}\nThe quickx fox.\n\\end{document}\n', '\\begin{document}\nThe xquick fox.\n\\end{document}\n']) {
+		const { doc, ranges } = placed(source, [mark(source, 's', 'quick', 'lazy')]);
+		expect(ranges.map((r) => [doc.textBetween(r.from, r.to), oldOf(r)])).toEqual([['quick', [['lazy', []]]]]);
+	}
 });

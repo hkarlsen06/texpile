@@ -6,11 +6,14 @@ import type { Node } from 'prosemirror-model';
 import { spansOfChars, type CharSource, type Segment } from '$lib/editor/visual/sourceSpans';
 import { blockOriginOf } from '$lib/editor/visual/parseOrigins';
 import { bareTextString, esc, setBareUrl } from './textEscapes';
+import { locateUnmarked, lostLeaves, placeShifted, shifted, type FoundLeaf } from '$lib/serializer/shadowLeaves';
 
 const PUA_FIRST = 0xe000;
 const PUA_LAST = 0xf8ff;
 type ShadowLeaf = { node: Node; emitted: string; placeholder: string; bare?: boolean };
 let shadow: ShadowLeaf[] | null = null;
+// the leaves a second run writes shifted rather than as their placeholder
+let shifting: Set<Node> | null = null;
 // what the joins, the trims and the comment checks read. A space is kept as a no-break space: still
 // whitespace to every trim, but never a byte of markup, so an edge a handler trimmed can be told
 // from the bytes beside it
@@ -53,10 +56,19 @@ function placeholderFor(emitted: string, k: number): string {
 	return out + emitted.slice(keep);
 }
 
+// a node written in place of one of the block's own (a label taken off its item, a text trimmed), and
+// how far into that one it starts
+const standIns = new WeakMap<Node, { node: Node; offset: number }>();
+
+export function standIn<T extends Node>(copy: T, original: Node, offset = 0): T {
+	standIns.set(copy, { node: original, offset });
+	return copy;
+}
+
 /** in a shadow run, what stands for this leaf's emission; the emission itself otherwise */
 export function shadowed(node: Node, emitted: string): string {
 	if (!shadow || shadow.length > PUA_LAST - PUA_FIRST) return emitted;
-	const placeholder = placeholderFor(emitted, shadow.length);
+	const placeholder = shifting?.has(node) ? shifted(emitted) : placeholderFor(emitted, shadow.length);
 	shadow.push({ node, emitted, placeholder });
 	return placeholder;
 }
@@ -96,17 +108,22 @@ function textLeafSpans(leaf: ShadowLeaf): CharSource[] {
 }
 
 /** where the leaves of `block` sit in `real`, the text `render` writes for it, told by a shadow run */
-export function mapRunLeaves(block: Node, real: string, render: () => string): Segment[] | null {
+function runShadow(render: () => string, shift: Set<Node> | null = null): { out: string; leaves: ShadowLeaf[] } {
 	const leaves: ShadowLeaf[] = [];
 	shadow = leaves;
+	shifting = shift;
 	setBareUrl(shadowBareUrl);
-	let out: string;
 	try {
-		out = render();
+		return { out: render(), leaves };
 	} finally {
 		shadow = null;
+		shifting = null;
 		setBareUrl(null);
 	}
+}
+
+export function mapRunLeaves(block: Node, real: string, render: () => string): Segment[] | null {
+	const { out, leaves } = runShadow(render);
 	if (out.length !== real.length) return null;
 	for (let i = 0; i < out.length; i++) {
 		if (out[i] === real[i] || isPua(out[i]) || (out[i] === ' ' && real[i] === ' ')) continue;
@@ -130,10 +147,8 @@ export function mapRunLeaves(block: Node, real: string, render: () => string): S
 	});
 	if (twice) return null;
 
-	// a leaf with a marker is found by it, allowing for whitespace a handler trimmed off its edges;
-	// one without, by being the only thing in the gap between the found leaves either side of it
-	type Found = { start: number; lead: number; tail: number };
-	const located: (Found | null)[] = leaves.map((leaf, k) => {
+	// a leaf with a marker is found by it, allowing for whitespace a handler trimmed off its edges
+	const marked: (FoundLeaf | null)[] = leaves.map((leaf, k) => {
 		const id = String.fromCharCode(PUA_FIRST + k);
 		const p = leaf.placeholder;
 		const j = p.indexOf(id);
@@ -151,36 +166,20 @@ export function mapRunLeaves(block: Node, real: string, render: () => string): S
 		}
 		return null;
 	});
-	for (let k = 0; k < leaves.length; k++) {
-		if (located[k] !== null || !leaves[k].emitted) continue;
-		let from = 0;
-		for (let p = k - 1; p >= 0; p--) {
-			const f = located[p];
-			if (f) {
-				from = f.start + leaves[p].emitted.length - f.lead - f.tail;
-				break;
-			}
-		}
-		let to = real.length;
-		for (let q = k + 1; q < leaves.length; q++) {
-			const f = located[q];
-			if (f) {
-				to = f.start;
-				break;
-			}
-		}
-		if (from > to) continue;
-		const gap = real.slice(from, to);
-		const first = gap.indexOf(leaves[k].emitted);
-		if (first < 0 || gap.indexOf(leaves[k].emitted, first + 1) >= 0) continue;
-		located[k] = { start: from + first, lead: 0, tail: 0 };
-	}
+	const unmarked = locateUnmarked(
+		marked,
+		leaves.map((l) => l.emitted),
+		real
+	);
+	const lost = lostLeaves(leaves, unmarked);
+	const located = lost.size ? placeShifted(out, runShadow(render, lost).out, leaves, lost, unmarked) : unmarked;
 
 	const segs: Segment[] = [];
 	for (let k = 0; k < leaves.length; k++) {
 		const found = located[k];
 		const leaf = leaves[k];
-		const pm = at.get(leaf.node);
+		const stood = standIns.get(leaf.node);
+		const pm = at.get(leaf.node) ?? (stood && at.has(stood.node) ? at.get(stood.node)! + stood.offset : undefined);
 		if (!found || pm === undefined) continue;
 		const { start, lead, tail } = found;
 		const coreLen = leaf.emitted.length - lead - tail;

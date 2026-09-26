@@ -54,17 +54,23 @@ function wordOver(doc: PMNode, from: number, to: number): { from: number; to: nu
 
 // changes with no word boundary between them are one, and one that both takes out and puts in more than
 // a single character is widened to the words it touches: half a word struck beside the other half is
-// hard to read. Both sides widen alike, since the text around a change is the same in both
-function wholeWords(changes: readonly DocChange[], doc: PMNode): DocChange[] {
+// hard to read. Both sides widen alike, since the text around a change is the same in both. Never past
+// the stretch compared, whose edges are a suggestion's own: letters typed against it are not its words
+function wholeWords(changes: readonly DocChange[], doc: PMNode, compared: readonly DocChange[]): DocChange[] {
+	function stretchOf(c: DocChange) {
+		return compared.find((s) => s.fromB <= c.fromB && c.toB <= s.toB && s.fromA <= c.fromA && c.toA <= s.toA);
+	}
 	const out: DocChange[] = [];
 	for (let i = 0; i < changes.length; i++) {
 		const start = i;
+		const stretch = stretchOf(changes[i]);
 		let deleted = changes[i].toA - changes[i].fromA;
 		let inserted = changes[i].toB - changes[i].fromB;
 		while (i + 1 < changes.length) {
 			const gapFrom = changes[i].toB;
 			const gapTo = changes[i + 1].fromB;
 			if (gapFrom < gapTo && !wordOver(doc, gapFrom - 1, gapTo)) break;
+			if (stretchOf(changes[i + 1]) !== stretch) break;
 			i++;
 			deleted += changes[i].toA - changes[i].fromA;
 			inserted += changes[i].toB - changes[i].fromB;
@@ -75,8 +81,12 @@ function wholeWords(changes: readonly DocChange[], doc: PMNode): DocChange[] {
 			for (const c of changes.slice(start, i + 1)) out.push({ fromA: c.fromA, toA: c.toA, fromB: c.fromB, toB: c.toB });
 			continue;
 		}
-		const fromB = Math.min(first.fromB, wordOver(doc, first.fromB, first.fromB + 1)?.from ?? first.fromB);
-		const toB = Math.max(last.toB, last.toB > 0 ? (wordOver(doc, last.toB - 1, last.toB)?.to ?? last.toB) : last.toB);
+		let fromB = Math.min(first.fromB, wordOver(doc, first.fromB, first.fromB + 1)?.from ?? first.fromB);
+		let toB = Math.max(last.toB, last.toB > 0 ? (wordOver(doc, last.toB - 1, last.toB)?.to ?? last.toB) : last.toB);
+		if (stretch) {
+			fromB = first.fromB - Math.min(first.fromB - fromB, first.fromB - stretch.fromB, first.fromA - stretch.fromA);
+			toB = last.toB + Math.min(toB - last.toB, stretch.toB - last.toB, stretch.toA - last.toA);
+		}
 		const joined = { fromA: first.fromA - (first.fromB - fromB), toA: last.toA + (toB - last.toB), fromB, toB };
 		const prev = out[out.length - 1];
 		if (prev && prev.toA >= joined.fromA) {
@@ -312,11 +322,15 @@ export function diffDocs(before: PMNode, after: PMNode, stretches: DocChange[] =
 		const prev = changes[i - 1];
 		const next = changes[i + 1];
 		const taken = c.toB === c.fromB;
-		const lo = prev ? (taken ? prev.toA : prev.toB) : 0;
-		const hi = next ? (taken ? next.fromA : next.fromB) : (taken ? before : after).content.size;
+		const s = compared.find((x) => x.fromA <= c.fromA && c.toA <= x.toA && x.fromB <= c.fromB && c.toB <= x.toB);
+		const lo = Math.max(prev ? (taken ? prev.toA : prev.toB) : 0, s ? (taken ? s.fromA : s.fromB) : 0);
+		const hi = Math.min(
+			next ? (taken ? next.fromA : next.fromB) : (taken ? before : after).content.size,
+			s ? (taken ? s.toA : s.toB) : Infinity
+		);
 		return slideToEdges(c, before, after, lo, hi);
 	});
-	return wholeWords(slid, after);
+	return wholeWords(slid, after, compared);
 }
 
 /** the characters of a range, one placeholder per node that is not text */

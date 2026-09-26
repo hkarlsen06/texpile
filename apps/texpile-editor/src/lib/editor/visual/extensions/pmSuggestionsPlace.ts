@@ -47,20 +47,29 @@ function regionOf(map: SourceMap, s: Span, body: Span): Span {
 	};
 }
 
+// a formula is one object: the editor holds what was typed in it, the file what typst converted that
+// to, and the two read alike only as drawn
 function plainText(doc: PMNode, from: number, to: number): string {
-	return doc.textBetween(from, to, '\n', '￼').replace(/\s+/g, ' ').trim();
+	let out = '';
+	doc.nodesBetween(from, to, (node, pos) => {
+		if (node.isText) out += node.text!.slice(Math.max(0, from - pos), to - pos);
+		else if (node.isAtom) out += '￼';
+		else if (node.isTextblock) out += '\n';
+		return !node.isAtom;
+	});
+	return out.replace(/\s+/g, ' ').trim();
 }
 
-/** the top-level nodes some blocks cover, as ranges, and the index of the first */
-type TopNodes = { first: number; spans: Span[] };
+/** the top-level nodes some blocks cover, as ranges, and their indices */
+type TopNodes = { indices: number[]; spans: Span[] };
 
 // by node and not by block: a map written back and a stretch parsed afresh group them differently (an
 // itemize is one block parsed, one an item once written), and the nodes are what the reader sees
-function topNodes(doc: PMNode, lo: number, hi: number): TopNodes {
-	const out: TopNodes = { first: -1, spans: [] };
+function topNodes(doc: PMNode, lo: number, hi: number, written: (from: number, to: number) => boolean = () => true): TopNodes {
+	const out: TopNodes = { indices: [], spans: [] };
 	doc.forEach((node, offset, i) => {
-		if (offset < lo || offset + node.nodeSize > hi) return;
-		if (out.first < 0) out.first = i;
+		if (offset < lo || offset + node.nodeSize > hi || !written(offset, offset + node.nodeSize)) return;
+		out.indices.push(i);
 		out.spans.push({ from: offset, to: offset + node.nodeSize });
 	});
 	return out;
@@ -126,13 +135,16 @@ export function placePmSuggestions(doc: PMNode, marks: SuggestionMark[], source:
 	for (const { region, marks: group } of clustersOf(live, map, body)) {
 		const after = parse(text.slice(region.from, region.to));
 		const inRegion = bySource(map.blocks).filter((b) => b.srcFrom >= region.from && b.srcTo <= region.to);
-		const tops = topNodes(doc, Math.min(...inRegion.map((b) => b.pmFrom)), Math.max(...inRegion.map((b) => b.pmTo)));
+		// a node no block covers wrote nothing (an empty paragraph), so the stretch parsed has no node for it
+		const tops = topNodes(doc, Math.min(...inRegion.map((b) => b.pmFrom)), Math.max(...inRegion.map((b) => b.pmTo)), (from, to) =>
+			inRegion.some((b) => b.pmFrom <= from && to <= b.pmTo)
+		);
 		// a parser that says where no run of the stretch came from leaves the blocks as all that can be said
 		if (after.map.leaves.length === 0 || !readsAsShown(doc, tops, after)) {
 			group.forEach(asBlocks);
 			continue;
 		}
-		const shown: Shown = { doc, map, at: region.from, first: tops.first };
+		const shown: Shown = { doc, map, at: region.from, tops: tops.indices };
 		let beforeSrc = text.slice(region.from, region.to);
 		for (const s of [...group].reverse())
 			beforeSrc = beforeSrc.slice(0, s.from - region.from) + s.restore + beforeSrc.slice(s.to - region.from);

@@ -12,7 +12,7 @@ import { blankLineAt, createBlockAssembly, type DocSerializeResult } from '$lib/
 import type { Ctx, NodeHandler } from '$lib/serializer/types';
 import { esc, applyMarks, bareTextString, joinInline, markableMarks, marksKey } from './textEscapes';
 import { blockMath, alignEnvironment } from './mathBlocks';
-import { isHandlerLeaf, mapRunLeaves, renderShadowed, shadowed, withoutShadow } from './latexShadowRun';
+import { isHandlerLeaf, mapRunLeaves, renderShadowed, shadowed, standIn, withoutShadow } from './latexShadowRun';
 import { buildIncludegraphics } from './includegraphics';
 import { continuesList, runEnvName } from './listContinuation';
 import { dropParagraphEnd, paragraphGap } from './paragraphEnds';
@@ -116,7 +116,7 @@ export function renderChildren(node: Node, inTableCell: boolean): string {
  * label is not the label. `latex` is the run re-serialized, which is what an edited label has
  * to be written back as; the caller prefers the untouched source when the two still agree.
  */
-function splitLeadingLabel(item: Node): { latex: string; body: Node; glued: boolean } | null {
+function splitLeadingLabel(item: Node): { latex: string; bare: Node; body: Node; glued: boolean } | null {
 	if (item.type.name !== 'paragraph') return null;
 	// through the LAST marked node, not the first unmarked one
 	let last = -1;
@@ -133,16 +133,20 @@ function splitLeadingLabel(item: Node): { latex: string; body: Node; glued: bool
 	const bare = item.type.schema.node(
 		'paragraph',
 		null,
-		item.content.cut(0, size).content.map((n) => n.mark(n.marks.filter((m) => m.type.name !== 'item_label' && m.type.name !== 'strong')))
+		item.content
+			.cut(0, size)
+			.content.map((n) => standIn(n.mark(n.marks.filter((m) => m.type.name !== 'item_label' && m.type.name !== 'strong')), n))
 	);
 	let rest = item.content.cut(size);
 	const next = rest.firstChild;
 	// the body runs straight on from the bracket when no whitespace stands between them
 	const glued = !!next && !(next.isText && /^\s/.test(next.text ?? ''));
 	if (next?.isText && next.text && /^\s+$/.test(next.text)) rest = rest.cut(next.nodeSize);
-	else if (next?.isText && next.text && /^\s/.test(next.text))
-		rest = rest.replaceChild(0, next.type.schema.text(next.text.replace(/^\s+/, ''), next.marks));
-	return { latex: renderChildren(bare, false).trim(), body: item.copy(rest), glued };
+	else if (next?.isText && next.text && /^\s/.test(next.text)) {
+		const trimmed = next.text.replace(/^\s+/, '');
+		rest = rest.replaceChild(0, standIn(next.type.schema.text(trimmed, next.marks), next, next.text.length - trimmed.length));
+	}
+	return { latex: renderChildren(bare, false).trim(), bare, body: item.copy(rest), glued };
 }
 
 const HEADING_CMD: Record<number, string> = {
@@ -433,9 +437,11 @@ const NODES: Record<string, NodeHandler> = {
 			return node.childCount > 0 ? splitLeadingLabel(node.child(first)) : null;
 		});
 		const sourceHolds = itemLabel != null && labelled != null && labelKey(labelled.latex) === labelKey(itemLabel);
-		const label = labelled ? (sourceHolds ? itemLabel : labelled.latex) : itemLabel === '' ? '' : null;
+		const said = labelled ? (sourceHolds ? itemLabel : labelled.latex) : itemLabel === '' ? '' : null;
+		// written through the shadow when that writes the same bytes, so a run can tell where the label's words went
+		const label = labelled && said === labelled.latex ? renderChildren(labelled.bare, false).trim() : said;
 		// a `]` in the label would close the bracket early: braces around it keep it inside
-		const bracketed = label != null && label.includes(']') && !/^\{[^]*\}$/.test(label) ? `{${label}}` : label;
+		const bracketed = said != null && said.includes(']') && !/^\{[^]*\}$/.test(said) ? `{${label}}` : label;
 		const itemCmd = label == null ? '\\item' : `\\item[${bracketed}]`;
 
 		// an item's untouched blocks are written out as their bytes; the labelled first block is shown

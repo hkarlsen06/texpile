@@ -237,6 +237,18 @@ export function compareSuggestions(o: CompareInput): ComparedSuggestions {
 		}
 
 		if (mode === 'editing') {
+			// typing inside a suggestion, or over some of its words, is more of it; at its edges it is plain text
+			const l = h.aFrom > wa0 ? beforeOwner[h.aFrom - 1 - wa0] : -1;
+			const r = h.aTo < wa1 ? beforeOwner[h.aTo - wa0] : -1;
+			const within =
+				inserted !== '' &&
+				!acceptedGone &&
+				inside.length === 0 &&
+				(owners.size === 1 ? !whole([...owners][0]) : typed && l >= 0 && l === r);
+			if (within) {
+				afterOwner.fill(owners.size === 1 ? [...owners][0] : l, h.bFrom - wb0, h.bTo - wb0);
+				return;
+			}
 			for (const i of owners) {
 				if (!whole(i)) continue;
 				const e = entries[i];

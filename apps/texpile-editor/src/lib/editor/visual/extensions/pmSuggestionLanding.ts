@@ -1,5 +1,5 @@
 // a parsed stretch's positions in the editor's document
-import type { Node as PMNode } from 'prosemirror-model';
+import type { Node as PMNode, ResolvedPos } from 'prosemirror-model';
 import { bySource, indexStartingBy, pmToSource, sourceToPm, type RegionParse, type Segment, type SourceMap } from '../sourceSpans';
 import { blockAtSource } from '../sourceMap';
 import { isSelfRendered } from '../diff/selfRendered';
@@ -45,6 +45,19 @@ function land(map: SourceMap, offset: number, assoc: Side): Landing | null {
 	return block ? { pos: block.pmFrom, block } : null;
 }
 
+// the editor can hold whitespace at a textblock's edge that the file does not (a paragraph split after a
+// space), so the edge of a textblock in the stretch is the edge in the editor, past that whitespace
+function pastUnwritten(doc: PMNode, l: Landing, $pos: ResolvedPos): Landing {
+	const atStart = $pos.parentOffset === 0;
+	const atEnd = $pos.parentOffset === $pos.parent.content.size;
+	if (!$pos.parent.isTextblock || atStart === atEnd) return l;
+	const $l = doc.resolve(l.pos);
+	if (!$l.parent.isTextblock) return l;
+	const edge = atEnd ? $l.end() : $l.start();
+	const between = doc.textBetween(Math.min(edge, l.pos), Math.max(edge, l.pos), '\n', '￼');
+	return between !== '' && between.trim() === '' ? { pos: edge, block: null } : l;
+}
+
 // where the stretch's document has `pos`, the editor's document has it too: found by the bytes of the
 // run there, else of the nearest run in the same textblock, else by its place in the block, which the
 // two documents share
@@ -65,7 +78,7 @@ export function landIn(shown: Shown, region: RegionParse, pos: number, assoc: Si
 	const exact = pmToSource(leaves, pos, assoc);
 	if (exact !== null) {
 		const l = land(shown.map, shown.at + exact, assoc);
-		if (l && !l.block) return l;
+		if (l && !l.block) return pastUnwritten(shown.doc, l, $pos);
 	}
 	if ($pos.parent.isTextblock) {
 		const lo = $pos.start();
@@ -79,13 +92,16 @@ export function landIn(shown: Shown, region: RegionParse, pos: number, assoc: Si
 		const pick = assoc < 0 ? (before ?? after) : (after ?? before);
 		if (pick) {
 			const l = land(shown.map, shown.at + (pick === before ? pick.srcTo : pick.srcFrom), pick === before ? -1 : 1);
-			if (l && !l.block) return l;
+			if (l && !l.block) return pastUnwritten(shown.doc, l, $pos);
 		}
 	}
 	if (!blockOnSide(blocks, pos, assoc)) return null;
-	// the stretch's top-level nodes are the shown ones from `first` on, so the same path down, the same
-	// offset in the innermost node
-	const top = shown.first + $pos.index(0);
+	// the stretch's top-level nodes are the shown ones in `tops`, so the same path down, the same offset
+	// in the innermost node
+	const index = $pos.index(0);
+	const last = shown.tops[shown.tops.length - 1];
+	if (last === undefined) return null;
+	const top = index < shown.tops.length ? shown.tops[index] : last + 1;
 	if ($pos.depth === 0) return top > shown.doc.childCount ? null : { pos: shown.doc.resolve(0).posAtIndex(top), block: null };
 	if (top >= shown.doc.childCount) return null;
 	let node = shown.doc.child(top);

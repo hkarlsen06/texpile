@@ -14,7 +14,8 @@
 	}: {
 		quote: string;
 		top: number;
-		onSubmit: (body: string) => void;
+		/** `keyed`: sent with Enter, so the reader's hands are on the keyboard and go back to the text */
+		onSubmit: (body: string, keyed: boolean) => void;
 		onCancel: () => void;
 		onSize: (height: number) => void;
 	} = $props();
@@ -40,11 +41,11 @@
 		return () => document.removeEventListener('focusin', onFocusIn);
 	});
 
-	function submit() {
+	function submit(keyed: boolean) {
 		const body = draft.trim();
 		if (!body) return;
 		draft = '';
-		onSubmit(body);
+		onSubmit(body, keyed);
 	}
 </script>
 
@@ -66,11 +67,11 @@
 				onCancel();
 			} else if (e.key === 'Enter' && !e.shiftKey) {
 				e.preventDefault();
-				submit();
+				submit(true);
 			}
 		}}></textarea>
 	<div class="mt-1.5 flex items-center gap-1">
-		<button class="btn btn-xs preset-filled-primary-500" disabled={!draft.trim()} onclick={submit}>{m.comments_add()}</button>
+		<button class="btn btn-xs preset-filled-primary-500" disabled={!draft.trim()} onclick={() => submit(false)}>{m.comments_add()}</button>
 		<button
 			class="btn btn-xs hover:preset-tonal"
 			onclick={() => {

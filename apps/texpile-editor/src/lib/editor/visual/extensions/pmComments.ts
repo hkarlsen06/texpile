@@ -18,7 +18,8 @@ import type { Node as PMNode } from 'prosemirror-model';
 import { buildAnchor, type CommentAnchor } from '$lib/comments/anchor';
 import { indexStartingBy, pmToSource, type Segment, type SourceMap } from '../sourceSpans';
 
-import { focusPmSuggestionMeta, pmSuggestionAt, pmSuggestions, pmSuggestionsKey } from './pmSuggestions';
+import { threadAtPointer } from '$lib/comments/threadAtPointer';
+import { focusPmSuggestionMeta, pmSuggestions, pmSuggestionsKey } from './pmSuggestions';
 import { refuseDropOnGoneBlocks } from './goneBlocksRefuseDrop';
 import { pmDecisionSteps } from './pmDecisionStep';
 import { pmSelectionToolbar } from './pmSelectionToolbar';
@@ -253,11 +254,11 @@ export function pmComments({ onSelect, onAdd, sourceAnchor, addLabel = 'Comment'
 			decorations(state) {
 				return pmCommentsKey.getState(state)?.deco ?? DecorationSet.empty;
 			},
-			handleClick(view, pos) {
-				if (!onSelect) return false;
-				const hit = pmCommentAt(view.state, pos) ?? pmSuggestionAt(view.state, pos);
-				if (!hit) return false;
-				onSelect(hit.id);
+			// what is drawn under the pointer, not the caret's place: a click just beside a thread is not on it
+			handleClick(_view, _pos, event) {
+				const id = threadAtPointer(event.target);
+				if (!onSelect || !id) return false;
+				onSelect(id);
 				// not handled: the click should still place the caret where it landed
 				return false;
 			}

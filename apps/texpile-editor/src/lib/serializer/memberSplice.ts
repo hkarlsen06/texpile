@@ -245,12 +245,15 @@ export function createMemberSplice(
 						return moved;
 					}
 					for (const sg of partLeaves) {
-						if (sg.srcFrom < lead || sg.srcTo > lead + core.length) continue;
+						// a text run reaching into the whitespace trimmed off the child keeps what was written of it
+						const lo = Math.max(sg.srcFrom, lead);
+						const hi = Math.min(sg.srcTo, lead + core.length);
+						if (hi <= lo || (sg.kind !== 'text' && (lo !== sg.srcFrom || hi !== sg.srcTo))) continue;
 						leaves.push({
-							pmFrom: childPm + sg.pmFrom,
-							pmTo: childPm + sg.pmTo,
-							srcFrom: at + prefixed(sg.srcFrom) - lead,
-							srcTo: at + prefixed(sg.srcTo) - lead,
+							pmFrom: childPm + sg.pmFrom + (lo - sg.srcFrom),
+							pmTo: childPm + sg.pmTo - (sg.srcTo - hi),
+							srcFrom: at + prefixed(lo) - lead,
+							srcTo: at + prefixed(hi) - lead,
 							kind: sg.kind
 						});
 					}

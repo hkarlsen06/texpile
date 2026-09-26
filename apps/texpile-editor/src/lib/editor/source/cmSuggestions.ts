@@ -240,10 +240,6 @@ export function clearOfOldWords(set: DecorationSet, state: EditorState): Decorat
 	return Decoration.set(out, true);
 }
 
-export function suggestionAt(state: EditorState, pos: number): SuggestionRange | null {
-	return liveSuggestionRanges(state).find((r) => pos >= r.from && pos <= r.to) ?? null;
-}
-
 function struckAt(state: EditorState, at: number): SuggestionRange[] {
 	return liveSuggestionRanges(state).filter((r) => r.restore && r.from === at);
 }

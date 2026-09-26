@@ -7,6 +7,7 @@
 	import { liveCommentRanges } from '$lib/editor/visual/extensions/comments';
 	import { liveSuggestionRanges } from '$lib/editor/source/cmSuggestions';
 	import { activeSuggestions } from '$lib/comments/activeSuggestions.svelte';
+	import { threadAtPointer } from '$lib/comments/threadAtPointer';
 	import { toaster } from '$lib/modals/toaster-svelte';
 	import { revealPmComment } from '$lib/editor/visual/extensions/pmComments';
 	import { COMMENT_RAIL_PEEK, COMMENT_RAIL_WIDTH, EDITOR_TEXT_MIN, EDITOR_TEXT_PAD } from '$lib/workspace/paneGeometry';
@@ -16,6 +17,7 @@
 	import { stackRailItems, type RailBounds, type RailItem } from './railLayout';
 	import CommentCard from './CommentCard.svelte';
 	import CommentComposerCard from './CommentComposerCard.svelte';
+	import { returnToCmText, returnToPmText } from './returnToText';
 	import { m } from '$lib/paraglide/messages';
 
 	let {
@@ -204,13 +206,14 @@
 		const root = mode === 'visual' ? pmView?.dom : cmView?.contentDOM;
 		if (!root) return;
 		function over(e: Event) {
-			const hit = (e.target as HTMLElement | null)?.closest?.<HTMLElement>('[data-comment]');
-			hovered = hit?.dataset.comment ?? null;
+			hovered = threadAtPointer(e.target);
 		}
 		function leave() {
 			hovered = null;
 		}
-		function click() {
+		function click(e: Event) {
+			// text no thread holds: the reader has moved on, and the card they had open goes back in line
+			if (!threadAtPointer(e.target)) ctl.selected = null;
 			const collapsed = mode === 'visual' ? pmView?.state.selection.empty : cmView?.state.selection.main.empty;
 			if (collapsed) glide.retreat();
 		}
@@ -262,7 +265,12 @@
 		<CommentComposerCard
 			quote={ctl.pending.quote}
 			top={topOf(PENDING_ANCHOR)}
-			onSubmit={(body) => void ctl.commitAdd(body)}
+			onSubmit={(body, keyed) => {
+				void ctl.commitAdd(body);
+				if (!keyed) return;
+				if (mode === 'visual' && pmView) returnToPmText(pmView);
+				else if (mode === 'source' && cmView) returnToCmText(cmView);
+			}}
 			onCancel={() => ctl.cancelAdd()}
 			onSize={(h) => setHeight(PENDING_ANCHOR, h)}
 		/>

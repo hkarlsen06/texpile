@@ -51,28 +51,31 @@ describe('an edit meeting a suggestion', () => {
 			['revise:s1']
 		],
 		[
-			'typing inside splits it, old words with the first part',
+			'typing inside is more of it',
 			T,
 			'It is sharp and very cheap for smooth data.',
 			[S],
 			'editing',
-			[
-				['s1', 'sharp and ', 'reliable', 'mei'],
-				['n1', 'cheap', '', 'mei']
-			],
-			['revise:s1', 'open:n1']
+			[['s1', 'sharp and very cheap', 'reliable', 'mei']],
+			['revise:s1']
 		],
 		[
-			'replacing part of it splits it around the new text',
+			'replacing part of it keeps the new text in it',
 			T,
 			'It is sharp or cheap for smooth data.',
 			[S],
 			'editing',
-			[
-				['s1', 'sharp ', 'reliable', 'mei'],
-				['n1', ' cheap', '', 'mei']
-			],
-			['revise:s1', 'open:n1']
+			[['s1', 'sharp or cheap', 'reliable', 'mei']],
+			['revise:s1']
+		],
+		[
+			'typing just before it leaves it alone',
+			T,
+			'It is very sharp and cheap for smooth data.',
+			[S],
+			'editing',
+			[['s1', 'sharp and cheap', 'reliable', 'mei']],
+			[]
 		],
 		[
 			'an edit across one edge takes only what it covers',
