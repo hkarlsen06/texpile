@@ -12,7 +12,7 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: one-m
     environment: CICD
     env:
       PROJECT: texpile-desktop

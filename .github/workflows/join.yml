@@ -10,7 +10,7 @@ on:
 jobs:
   deploy:
     if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
-    runs-on: ubuntu-latest
+    runs-on: one-m
     environment: CICD
     steps:
       - uses: actions/checkout@v4

@@ -53,7 +53,7 @@ jobs:
               release/*.zip
               release/*.blockmap
               release/latest-mac.yml
-          - os: ubuntu-latest
+          - os: one-m
             artifacts: |
               release/*.AppImage
               release/*.deb
@@ -153,7 +153,7 @@ jobs:
   publish-r2:
     needs: build
     if: startsWith(github.ref, 'refs/tags/v') || inputs.publish_r2
-    runs-on: ubuntu-latest
+    runs-on: one-m
     environment: CICD
     env:
       BUCKET: texpile-releases # must match the bucket name created in the Cloudflare dashboard
